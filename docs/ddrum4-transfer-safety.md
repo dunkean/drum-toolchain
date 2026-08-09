@@ -1,0 +1,33 @@
+# DDrum4 B0 Transfer Safety
+
+The B0 sound is a disposable transfer-path test, not a musical sound and not
+part of the final bank. Its source is a deterministic, non-copyrighted,
+short mono sine-decay WAV created locally by the bank-builder command.
+
+```powershell
+$env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
+python -m ddrum4_bank.cli create-b0-fixture `
+  --wav D:\Studio\ddrum4-b0\b0-click.wav `
+  --manifest D:\Studio\ddrum4-b0\b0-click.json
+```
+
+The command has no MIDI implementation and cannot send anything to the module.
+It refuses to overwrite either output and records the fixture hash and source
+provenance in the JSON manifest.
+
+Before a human performs the one required ddrum4UI import/build/send operation,
+record all of the following in the bench log:
+
+1. DDrum4 firmware/version shown by the module.
+2. Observed free-memory value and the screen/menu that reported it.
+3. A user-approved, sacrificial User Sound ID. It must not contain a sound the
+   user wants to retain.
+4. The exact ddrum4UI/ddrum4edit version, operation and generated output file.
+5. After transmission, the observed Sound ID, audible playback at several MIDI
+   velocities, UMC recording path and actual encoded block count.
+
+Do not send a generated file merely because it has a `.mid`, `.midi`, or
+`.syx` suffix. The current backend intentionally cannot build transfer files
+until one manual, reproducible UI build identifies the correct format and
+command semantics. Stop the queue on the first build, send, playback, or
+recording failure.

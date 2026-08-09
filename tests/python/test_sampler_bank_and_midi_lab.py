@@ -14,6 +14,7 @@ from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 from ddrum4_bank.transport import resolve_port
+from ddrum4_bank.b0 import B0Fixture, write_fixture_manifest
 from drum_domain import validate_document
 
 
@@ -199,6 +200,19 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             resolve_port(["MIDI4x4 30", "MIDIIN2 (MIDI4x4) 31"], "MIDI4x4 30"),
             "MIDI4x4 30",
         )
+
+    def test_b0_fixture_is_deterministic_pcm_and_never_overwrites(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wav = root / "b0.wav"
+            manifest = root / "b0.json"
+            document = write_fixture_manifest(B0Fixture(), wav, manifest)
+            self.assertTrue(wav.is_file())
+            self.assertEqual(document["audio"]["channels"], 1)
+            self.assertFalse(document["hardware_write"])
+            self.assertEqual(len(str(document["sha256"])), 64)
+            with self.assertRaises(FileExistsError):
+                write_fixture_manifest(B0Fixture(), wav, root / "other.json")
 
     def test_routing_contract_is_valid_and_serializable(self) -> None:
         contract = RoutingContract(

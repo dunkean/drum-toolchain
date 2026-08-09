@@ -159,3 +159,13 @@ Expected result: `converter tests passed`.
   safely. Vendor payload semantics remain intentionally undecoded.
 - Remaining B0 gate: record firmware/version, observed free memory and a
   user-confirmed sacrificial Sound ID before any transfer characterization.
+
+## B0 offline fixture — 2026-08-10
+
+- Added `create-b0-fixture`, which writes a deterministic, non-copyrighted
+  16-bit mono WAV test click plus SHA-256/provenance manifest. It refuses to
+  overwrite either file and has no MIDI-port or module-write capability.
+- Added `docs/ddrum4-transfer-safety.md`, which records the remaining explicit
+  inventory and one-time ddrum4UI build evidence required before transfer.
+- Verified fixture framing (16 kHz, 2,880 frames) and the full suite: 28
+  Python tests, firmware bridge-core and modernizer-core all pass.
