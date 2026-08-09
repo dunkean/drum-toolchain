@@ -18,6 +18,7 @@ _deps/
 *.lib
 *.pdb
 *.ilk
+*.obj
 
 # PlatformIO / Arduino
 .pio/

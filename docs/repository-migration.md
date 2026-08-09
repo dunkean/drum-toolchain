@@ -76,6 +76,9 @@ Expected result: `converter tests passed`.
 - The new shared Python test entry point passes seven tests.
 - PlatformIO native test execution was attempted through the documented
   fallback executable. It cannot compile because `gcc` and `g++` are absent.
-  This is an environment blocker, not a source failure.
-- A clean modernizer CMake build cannot yet be attempted because `cmake` is not
-  on `PATH`.
+  This is an environment blocker, not a source failure. An MSVC bridge-core
+  test was added as a local verification path; PlatformIO/Unity remains the
+  target test framework for environments with GCC.
+- CMake is not on `PATH`, but the Visual Studio 2022 bundled CMake and MSVC
+  toolchain are present. A clean modernizer core build and test pass through
+  the documented Visual Studio developer environment.

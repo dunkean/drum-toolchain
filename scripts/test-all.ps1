@@ -24,3 +24,6 @@ try {
 } finally {
     Pop-Location
 }
+
+& (Join-Path $PSScriptRoot 'test-firmware-core.ps1')
+& (Join-Path $PSScriptRoot 'test-modernizer-core.ps1')
