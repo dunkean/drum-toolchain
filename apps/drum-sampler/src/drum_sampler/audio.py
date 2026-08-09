@@ -67,8 +67,10 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
     """
     if not 0 <= note <= 127 or not 1 <= velocity <= 127 or not 1 <= channel <= 16:
         raise ValueError("note must be 0..127, velocity 1..127 and channel 1..16")
-    if duration <= 0 or gate < 0 or preroll < 0 or channels not in (1, 2):
+    if duration <= 0 or gate < 0 or preroll < 0 or not 1 <= channels <= 4:
         raise ValueError("invalid capture duration, gate, preroll or channel count")
+    if output.exists():
+        raise FileExistsError(f"raw capture already exists and will not be overwritten: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     frames = round((duration + preroll) * sample_rate)
     recording = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32",

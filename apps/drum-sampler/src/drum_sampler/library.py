@@ -1,7 +1,7 @@
 """Versioned neutral sample-library records; raw audio is never overwritten."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 
@@ -97,4 +97,7 @@ class SampleLibrary:
 def library_from_plan(identifier: str, channel_layout: tuple[str, ...], takes: tuple[PlannedTake, ...]) -> SampleLibrary:
     if not identifier:
         raise ValueError("sample-library id is required")
-    return SampleLibrary(identifier, channel_layout, tuple(SampleTake.from_planned_take(take) for take in takes))
+    return SampleLibrary(identifier, channel_layout, tuple(
+        replace(SampleTake.from_planned_take(take), channels=channel_layout)
+        for take in takes
+    ))

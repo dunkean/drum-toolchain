@@ -4,7 +4,7 @@ import unittest
 import subprocess
 import sys
 
-from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, library_from_plan
+from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.backup import validate_settings_backup
 from ddrum4_bank.nested import NestedRoute, NestedSound
@@ -43,6 +43,28 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual(facts["channels"], 1)
             self.assertFalse(facts["clipped"])
             self.assertEqual(len(str(facts["sha256"])), 64)
+
+    def test_capture_executor_is_resumable_and_enriches_library(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        request = CaptureRequest("kick_main", "head", 36, (64,), 2)
+        session = CaptureSessionPlan("fixture-midi", "fixture-audio", ("kick", "snare", "left", "right"), (request,), tail_ms=10)
+        calls: list[Path] = []
+        def fake_capture(**kwargs: object) -> Path:
+            output = kwargs["output"]
+            assert isinstance(output, Path)
+            calls.append(output)
+            wavfile.write(output, 44100, np.zeros((8, 4), dtype=np.int16))
+            return output
+        with tempfile.TemporaryDirectory() as temporary:
+            raw = Path(temporary)
+            self.assertEqual(len(capture_pending(session, raw, capture=fake_capture)), 2)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(capture_pending(session, raw, capture=fake_capture), ())
+            library = library_from_captures("fixture", session, raw, source="test VST", license_statement="user-owned render")
+            self.assertTrue(all(take.status == "captured" for take in library.takes))
+            self.assertTrue(all(take.channels == ("kick", "snare", "left", "right") for take in library.takes))
+            self.assertTrue(all(take.frames == 8 for take in library.takes))
 
     def test_safe_cli_entry_points_create_and_inspect_metadata(self) -> None:
         root = Path(__file__).resolve().parents[2]
