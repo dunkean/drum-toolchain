@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import platform
 import time
 
 import mido
@@ -68,26 +69,126 @@ def receive_midi_dump(port_query: str, output: Path, seconds: float = 15.0, idle
     if seconds <= 0 or idle_seconds <= 0:
         raise ValueError("seconds and idle_seconds must be positive")
     name = resolve_port(list(mido.get_input_names()), port_query)
+    messages = (
+        _receive_windows_long_messages(name, seconds=seconds, idle_seconds=idle_seconds)
+        if platform.system() == "Windows"
+        else _receive_mido_messages(name, seconds=seconds, idle_seconds=idle_seconds)
+    )
+    if not messages:
+        raise ValueError("no MIDI data received; start the module/UI dump then retry")
+    track = mido.MidiTrack()
+    track.extend(messages)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    file = mido.MidiFile(type=0)
+    file.tracks.append(track)
+    file.save(output)
+    return len(messages)
+
+
+def _receive_mido_messages(name: str, *, seconds: float, idle_seconds: float) -> list[mido.Message]:
+    """Portable fallback for small MIDI/SysEx messages."""
     track = mido.MidiTrack()
     started = time.monotonic()
     last_message = started
-    count = 0
     with mido.open_input(name) as input_port:
         while time.monotonic() - started < seconds:
             message = input_port.poll()
             if message is None:
-                if count and time.monotonic() - last_message >= idle_seconds:
+                if track and time.monotonic() - last_message >= idle_seconds:
                     break
                 time.sleep(0.002)
                 continue
             message.time = 0
             track.append(message)
-            count += 1
             last_message = time.monotonic()
-    if not count:
-        raise ValueError("no MIDI data received; start the module/UI dump then retry")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    file = mido.MidiFile(type=0)
-    file.tracks.append(track)
-    file.save(output)
-    return count
+    return list(track)
+
+
+def _receive_windows_long_messages(name: str, *, seconds: float, idle_seconds: float) -> list[mido.Message]:
+    """Capture long Windows-MM SysEx packets without the 1 KiB input limit.
+
+    DDrum4UI sound packets are 1,174 bytes including F0/F7.  The normal
+    Python MIDI input backend silently dropped them on this workstation.
+    Windows MM lets us provide sufficiently large receive buffers directly.
+    """
+    import ctypes as c
+    from ctypes import wintypes as w
+
+    input_names = list(mido.get_input_names())
+    device_index = input_names.index(name)
+    winmm = c.WinDLL("winmm")
+    mim_longdata = 0x3C4
+    callback_function = 0x30000
+    dword_ptr = c.c_size_t
+
+    class MidiHeader(c.Structure):
+        _fields_ = [
+            ("lpData", c.c_void_p),
+            ("dwBufferLength", w.DWORD),
+            ("dwBytesRecorded", w.DWORD),
+            ("dwUser", dword_ptr),
+            ("dwFlags", w.DWORD),
+            ("lpNext", c.c_void_p),
+            ("reserved", dword_ptr),
+            ("dwOffset", w.DWORD),
+            ("dwReserved", dword_ptr * 8),
+        ]
+
+    callback_type = c.WINFUNCTYPE(None, c.c_void_p, w.UINT, dword_ptr, dword_ptr, dword_ptr)
+    raw_messages: list[bytes] = []
+
+    @callback_type
+    def callback(handle: object, event: int, instance: int, parameter: int, timestamp: int) -> None:
+        if event != mim_longdata:
+            return
+        header = c.cast(parameter, c.POINTER(MidiHeader)).contents
+        if header.dwBytesRecorded:
+            raw_messages.append(c.string_at(header.lpData, header.dwBytesRecorded))
+
+    handle = c.c_void_p()
+    header_size = c.sizeof(MidiHeader)
+    result = winmm.midiInOpen(c.byref(handle), device_index, callback, 0, callback_function)
+    if result:
+        raise RuntimeError(f"Windows MM could not open MIDI input {name!r}: error {result}")
+
+    # A full DDrum4 settings dump observed on this workstation has 56 packets.
+    # Reserve 64 buffers so callback ownership never has to be recycled while
+    # the module is still transmitting.
+    buffers: list[tuple[object, MidiHeader]] = []
+    try:
+        for _ in range(64):
+            buffer = c.create_string_buffer(4096)
+            header = MidiHeader(c.cast(buffer, c.c_void_p), 4096, 0, 0, 0, None, 0, 0, (dword_ptr * 8)())
+            result = winmm.midiInPrepareHeader(handle, c.byref(header), header_size)
+            if result:
+                raise RuntimeError(f"Windows MM could not prepare SysEx buffer: error {result}")
+            result = winmm.midiInAddBuffer(handle, c.byref(header), header_size)
+            if result:
+                raise RuntimeError(f"Windows MM could not queue SysEx buffer: error {result}")
+            buffers.append((buffer, header))
+        result = winmm.midiInStart(handle)
+        if result:
+            raise RuntimeError(f"Windows MM could not start MIDI input: error {result}")
+        started = time.monotonic()
+        last_count = 0
+        last_message = started
+        while time.monotonic() - started < seconds:
+            if len(raw_messages) != last_count:
+                last_count = len(raw_messages)
+                last_message = time.monotonic()
+            elif raw_messages and time.monotonic() - last_message >= idle_seconds:
+                break
+            time.sleep(0.002)
+    finally:
+        winmm.midiInStop(handle)
+        winmm.midiInReset(handle)
+        for _, header in buffers:
+            winmm.midiInUnprepareHeader(handle, c.byref(header), header_size)
+        winmm.midiInClose(handle)
+
+    messages: list[mido.Message] = []
+    for raw in raw_messages:
+        message = mido.Message.from_bytes(list(raw))
+        message.time = 0
+        messages.append(message)
+    return messages

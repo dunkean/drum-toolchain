@@ -222,8 +222,11 @@ Expected result: `converter tests passed`.
 - DDrum4UI's bundled native sender uses Windows MM/libremidi and exposes an
   inter-message-pause setting. Its public user documentation does not specify
   its exact packet framing or timing. A loopMIDI capture port was proven to
-  carry long SysEx messages, but only DDrum4UI reset events were observable
-  during this bench session; no native sound stream was captured yet.
+  carry long SysEx messages, but the ordinary Python input API silently drops
+  packets above 1 KiB. Added a Windows-MM long-message receiver with 4 KiB
+  buffers and a guarded `record-sysex` command; an internal 1,174-byte virtual
+  SysEx capture succeeds. No native DDrum4UI sound stream has been captured
+  yet.
 - Next hardware action: replay the validated B0 `.mid` with its embedded
   timing only, while the user observes the module display. Do not attempt a
   bulk bank transfer before this produces the expected block countdown and

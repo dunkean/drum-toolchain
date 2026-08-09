@@ -59,3 +59,24 @@ not add an additional per-SysEx pause. The B0 file spaces its packets by about
 first hardware characterization. Raw `.syx` files have no delta-times and
 therefore remain the only transfer type that needs an explicit inter-message
 pause.
+
+## Capturing a native DDrum4UI transfer on Windows
+
+The command below records a manually initiated DDrum4UI SysEx send without
+assuming that the stream is a settings backup. On Windows it uses enlarged
+Windows-MM receive buffers; ordinary Python MIDI inputs can silently drop the
+1,174-byte sound packets.
+
+```powershell
+$env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
+python -m ddrum4_bank.cli record-sysex `
+  --input 'in_dunk 14' `
+  --output D:\Studio\ddrum4-b0\ddrum4ui-native.mid `
+  --seconds 90 `
+  --confirm-listening
+```
+
+With the recorder already listening, select `in_dunk` in the **Output port**
+field of the DDrum4UI **Send to ddrum4** dialog and press **Start** once. This
+never reaches the hardware module. The command refuses to overwrite a prior
+capture.

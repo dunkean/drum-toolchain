@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--output", required=True, type=Path)
     backup.add_argument("--seconds", type=float, default=30.0)
     backup.add_argument("--confirm-listening", action="store_true", help="required: open the selected MIDI input and wait for a dump")
+    record_sysex = subparsers.add_parser("record-sysex", help="record a manually initiated SysEx stream without interpreting it as module settings")
+    record_sysex.add_argument("--input", required=True, help="unique MIDI input name")
+    record_sysex.add_argument("--output", required=True, type=Path)
+    record_sysex.add_argument("--seconds", type=float, default=30.0)
+    record_sysex.add_argument("--confirm-listening", action="store_true", help="required: open the selected MIDI input and wait for a manually initiated stream")
     inspect_backup = subparsers.add_parser("inspect-settings-backup", help="print read-only structural facts for a saved settings dump")
     inspect_backup.add_argument("backup", type=Path)
     fixture = subparsers.add_parser("create-b0-fixture", help="write a non-overwriting synthetic WAV for the offline B0 transfer bench")
@@ -77,6 +82,14 @@ def main(argv: list[str] | None = None) -> int:
         metadata = args.output.with_suffix(args.output.suffix + ".json")
         record.write_metadata(metadata)
         print(f"received {count} messages; verified backup metadata at {metadata}")
+        return 0
+    if args.command == "record-sysex":
+        if not args.confirm_listening:
+            raise ValueError("this opens a live MIDI input; pass --confirm-listening before manually initiating the stream")
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite recorded SysEx output: {args.output}")
+        count = receive_midi_dump(args.input, args.output, seconds=args.seconds)
+        print(f"recorded {count} long MIDI/SysEx messages at {args.output}")
         return 0
     if args.command == "compare-plan":
         report = render_comparison(compare_plan(args.plan))
