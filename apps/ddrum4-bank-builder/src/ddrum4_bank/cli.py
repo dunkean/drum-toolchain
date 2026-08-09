@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     nested.add_argument("plan", type=Path)
     nested.add_argument("--routing-contract", required=True, type=Path)
     nested.add_argument("--report", required=True, type=Path)
+    snare = subparsers.add_parser("select-snare", help="select evenly distributed captured snare layers for the B1 source plan")
+    snare.add_argument("--library", required=True, type=Path)
+    snare.add_argument("--output", required=True, type=Path)
+    snare.add_argument("--instrument", default="snare_main")
+    snare.add_argument("--head-layers", default=7, type=int)
+    snare.add_argument("--rim-layers", default=2, type=int)
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
     allocation.add_argument("--output", type=Path, help="optional Markdown report path")
@@ -84,6 +90,15 @@ def main(argv: list[str] | None = None) -> int:
         compilation = compile_nested_file(args.plan)
         write_compilation(compilation, args.routing_contract, args.report)
         print(f"wrote {args.routing_contract} and {args.report}")
+        return 0
+    if args.command == "select-snare":
+        # Keep all non-sampler bank commands usable with the documented
+        # bank-builder-only PYTHONPATH.
+        from .selection import select_snare
+        from drum_sampler.library import SampleLibrary
+        selection = select_snare(SampleLibrary.read(args.library), args.instrument, args.head_layers, args.rim_layers)
+        selection.write(args.output)
+        print(f"wrote {args.output} with {len(selection.head)} head and {len(selection.rim)} rim layers")
         return 0
     backend = _backend(args.ddrum4edit)
     if args.command == "inspect":

@@ -34,6 +34,14 @@ DDrum4 protocol specification. The 56 messages form two byte-identical
 28-message sequences; the inspector records this fact without assuming why
 the module emits it.
 
+### Observed module state — 2026-08-10
+
+- Firmware shown at boot: `1.50`.
+- `SHIFT` + `MEM.LEFT`: `1.27`, meaning 1,270 currently free blocks.
+- The user explicitly authorized replacement of all existing sounds if needed.
+  B0 still starts with the available free memory and deletes nothing merely to
+  create room.
+
 After validation, record the module firmware/version, safe sound-ID range, and
 a user-confirmed inventory/free-memory observation. Only then may a separate
 explicitly confirmed transfer command be introduced or used.

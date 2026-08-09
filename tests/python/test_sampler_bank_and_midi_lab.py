@@ -16,6 +16,8 @@ from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 from ddrum4_bank.transport import resolve_port
 from ddrum4_bank.b0 import B0Fixture, write_fixture_manifest
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
+from ddrum4_bank.selection import select_snare, select_velocity_layers
+from drum_sampler.library import SampleTake
 from drum_domain import validate_document
 
 
@@ -249,6 +251,22 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "nested positions must be unique"):
             compile_nested(bad)
+
+    def test_snare_selector_spreads_captured_velocity_layers_and_requires_provenance(self) -> None:
+        def take(articulation: str, velocity: int) -> SampleTake:
+            return SampleTake("snare_main", articulation, 38, 10, velocity, 1, f"{articulation}-{velocity}.wav", source="user-owned SD3 render", license_statement="user-owned render", status="captured", sha256=f"{velocity:064x}")
+        library = SampleLibrary("dense-snare", ("left", "right"), tuple(
+            [take("head", velocity) for velocity in range(8, 129, 8)] + [take("rim", velocity) for velocity in (32, 112)]
+        ))
+        selected = select_snare(library)
+        self.assertEqual([layer.velocity for layer in selected.head], [8, 24, 48, 72, 88, 104, 128])
+        self.assertEqual([layer.velocity for layer in selected.rim], [32, 112])
+        self.assertEqual(selected.accent.velocity, 128)
+        self.assertEqual(selected.to_document()["sample_slots"], 10)
+        self.assertTrue(selected.warnings)
+        unlicensed = SampleLibrary("bad", ("left",), (SampleTake("snare_main", "head", 38, 10, 64, 1, "bad.wav", status="captured"),))
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            select_velocity_layers(unlicensed, "snare_main", "head", 1)
 
     def test_routing_contract_is_valid_and_serializable(self) -> None:
         contract = RoutingContract(

@@ -25,3 +25,12 @@ limits, and emits the matching `routing-contract.json` plus a coverage report.
 It does not claim to encode a DDrum4 sound file; that remains blocked on one
 verified ddrum4UI/ddrum4edit build fixture. See
 `profiles/banks/nested-compiler-fixture.yaml` for the minimal safe example.
+
+## Snare source selection
+
+`select-snare` selects evenly distributed velocity levels from a captured
+neutral library: up to seven head layers, two rim layers, then one captured
+cross-stick or a clearly reported strongest-head fallback. It refuses planned,
+unlicensed, or source-unattributed takes, and never creates encoded audio or
+sends MIDI. The resulting JSON is an input record for the later verified
+ddrum4edit build, not a transferable sound file.

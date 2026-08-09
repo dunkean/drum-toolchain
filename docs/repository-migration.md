@@ -179,3 +179,20 @@ Expected result: `converter tests passed`.
   aggregate sample/layer budgets fail with direct explanations.
 - Sound encoding and DDrum4UI transfer remain deliberately separate and gated
   on the verified backend build fixture and hardware inventory.
+
+## B1 snare selection foundation — 2026-08-10
+
+- Added deterministic selection from dense captured libraries: seven evenly
+  distributed head layers, two rim layers, and a cross-stick/strongest-head
+  accent candidate within the ten-sample cap.
+- Selection rejects unproven provenance and records any intentional fallback;
+  it does not substitute factory audio or encode/send a sound.
+
+## Hardware inventory observation — 2026-08-10
+
+- The connected DDrum4 reports firmware `1.50` at boot and 1,270 free blocks
+  through the read-only `SHIFT` + `MEM.LEFT` display.
+- The user authorized replacing all existing sounds if later required, but B0
+  uses the available free memory first. A deterministic 44.1 kHz B0 WAV and
+  manifest were written outside Git at `D:\Studio\ddrum4-b0\` for manual UI
+  import; no module transfer has occurred.
