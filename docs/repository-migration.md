@@ -126,3 +126,15 @@ Expected result: `converter tests passed`.
   needs either host/DAW internal rendering/recording or an explicit physical
   OUT 1/2 -> IN 3/4 patch with separate monitoring. This is recorded in
   `docs/capture-workflow.md`; no capture was attempted.
+
+## DrumGizmo exporter foundation — 2026-08-09
+
+- Downloaded DrumGizmo 0.9.20 source into ignored `build/` reference storage
+  and verified the generated XML structure against its own parser tests.
+- Added a DrumGizmo 2.0 exporter for captured neutral libraries. It creates
+  `drumkit.xml`, `midimap.xml`, one instrument XML per logical articulation,
+  and optionally a non-overwriting copy of each WAV into the generated kit.
+- It supports the future four-channel `kick`, `snare`, `left`, `right` layout
+  and refuses ambiguous MIDI-note-to-articulation mappings.
+- XML is parsed after generation in automated tests. Loading a real generated
+  kit in the DrumGizmo engine remains pending on actual captured audio.
