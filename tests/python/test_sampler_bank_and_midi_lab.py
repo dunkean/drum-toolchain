@@ -1,10 +1,13 @@
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+import sys
 
-from drum_sampler.session import CaptureRequest, CaptureSessionPlan
+from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.nested import NestedRoute, NestedSound
+from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 
 
@@ -18,6 +21,14 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             first = plan.takes()[0]
             (raw / first.raw_filename()).touch()
             self.assertEqual(len(plan.incomplete_takes(raw)), 5)
+
+    def test_neutral_sample_library_round_trip(self) -> None:
+        request = CaptureRequest("snare_main", "head", 38, (64,), 2)
+        library = library_from_plan("sd3-metalcore", ("left", "right"), CaptureSessionPlan("out_APC", "loopback", ("left", "right"), (request,)).takes())
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "library.json"
+            library.write(path)
+            self.assertEqual(SampleLibrary.read(path), library)
 
     def test_nested_layout_enforces_ddrum4_limits(self) -> None:
         sound = NestedSound("CYMB_801", 4, (
@@ -34,6 +45,27 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
 
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)
+
+    def test_routing_contract_is_valid_and_serializable(self) -> None:
+        contract = RoutingContract(
+            "metalcore-main",
+            10,
+            {"ddti": 10, "edrumin": 11},
+            {"mode": "direct_cc4", "source": "edrumin", "input_cc": 4, "output_cc": 4, "input_closed": 0, "input_open": 127, "output_closed": 0, "output_open": 127},
+            (ContractRoute("snare_head", "ddti", 38, 40, "SNRE_801", position=1),),
+        )
+        document = contract.to_document()
+        self.assertEqual(document["kind"], "ddrum4-routing-contract")
+        self.assertEqual(document["routes"][0]["velocity"]["output_max"], 127)
+        root = Path(__file__).resolve().parents[2]
+        generator = root / "firmware/ddrum4-midi-bridge/tools/generate_mapping.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            input_path = Path(temporary) / "routing-contract.json"
+            output_path = Path(temporary) / "generated_mapping.h"
+            contract.write(input_path)
+            result = subprocess.run([sys.executable, str(generator), str(input_path), "--output", str(output_path)], text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("{10, 38, 40, 1, 127, 1, 127}", output_path.read_text(encoding="utf-8"))
 
     def test_trace_round_trip_and_unique_port_matching(self) -> None:
         trace = MidiTrace("edrumin", (TraceEvent(0, "note_on", 11, 42, 100),))

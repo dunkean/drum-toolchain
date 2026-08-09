@@ -65,7 +65,8 @@ Expected result: `converter tests passed`.
 - Extracted the initial sampler grid planner and existing non-destructive WAV
   processing module.
 - Extracted the `ddrum4edit` discovery/transport code, explicit backend
-  adapter, and nested-layout validation.
+  adapter, nested-layout validation, neutral routing-contract serializer, and
+  compatibility with the existing mapping generator.
 - Extracted the initial MIDI port resolver and JSON Lines trace format.
 - Migrated Arduino firmware source, generator, and native test source.
 - Migrated modernizer source/configuration/tests without copying CMake build
