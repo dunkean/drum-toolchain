@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from .ddrum4edit_backend import Ddrum4EditBackend
 from .ddrum4ui import discover
@@ -44,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     nested.add_argument("plan", type=Path)
     nested.add_argument("--routing-contract", required=True, type=Path)
     nested.add_argument("--report", required=True, type=Path)
+    nested.add_argument("--firmware-header", type=Path, help="optional generated Arduino mapping header; refuses to overwrite")
     snare = subparsers.add_parser("select-snare", help="select evenly distributed captured snare layers for the B1 source plan")
     snare.add_argument("--library", required=True, type=Path)
     snare.add_argument("--output", required=True, type=Path)
@@ -88,7 +91,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "compile-nested":
         compilation = compile_nested_file(args.plan)
+        if args.firmware_header and args.firmware_header.exists():
+            raise FileExistsError(f"refusing to overwrite firmware header: {args.firmware_header}")
         write_compilation(compilation, args.routing_contract, args.report)
+        if args.firmware_header:
+            generator = Path(__file__).resolve().parents[4] / "firmware/ddrum4-midi-bridge/tools/generate_mapping.py"
+            result = subprocess.run([sys.executable, str(generator), str(args.routing_contract), "--output", str(args.firmware_header)], text=True, capture_output=True, check=False)
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip() or "firmware mapping generation failed")
         print(f"wrote {args.routing_contract} and {args.report}")
         return 0
     if args.command == "select-snare":

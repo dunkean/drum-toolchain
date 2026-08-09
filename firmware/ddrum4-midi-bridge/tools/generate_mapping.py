@@ -63,13 +63,16 @@ def main() -> int:
             velocity = target.get("velocity", {})
             if not isinstance(velocity, dict):
                 raise ValueError("route target.velocity must be a mapping")
+            route_name = route.get("id", route.get("identifier", "route"))
+            if route.get("sound_id"):
+                route_name = f"{route['sound_id']} / {route_name}"
             routes.append((channel, integer(route["input_note"], "route input_note", 0, 127),
                            integer(target["output_note"], "route output_note", 0, 127),
                            integer(velocity.get("input_min", 1), "velocity input_min", 1, 127),
                            integer(velocity.get("input_max", 127), "velocity input_max", 1, 127),
                            integer(velocity.get("output_min", 1), "velocity output_min", 1, 127),
                            integer(velocity.get("output_max", 127), "velocity output_max", 1, 127),
-                           route.get("id", "route")))
+                           route_name))
         if len({(item[0], item[1]) for item in routes}) != len(routes):
             raise ValueError("duplicate source channel/note route")
         if any(item[2] > 127 for item in routes):

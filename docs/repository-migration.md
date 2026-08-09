@@ -175,8 +175,9 @@ Expected result: `converter tests passed`.
 
 - Added the backend-neutral `compile-nested` command and a minimal fixture.
   One declared nested layout now produces both the Arduino-facing routing
-  contract and an articulation-coverage report, while invalid positions or
-  aggregate sample/layer budgets fail with direct explanations.
+  contract, optional generated Arduino mapping header, and an
+  articulation-coverage report, while invalid positions or aggregate
+  sample/layer budgets fail with direct explanations.
 - Sound encoding and DDrum4UI transfer remain deliberately separate and gated
   on the verified backend build fixture and hardware inventory.
 

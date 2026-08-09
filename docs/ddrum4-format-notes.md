@@ -22,6 +22,8 @@ as a regression fixture before enabling bulk builds.
 `compile-nested` is now the backend-neutral compilation step. It accepts a
 declared layout, validates the DDrum4 ten-slot/ten-layer and Note P position
 limits, and emits the matching `routing-contract.json` plus a coverage report.
+With `--firmware-header`, it also invokes the existing firmware generator from
+that generated contract, producing a non-overwriting Arduino mapping header.
 It does not claim to encode a DDrum4 sound file; that remains blocked on one
 verified ddrum4UI/ddrum4edit build fixture. See
 `profiles/banks/nested-compiler-fixture.yaml` for the minimal safe example.

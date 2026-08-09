@@ -243,6 +243,15 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertIn("SNRE_801", (output / "coverage.md").read_text(encoding="utf-8"))
             with self.assertRaises(FileExistsError):
                 write_compilation(compilation, output / "routing-contract.json", output / "other.md")
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            result = subprocess.run([
+                sys.executable, "-m", "ddrum4_bank.cli", "compile-nested", str(root / "profiles/banks/nested-compiler-fixture.yaml"),
+                "--routing-contract", str(output / "routing-contract.json"), "--report", str(output / "coverage.md"),
+                "--firmware-header", str(output / "generated_mapping.h"),
+            ], text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("SNRE_801", (output / "generated_mapping.h").read_text(encoding="utf-8"))
         bad = {
             "bank": {"id": "bad"}, "midi": {"ddrum_output_channel": 10, "sources": {"ddti": {"channel": 10}}}, "sounds": [{"id": "CYMB_801", "output_note": 49, "note_p": 2, "routes": [
                 {"id": "a", "source": "ddti", "input_note": 49, "position": 1, "sample_slots": 6, "layers": 5},
