@@ -6,6 +6,7 @@ import sys
 
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
+from ddrum4_bank.backup import validate_settings_backup
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
@@ -70,6 +71,19 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
 
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)
+
+    def test_settings_backup_validator_requires_real_midi_content(self) -> None:
+        import mido
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "backup.mid"
+            midi = mido.MidiFile(type=0)
+            track = mido.MidiTrack()
+            track.append(mido.Message("sysex", data=(1, 2, 3)))
+            midi.tracks.append(track)
+            midi.save(path)
+            record = validate_settings_backup(path)
+            self.assertEqual(record.message_count, 1)
+            self.assertEqual(record.sysex_count, 1)
 
     def test_routing_contract_is_valid_and_serializable(self) -> None:
         contract = RoutingContract(
