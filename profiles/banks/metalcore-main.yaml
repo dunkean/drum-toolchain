@@ -1,0 +1,22 @@
+bank:
+  id: metalcore-main
+  status: planning
+  memory_blocks: 8192
+  quality_priority:
+    - snare_main
+    - hihat_main
+    - crash_1
+    - crash_2
+    - kick_main
+    - ride_main
+    - tom_1
+    - tom_2
+    - tom_3
+    - snare_secondary
+  constraints:
+    max_samples_per_sound: 10
+    max_layers_per_sound: 10
+    max_variations_per_sound: 10
+    positions: [1, 2, 4, 8]
+notes:
+  - This is a planning manifest. It does not describe verified ddrum4 assignments yet.

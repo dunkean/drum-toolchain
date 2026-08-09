@@ -13,8 +13,8 @@ The implementation order is mandatory:
 6. generate and validate the Arduino standalone bridge;
 7. export the dense capture library to DrumGizmo.
 
-Read [`docs/execution-plan.md`](docs/execution-plan.md) before changing project
-structure or sending anything to the ddrum4.
+Read [`docs/DRUM_TOOLCHAIN_EXECUTION_PLAN.md`](docs/DRUM_TOOLCHAIN_EXECUTION_PLAN.md)
+before changing project structure or sending anything to the ddrum4.
 
 ## Applications
 

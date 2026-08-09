@@ -1,0 +1,52 @@
+schema_version: 1
+profile: ddrum4-to-sd3-default
+input: { port_match: ddrum4, channel: 10 }
+output: { endpoint: ddrum_converted, channel: 10, backend: auto }
+program_manager:
+  enabled: true
+  source: { channel: 10 }
+  initial_kit: core
+  forward_program_change: false
+  unknown_program: ignore_and_monitor
+  bindings:
+    - { program: 0, kit: core }
+    - { program: 1, kit: metal }
+    - { program: 2, kit: electro }
+policies:
+  realtime: pass
+  cc: { allow: [4] }
+routes:
+  - id: snare_head_position
+    match: { type: note_range, first_note: 40, count: 8 } # Replace after MIDI Learn.
+    transform:
+      type: positional_note_to_cc
+      destination_note: 6
+      position_cc: 16
+      cc_values: [0, 18, 36, 54, 73, 91, 109, 127]
+      note_off: forward
+  - id: snare_rim
+    match: { type: note, note: 48 }
+    transform: { type: note_map, destination_note: 40 }
+  - id: kick
+    match: { type: note, note: 36 }
+    transform: { type: note_map, destination_note: 36 }
+  - id: hihat_tip
+    match: { type: note, note: 50 } # Replace after capture; must not overlap Note P ranges.
+    transform: { type: note_map, destination_note: 42 }
+  - id: hihat_pedal
+    match: { channel: 10 } # CC4 entrant, calibré fermé/ouvert vers le CC cible.
+    transform: { type: hihat_continuous, destination_note: 42, input_cc: 4, output_cc: 4, closed_value: 0, open_value: 127 }
+virtual_kits:
+  - { id: core, label: "1 · Core" }
+  - id: metal
+    label: "2 · Metal"
+    route_overrides:
+      - route: snare_head_position
+        transform: { destination_note: 14 }
+  - id: electro
+    label: "3 · Electro"
+    output_override: { channel: 11 }
+    route_overrides:
+      - route: snare_head_position
+        match: { channel: 12, first_note: 52, count: 8 }
+        transform: { destination_note: 60, position_cc: 20 }

@@ -1,0 +1,16 @@
+profile: snare-via-edrumin-template
+status: template
+sources:
+  edrumin: {channel: 11}
+bindings:
+  - physical: snare_main.head
+    source: edrumin
+    input: 1
+    event: {channel: 11, note: 38}
+    controllers: {position_cc: 16}
+  - physical: snare_main.rim
+    source: edrumin
+    input: 1
+    event: {channel: 11, note: 40}
+notes:
+  - Replace all template MIDI values with midi-lab captures before using this profile in firmware.

@@ -1,0 +1,11 @@
+# Point de départ DrumGizmo : utiliser ddrum_converted comme entrée ALSA/JACK,
+# puis associer ces notes aux instruments du kit DrumGizmo chargé.
+endpoint: ddrum_converted
+channel: 10
+notes:
+  kick: 36
+  snare_head: 6
+  snare_rim: 40
+  hihat_tip: 42
+position_cc: 16
+hihat_cc: 4

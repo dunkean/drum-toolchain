@@ -1,0 +1,26 @@
+# Reusable, editable preparation policies. Source WAVs are never overwritten.
+profiles:
+  full:
+    target_sample_rate: 44100
+    trim_threshold_db: -60
+    normalize_dbfs: -1.0
+    fade_in_ms: 1.0
+    fade_out_ms: 12.0
+    highpass_hz: 20
+    lowpass_hz: 19500
+  balanced:
+    target_sample_rate: 44100
+    trim_threshold_db: -55
+    normalize_dbfs: -1.0
+    fade_in_ms: 2.0
+    fade_out_ms: 8.0
+    highpass_hz: 25
+    lowpass_hz: 18000
+  compact:
+    target_sample_rate: 44100
+    trim_threshold_db: -48
+    normalize_dbfs: -1.5
+    fade_in_ms: 2.0
+    fade_out_ms: 5.0
+    highpass_hz: 35
+    lowpass_hz: 15000

@@ -1,0 +1,6 @@
+setup:
+  physical_kit: ../physical/greg-hybrid-kit.yaml
+  wiring: ../wiring/snare-via-edrumin.yaml
+  target: ../targets/ddrum4-standalone.yaml
+  bank: ../banks/metalcore-main.yaml
+  capture: ../capture/audio-quality.yaml

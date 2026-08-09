@@ -24,6 +24,7 @@ control-surface integration phase.
 | `pio` on `PATH` | unavailable |
 | fallback PlatformIO executable | present at the documented Python 3.13 scripts location |
 | CMake on `PATH` | unavailable |
+| GCC/G++ for PlatformIO native tests | unavailable |
 
 ### Source baseline
 
@@ -55,3 +56,26 @@ Expected result: `converter tests passed`.
 - Added ignore rules for all generated binaries, dumps, audio, local settings,
   downloaded dependencies, and reference assets.
 - No legacy project file has been moved, deleted, or modified.
+
+## M2-M7 extraction — in progress
+
+- Extracted a pure `drum-domain` package with a physical-kit model, normalized
+  events, composable setup references, legacy project compatibility, and stable
+  serialization helpers.
+- Extracted the initial sampler grid planner and existing non-destructive WAV
+  processing module.
+- Extracted the `ddrum4edit` discovery/transport code, explicit backend
+  adapter, and nested-layout validation.
+- Extracted the initial MIDI port resolver and JSON Lines trace format.
+- Migrated Arduino firmware source, generator, and native test source.
+- Migrated modernizer source/configuration/tests without copying CMake build
+  trees.
+
+### Verification status
+
+- The new shared Python test entry point passes seven tests.
+- PlatformIO native test execution was attempted through the documented
+  fallback executable. It cannot compile because `gcc` and `g++` are absent.
+  This is an environment blocker, not a source failure.
+- A clean modernizer CMake build cannot yet be attempted because `cmake` is not
+  on `PATH`.
