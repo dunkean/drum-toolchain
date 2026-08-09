@@ -49,3 +49,13 @@ Do not send a generated file merely because it has a `.mid`, `.midi`, or
 until one manual, reproducible UI build identifies the correct format and
 command semantics. Stop the queue on the first build, send, playback, or
 recording failure.
+
+## Timed MIDI-file replay
+
+A DDrum4UI-authored `.mid` sound contains its required SysEx timing as MIDI
+delta-times. A replay implementation must use those times exactly and must
+not add an additional per-SysEx pause. The B0 file spaces its packets by about
+376 ms; applying a second 400 ms pause produced a module `ERR` during the
+first hardware characterization. Raw `.syx` files have no delta-times and
+therefore remain the only transfer type that needs an explicit inter-message
+pause.

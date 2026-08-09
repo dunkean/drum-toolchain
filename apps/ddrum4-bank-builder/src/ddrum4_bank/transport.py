@@ -44,8 +44,11 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
             for message in file.play(meta_messages=False):
                 output.send(message)
                 sent += 1
-                if message.type == "sysex":
-                    time.sleep(sysex_pause)
+            # `MidiFile.play()` already honours the delta-times recorded in a
+            # sound file.  Adding a second pause here created a gap of roughly
+            # 0.8 seconds between DDrum4 packets in the B0 fixture, even though
+            # ddrum4UI authored them 0.376 seconds apart.  The module treats a
+            # long gap inside a sound transfer as an error.
     return sent
 
 

@@ -3,6 +3,9 @@ import tempfile
 import unittest
 import subprocess
 import sys
+from unittest.mock import patch
+
+import mido
 
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
@@ -13,7 +16,7 @@ from ddrum4_bank.plan import compare_plan, render_comparison
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
-from ddrum4_bank.transport import resolve_port
+from ddrum4_bank.transport import resolve_port, send_midi_file
 from ddrum4_bank.b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
@@ -22,6 +25,37 @@ from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
+    def test_midi_sound_transfer_uses_file_timing_without_an_extra_sysex_pause(self) -> None:
+        class Output:
+            def __init__(self) -> None:
+                self.sent: list[mido.Message] = []
+
+            def __enter__(self) -> "Output":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def send(self, message: mido.Message) -> None:
+                self.sent.append(message)
+
+        class SoundFile:
+            def play(self, *, meta_messages: bool) -> list[mido.Message]:
+                assert not meta_messages
+                return [mido.Message("sysex", data=(1, 2, 3)), mido.Message("sysex", data=(4, 5, 6))]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            sound = Path(temporary) / "fixture.mid"
+            sound.touch()
+            output = Output()
+            with patch("ddrum4_bank.transport.mido.get_output_names", return_value=["fixture-out"]), \
+                 patch("ddrum4_bank.transport.mido.open_output", return_value=output), \
+                 patch("ddrum4_bank.transport.mido.MidiFile", return_value=SoundFile()), \
+                 patch("ddrum4_bank.transport.time.sleep") as sleep:
+                self.assertEqual(send_midi_file(sound, "fixture-out"), 2)
+            self.assertEqual(len(output.sent), 2)
+            sleep.assert_not_called()
+
     def test_capture_grid_is_dense_and_resumable(self) -> None:
         request = CaptureRequest("snare_main", "head", 38, (16, 64, 127), 2)
         plan = CaptureSessionPlan("out_APC", "loopback", ("left", "right"), (request,))

@@ -205,3 +205,26 @@ Expected result: `converter tests passed`.
   records its real encoded block count, and refuses overwrite of the record.
 - The command has no MIDI output path. B0 remains pending only on the local
   DDrum4UI sound save, then the separately confirmed hardware transfer.
+
+## B0 transport characterization — 2026-08-10
+
+- The manual DDrum4UI build was saved as `D:\Studio\ddrum4-b0\KICK_999.mid`.
+  It is a 13,076-byte, 11-SysEx-message sound and `ddrum4edit` reports 11
+  encoded blocks. Its build record retains the source WAV and sound hashes.
+- The physical PC-to-module MIDI route was independently proven by triggering
+  the DDrum4. Its installed mapping labels MIDI numbers 13/14/15 as
+  `C#0`/`D0`/`D#0`; this is an octave-label convention difference, not a
+  routing failure.
+- The first direct replay produced `ERR` on the module. Investigation found
+  that the replay path was applying an additional 400 ms SysEx pause after
+  `MidiFile.play()` had already honoured DDrum4UI's 376 ms packet timing.
+  The duplicate pause was removed and covered by a regression test.
+- DDrum4UI's bundled native sender uses Windows MM/libremidi and exposes an
+  inter-message-pause setting. Its public user documentation does not specify
+  its exact packet framing or timing. A loopMIDI capture port was proven to
+  carry long SysEx messages, but only DDrum4UI reset events were observable
+  during this bench session; no native sound stream was captured yet.
+- Next hardware action: replay the validated B0 `.mid` with its embedded
+  timing only, while the user observes the module display. Do not attempt a
+  bulk bank transfer before this produces the expected block countdown and
+  audible test sound.
