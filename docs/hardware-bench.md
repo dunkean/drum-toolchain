@@ -30,7 +30,9 @@ match. The validated local backup is outside Git at
 `4c05512746282701aefe2ee3af24d30aa7909ccda2c5cbdecf4e83f733fea037`.
 It contains 56 SysEx messages. Its structural inspection reports payload
 lengths 112, 121, and 578 bytes; these are framing facts only, not a decoded
-DDrum4 protocol specification.
+DDrum4 protocol specification. The 56 messages form two byte-identical
+28-message sequences; the inspector records this fact without assuming why
+the module emits it.
 
 After validation, record the module firmware/version, safe sound-ID range, and
 a user-confirmed inventory/free-memory observation. Only then may a separate

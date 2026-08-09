@@ -34,6 +34,7 @@ class BackupInspection:
     message_types: dict[str, int]
     sysex_data_lengths: tuple[int, ...]
     sysex_prefixes: dict[str, int]
+    repeated_message_sequence_count: int
 
     def to_document(self) -> dict[str, object]:
         return {
@@ -43,6 +44,7 @@ class BackupInspection:
             "message_types": self.message_types,
             "sysex_data_lengths": list(self.sysex_data_lengths),
             "sysex_prefixes": self.sysex_prefixes,
+            "repeated_message_sequence_count": self.repeated_message_sequence_count,
         }
 
 
@@ -76,4 +78,19 @@ def inspect_settings_backup(path: Path) -> BackupInspection:
             lengths.add(len(message.data))
             prefix = " ".join(f"{byte:02X}" for byte in message.data[:4])
             prefixes[prefix] = prefixes.get(prefix, 0) + 1
-    return BackupInspection(record, dict(sorted(message_types.items())), tuple(sorted(lengths)), dict(sorted(prefixes.items())))
+    serialized = tuple(bytes(message.bin()) for message in messages)
+    repeats = 1
+    for candidate in range(2, len(serialized) + 1):
+        if len(serialized) % candidate:
+            continue
+        segment_size = len(serialized) // candidate
+        if serialized == serialized[:segment_size] * candidate:
+            repeats = candidate
+            break
+    return BackupInspection(
+        record,
+        dict(sorted(message_types.items())),
+        tuple(sorted(lengths)),
+        dict(sorted(prefixes.items())),
+        repeats,
+    )

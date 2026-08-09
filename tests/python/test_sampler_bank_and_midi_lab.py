@@ -190,6 +190,20 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual(inspection.message_types, {"sysex": 1})
             self.assertEqual(inspection.sysex_data_lengths, (3,))
             self.assertEqual(inspection.sysex_prefixes, {"01 02 03": 1})
+            self.assertEqual(inspection.repeated_message_sequence_count, 1)
+
+    def test_settings_backup_inspection_detects_repeated_message_sequence(self) -> None:
+        import mido
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "repeated.mid"
+            midi = mido.MidiFile(type=0)
+            track = mido.MidiTrack()
+            for _ in range(2):
+                track.append(mido.Message("sysex", data=(1, 2, 3)))
+                track.append(mido.Message("sysex", data=(4, 5, 6)))
+            midi.tracks.append(track)
+            midi.save(path)
+            self.assertEqual(inspect_settings_backup(path).repeated_message_sequence_count, 2)
 
     def test_ddrum4_port_resolution_prefers_exact_name(self) -> None:
         self.assertEqual(
