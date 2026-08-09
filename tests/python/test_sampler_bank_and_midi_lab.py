@@ -8,6 +8,7 @@ from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, anal
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.backup import validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
+from ddrum4_bank.plan import compare_plan, render_comparison
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
@@ -130,6 +131,13 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         self.assertEqual([option.identifier for option in quality.selected], ["snare-full", "crash-compact"])
         self.assertEqual([option.identifier for option in compact.selected], ["snare-compact", "crash-compact"])
         self.assertTrue(any("reduced quality" in warning for warning in quality.warnings))
+
+    def test_metalcore_plan_is_editable_and_compares_two_allocations(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        results = compare_plan(root / "profiles/banks/metalcore-main.yaml")
+        self.assertEqual([result.strategy for result in results], ["quality-first", "compact-first"])
+        self.assertGreater(results[0].estimated_blocks, results[1].estimated_blocks)
+        self.assertIn("snare_main.head", render_comparison(results))
 
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)

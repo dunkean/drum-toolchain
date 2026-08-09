@@ -2,6 +2,8 @@ bank:
   id: metalcore-main
   status: planning
   memory_blocks: 8192
+  # Estimates only. Actual fit is based on ddrum4edit encoded block counts.
+  planning_memory_blocks: 7000
   quality_priority:
     - snare_main
     - hihat_main
@@ -20,3 +22,50 @@ bank:
     positions: [1, 2, 4, 8]
 notes:
   - This is a planning manifest. It does not describe verified ddrum4 assignments yet.
+  - Planned sound groups are logical containers, not measured DDrum4 Sound IDs.
+
+# Each option is selected from a dense neutral sample library after capture.
+# The source IDs are stable logical take-set labels, not bundled audio files.
+logical_components:
+  - id: snare_main.head
+    priority: 100
+    planned_sound_group: snare-main
+    options:
+      - {id: snare-head-flagship, quality: 10, sample_slots: 7, layers: 7, estimated_blocks: 1050, source_take_ids: [snare_main.head.dense]}
+      - {id: snare-head-compact, quality: 6, sample_slots: 4, layers: 4, estimated_blocks: 560, source_take_ids: [snare_main.head.dense]}
+  - id: snare_main.rim
+    priority: 96
+    planned_sound_group: snare-main
+    options:
+      - {id: snare-rim-flagship, quality: 9, sample_slots: 2, layers: 2, estimated_blocks: 240, source_take_ids: [snare_main.rim.dense]}
+      - {id: snare-rim-compact, quality: 5, sample_slots: 1, layers: 1, estimated_blocks: 120, source_take_ids: [snare_main.rim.dense]}
+  - id: hihat_main.bow
+    priority: 98
+    planned_sound_group: hihat-main
+    options:
+      - {id: hihat-bow-flagship, quality: 10, sample_slots: 5, layers: 5, estimated_blocks: 840, source_take_ids: [hihat_main.bow.dense]}
+      - {id: hihat-bow-compact, quality: 6, sample_slots: 3, layers: 3, estimated_blocks: 430, source_take_ids: [hihat_main.bow.dense]}
+  - id: hihat_main.edge
+    priority: 94
+    planned_sound_group: hihat-main
+    options:
+      - {id: hihat-edge-flagship, quality: 9, sample_slots: 4, layers: 4, estimated_blocks: 700, source_take_ids: [hihat_main.edge.dense]}
+      - {id: hihat-edge-compact, quality: 5, sample_slots: 2, layers: 2, estimated_blocks: 310, source_take_ids: [hihat_main.edge.dense]}
+  - id: crash_1.bow
+    priority: 92
+    planned_sound_group: crash-primary
+    options:
+      - {id: crash-1-flagship, quality: 10, sample_slots: 5, layers: 4, estimated_blocks: 860, source_take_ids: [crash_1.bow.dense]}
+      - {id: crash-1-compact, quality: 5, sample_slots: 3, layers: 2, estimated_blocks: 400, source_take_ids: [crash_1.bow.dense]}
+  - id: crash_2.bow
+    priority: 90
+    planned_sound_group: crash-primary
+    options:
+      - {id: crash-2-flagship, quality: 9, sample_slots: 5, layers: 4, estimated_blocks: 800, source_take_ids: [crash_2.bow.dense]}
+      - {id: crash-2-compact, quality: 5, sample_slots: 2, layers: 2, estimated_blocks: 330, source_take_ids: [crash_2.bow.dense]}
+  - id: kick_main.head
+    priority: 85
+    planned_sound_group: kick-main
+    options:
+      - {id: kick-main, quality: 8, sample_slots: 4, layers: 4, estimated_blocks: 540, source_take_ids: [kick_main.head.dense]}
+      - {id: kick-compact, quality: 4, sample_slots: 2, layers: 2, estimated_blocks: 260, source_take_ids: [kick_main.head.dense]}
