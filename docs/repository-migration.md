@@ -101,3 +101,19 @@ Expected result: `converter tests passed`.
   or transfer a sound. No hardware action has been performed in this phase.
 - The DDrum4 hardware bench and backup procedure are the next gated phase; no
   soundbank transfer is permitted yet.
+
+## Product foundation progress — 2026-08-09
+
+- Added a versioned neutral sample-library record with immutable raw path,
+  channel layout, source/licensing declaration, audio facts, SHA-256 hash, and
+  processing-history field.
+- Added a versioned capture-session document, dense take planning, resumable
+  capture execution, and a CLI confirmation gate before any MIDI-triggered
+  audio recording.
+- Four named capture channels are now supported by the sampler API for the
+  future `kick`, `snare`, `left`, and `right` layout; initial real sessions may
+  still use `left`/`right` only.
+- Added DDrum4 settings-backup validation and adjacent metadata hashing. The
+  receiver is implemented but has not been run against the module yet.
+- All changes were verified with `scripts/test-all.ps1`: 20 Python tests, the
+  portable firmware core test, and the clean modernizer core build/test pass.
