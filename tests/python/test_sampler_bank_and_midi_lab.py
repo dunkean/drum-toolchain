@@ -14,7 +14,7 @@ from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 from ddrum4_bank.transport import resolve_port
-from ddrum4_bank.b0 import B0Fixture, write_fixture_manifest
+from ddrum4_bank.b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
 from drum_sampler.library import SampleTake
@@ -230,6 +230,22 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual(len(str(document["sha256"])), 64)
             with self.assertRaises(FileExistsError):
                 write_fixture_manifest(B0Fixture(), wav, root / "other.json")
+
+    def test_b0_build_record_requires_intact_fixture_and_nonempty_midi(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wav = root / "b0.wav"
+            fixture = root / "b0.json"
+            write_fixture_manifest(B0Fixture(), wav, fixture)
+            sound = root / "KICK_999.mid"
+            sound.write_bytes(b"MThd")
+            record = verify_b0_build(fixture, sound, 10)
+            self.assertEqual(record.encoded_blocks, 10)
+            self.assertFalse(record.to_document()["hardware_transfer"])
+            record.write(root / "record.json")
+            wav.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "matches"):
+                verify_b0_build(fixture, sound, 10)
 
     def test_nested_compiler_generates_contract_and_rejects_impossible_layout(self) -> None:
         root = Path(__file__).resolve().parents[2]

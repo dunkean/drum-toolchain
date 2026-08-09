@@ -66,3 +66,48 @@ def write_fixture_manifest(fixture: B0Fixture, wav_path: Path, manifest_path: Pa
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return document
+
+
+@dataclass(frozen=True)
+class B0BuildRecord:
+    fixture_manifest: str
+    fixture_sha256: str
+    sound_path: str
+    sound_sha256: str
+    encoded_blocks: int
+
+    def to_document(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "kind": "ddrum4-b0-local-build-record",
+            **asdict(self),
+            "hardware_transfer": False,
+        }
+
+    def write(self, path: Path) -> None:
+        if path.exists():
+            raise FileExistsError(f"refusing to overwrite B0 build record: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_document(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def verify_b0_build(fixture_manifest: Path, sound_path: Path, encoded_blocks: int) -> B0BuildRecord:
+    """Verify local provenance and measured encoded size; never sends MIDI."""
+    if encoded_blocks < 1:
+        raise ValueError("B0 sound must contain at least one encoded block")
+    try:
+        fixture = json.loads(fixture_manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read B0 fixture manifest: {error}") from error
+    if fixture.get("kind") != "ddrum4-b0-synthetic-fixture" or fixture.get("hardware_write") is not False:
+        raise ValueError("fixture manifest is not a local B0 synthetic fixture")
+    raw_path = Path(str(fixture.get("path", "")))
+    expected_hash = fixture.get("sha256")
+    if not raw_path.is_file() or not isinstance(expected_hash, str) or sha256(raw_path.read_bytes()).hexdigest() != expected_hash:
+        raise ValueError("B0 fixture audio is missing or no longer matches its manifest hash")
+    if sound_path.suffix.lower() not in {".mid", ".midi"} or not sound_path.is_file() or sound_path.stat().st_size == 0:
+        raise ValueError("B0 local sound must be a non-empty .mid or .midi file")
+    return B0BuildRecord(
+        str(fixture_manifest), expected_hash, str(sound_path),
+        sha256(sound_path.read_bytes()).hexdigest(), encoded_blocks,
+    )

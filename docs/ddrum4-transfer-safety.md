@@ -15,6 +15,19 @@ The command has no MIDI implementation and cannot send anything to the module.
 It refuses to overwrite either output and records the fixture hash and source
 provenance in the JSON manifest.
 
+After DDrum4UI has saved a local sound, verify it before any transmission:
+
+```powershell
+$env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
+python -m ddrum4_bank.cli verify-b0-build `
+  --fixture-manifest D:\Studio\ddrum4-b0\b0-click.json `
+  --sound D:\Studio\ddrum4-b0\KICK_999.mid `
+  --output D:\Studio\ddrum4-b0\KICK_999.build.json
+```
+
+This only invokes `ddrum4edit -p`, checks the fixture WAV hash and records the
+actual encoded block count. It has no MIDI output path.
+
 Before a human performs the one required ddrum4UI import/build/send operation,
 record all of the following in the bench log:
 

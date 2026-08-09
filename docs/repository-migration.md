@@ -197,3 +197,11 @@ Expected result: `converter tests passed`.
   uses the available free memory first. A deterministic 44.1 kHz B0 WAV and
   manifest were written outside Git at `D:\Studio\ddrum4-b0\` for manual UI
   import; no module transfer has occurred.
+
+## B0 local-build verification — 2026-08-10
+
+- Added `verify-b0-build`: it checks the B0 WAV against its manifest hash,
+  invokes the read-only `ddrum4edit -p` inspection on a locally saved sound,
+  records its real encoded block count, and refuses overwrite of the record.
+- The command has no MIDI output path. B0 remains pending only on the local
+  DDrum4UI sound save, then the separately confirmed hardware transfer.

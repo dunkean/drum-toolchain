@@ -12,7 +12,7 @@ from .ddrum4ui import discover
 from .backup import inspect_settings_backup, validate_settings_backup
 from .transport import receive_midi_dump
 from .plan import compare_plan, render_comparison
-from .b0 import B0Fixture, write_fixture_manifest
+from .b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from .compiler import compile_nested_file, write_compilation
 
 
@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     fixture = subparsers.add_parser("create-b0-fixture", help="write a non-overwriting synthetic WAV for the offline B0 transfer bench")
     fixture.add_argument("--wav", required=True, type=Path)
     fixture.add_argument("--manifest", required=True, type=Path)
+    verify_b0 = subparsers.add_parser("verify-b0-build", help="inspect and record a local B0 sound build; never transfers MIDI")
+    verify_b0.add_argument("--fixture-manifest", required=True, type=Path)
+    verify_b0.add_argument("--sound", required=True, type=Path)
+    verify_b0.add_argument("--output", required=True, type=Path)
     nested = subparsers.add_parser("compile-nested", help="compile declared nested layouts into routing-contract JSON and coverage report")
     nested.add_argument("plan", type=Path)
     nested.add_argument("--routing-contract", required=True, type=Path)
@@ -88,6 +92,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "create-b0-fixture":
         print(json.dumps(write_fixture_manifest(B0Fixture(), args.wav, args.manifest), indent=2, sort_keys=True))
+        return 0
+    if args.command == "verify-b0-build":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite B0 build record: {args.output}")
+        blocks = _backend(args.ddrum4edit).encoded_blocks(args.sound)
+        record = verify_b0_build(args.fixture_manifest, args.sound, blocks)
+        record.write(args.output)
+        print(f"verified {blocks} encoded blocks; wrote {args.output}")
         return 0
     if args.command == "compile-nested":
         compilation = compile_nested_file(args.plan)
