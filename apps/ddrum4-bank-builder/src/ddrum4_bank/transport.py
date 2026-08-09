@@ -49,10 +49,17 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
                 # inter-message pacing.  A native DDrum4UI capture measured a
                 # 400 ms packet interval.  Reproduce that observed transport
                 # rather than treating the sound file as a sequencer clip.
+                # The native sender also emits two MIDI Reset messages before
+                # the first packet and one immediately after the last one.
+                # The DDrum4 rejects a bare packet stream even when the bytes
+                # and 400 ms pace are otherwise correct.
+                output.send(mido.Message("reset"))
+                output.send(mido.Message("reset"))
                 for message in messages:
                     output.send(message)
                     sent += 1
                     time.sleep(sysex_pause)
+                output.send(mido.Message("reset"))
             else:
                 # Preserve ordinary MIDI-file replay semantics for non-SysEx
                 # traces used by the MIDI lab.

@@ -220,7 +220,10 @@ Expected result: `converter tests passed`.
   `MidiFile.play()` had already honoured DDrum4UI's 376 ms SMF delta. A native
   DDrum4UI capture proved that its real packet interval is 400 ms, so the
   sound replay now uses that pace directly instead of applying both delays;
-  the behavior is covered by a regression test.
+  the behavior is covered by a regression test. A complete native capture
+  additionally proved the exact framing: two MIDI Reset messages before the
+  11 SysEx packets and one Reset immediately after. The replay now reproduces
+  this sequence.
 - DDrum4UI's bundled native sender uses Windows MM/libremidi and exposes an
   inter-message-pause setting. Its public user documentation does not specify
   its exact packet framing or timing. A loopMIDI capture port was proven to

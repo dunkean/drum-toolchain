@@ -56,7 +56,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
                  patch("ddrum4_bank.transport.mido.merge_tracks", return_value=[mido.Message("sysex", data=(1, 2, 3)), mido.Message("sysex", data=(4, 5, 6))]), \
                  patch("ddrum4_bank.transport.time.sleep") as sleep:
                 self.assertEqual(send_midi_file(sound, "fixture-out"), 2)
-            self.assertEqual(len(output.sent), 2)
+            self.assertEqual([message.type for message in output.sent], ["reset", "reset", "sysex", "sysex", "reset"])
             self.assertEqual(sleep.call_count, 2)
             sleep.assert_called_with(0.4)
 

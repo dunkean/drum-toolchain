@@ -57,9 +57,12 @@ for B0, but these encode the serial-wire duration rather than the native
 sender's actual spacing. A direct Windows-MM capture measured the DDrum4UI
 sender at 400 ms between packets. Replay code therefore sends an all-SysEx
 sound `.mid` at that observed 400 ms pace and does not also honour its SMF
-delta-times. Applying both produced an approximately 776 ms gap and a module
-`ERR` during the first characterization. Raw `.syx` files have no delta-times
-and use the same explicit inter-message pause.
+delta-times. A complete native capture also contains two MIDI Reset messages
+immediately before the first packet and one Reset immediately after the last;
+the replay reproduces this framing. Applying both SMF and sender delays
+produced an approximately 776 ms gap and a module `ERR` during the first
+characterization. Raw `.syx` files have no delta-times and use the same
+explicit inter-message pause.
 
 ## Capturing a native DDrum4UI transfer on Windows
 
