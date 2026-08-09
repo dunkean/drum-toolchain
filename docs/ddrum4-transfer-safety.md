@@ -52,13 +52,14 @@ recording failure.
 
 ## Timed MIDI-file replay
 
-A DDrum4UI-authored `.mid` sound contains its required SysEx timing as MIDI
-delta-times. A replay implementation must use those times exactly and must
-not add an additional per-SysEx pause. The B0 file spaces its packets by about
-376 ms; applying a second 400 ms pause produced a module `ERR` during the
-first hardware characterization. Raw `.syx` files have no delta-times and
-therefore remain the only transfer type that needs an explicit inter-message
-pause.
+A DDrum4UI-authored `.mid` sound contains SysEx delta-times of about 376 ms
+for B0, but these encode the serial-wire duration rather than the native
+sender's actual spacing. A direct Windows-MM capture measured the DDrum4UI
+sender at 400 ms between packets. Replay code therefore sends an all-SysEx
+sound `.mid` at that observed 400 ms pace and does not also honour its SMF
+delta-times. Applying both produced an approximately 776 ms gap and a module
+`ERR` during the first characterization. Raw `.syx` files have no delta-times
+and use the same explicit inter-message pause.
 
 ## Capturing a native DDrum4UI transfer on Windows
 

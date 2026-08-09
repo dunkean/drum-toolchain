@@ -217,16 +217,19 @@ Expected result: `converter tests passed`.
   routing failure.
 - The first direct replay produced `ERR` on the module. Investigation found
   that the replay path was applying an additional 400 ms SysEx pause after
-  `MidiFile.play()` had already honoured DDrum4UI's 376 ms packet timing.
-  The duplicate pause was removed and covered by a regression test.
+  `MidiFile.play()` had already honoured DDrum4UI's 376 ms SMF delta. A native
+  DDrum4UI capture proved that its real packet interval is 400 ms, so the
+  sound replay now uses that pace directly instead of applying both delays;
+  the behavior is covered by a regression test.
 - DDrum4UI's bundled native sender uses Windows MM/libremidi and exposes an
   inter-message-pause setting. Its public user documentation does not specify
   its exact packet framing or timing. A loopMIDI capture port was proven to
   carry long SysEx messages, but the ordinary Python input API silently drops
   packets above 1 KiB. Added a Windows-MM long-message receiver with 4 KiB
   buffers and a guarded `record-sysex` command; an internal 1,174-byte virtual
-  SysEx capture succeeds. No native DDrum4UI sound stream has been captured
-  yet.
+  SysEx capture succeeds. The public command was also exercised end-to-end on
+  `in_dunk`: it wrote one intact 1,172-byte SysEx message to the isolated
+  self-test MIDI file. No native DDrum4UI sound stream has been captured yet.
 - Next hardware action: replay the validated B0 `.mid` with its embedded
   timing only, while the user observes the module display. Do not attempt a
   bulk bank transfer before this produces the expected block countdown and

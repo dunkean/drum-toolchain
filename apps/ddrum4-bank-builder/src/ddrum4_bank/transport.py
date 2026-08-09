@@ -42,14 +42,23 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
                 time.sleep(sysex_pause)
         else:
             file = mido.MidiFile(path)
-            for message in file.play(meta_messages=False):
-                output.send(message)
-                sent += 1
-            # `MidiFile.play()` already honours the delta-times recorded in a
-            # sound file.  Adding a second pause here created a gap of roughly
-            # 0.8 seconds between DDrum4 packets in the B0 fixture, even though
-            # ddrum4UI authored them 0.376 seconds apart.  The module treats a
-            # long gap inside a sound transfer as an error.
+            messages = [message for message in mido.merge_tracks(file.tracks) if not message.is_meta]
+            if messages and all(message.type == "sysex" for message in messages):
+                # The SMF delta-times in a DDrum4UI sound file encode roughly
+                # the serial-wire duration (376 ms for B0), not the sender's
+                # inter-message pacing.  A native DDrum4UI capture measured a
+                # 400 ms packet interval.  Reproduce that observed transport
+                # rather than treating the sound file as a sequencer clip.
+                for message in messages:
+                    output.send(message)
+                    sent += 1
+                    time.sleep(sysex_pause)
+            else:
+                # Preserve ordinary MIDI-file replay semantics for non-SysEx
+                # traces used by the MIDI lab.
+                for message in file.play(meta_messages=False):
+                    output.send(message)
+                    sent += 1
     return sent
 
 

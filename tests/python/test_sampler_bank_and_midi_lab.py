@@ -25,7 +25,7 @@ from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
-    def test_midi_sound_transfer_uses_file_timing_without_an_extra_sysex_pause(self) -> None:
+    def test_midi_sound_transfer_uses_observed_ddrum4ui_sysex_pacing(self) -> None:
         class Output:
             def __init__(self) -> None:
                 self.sent: list[mido.Message] = []
@@ -40,6 +40,8 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
                 self.sent.append(message)
 
         class SoundFile:
+            tracks: list[object] = []
+
             def play(self, *, meta_messages: bool) -> list[mido.Message]:
                 assert not meta_messages
                 return [mido.Message("sysex", data=(1, 2, 3)), mido.Message("sysex", data=(4, 5, 6))]
@@ -51,10 +53,12 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             with patch("ddrum4_bank.transport.mido.get_output_names", return_value=["fixture-out"]), \
                  patch("ddrum4_bank.transport.mido.open_output", return_value=output), \
                  patch("ddrum4_bank.transport.mido.MidiFile", return_value=SoundFile()), \
+                 patch("ddrum4_bank.transport.mido.merge_tracks", return_value=[mido.Message("sysex", data=(1, 2, 3)), mido.Message("sysex", data=(4, 5, 6))]), \
                  patch("ddrum4_bank.transport.time.sleep") as sleep:
                 self.assertEqual(send_midi_file(sound, "fixture-out"), 2)
             self.assertEqual(len(output.sent), 2)
-            sleep.assert_not_called()
+            self.assertEqual(sleep.call_count, 2)
+            sleep.assert_called_with(0.4)
 
     def test_capture_grid_is_dense_and_resumable(self) -> None:
         request = CaptureRequest("snare_main", "head", 38, (16, 64, 127), 2)
