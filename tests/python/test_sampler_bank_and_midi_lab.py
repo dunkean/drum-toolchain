@@ -7,6 +7,7 @@ import sys
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.backup import validate_settings_backup
+from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
@@ -117,6 +118,18 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         ))
         self.assertIn("nested positions must be unique", invalid.validate())
         self.assertIn("nested sound exceeds ten sample slots", invalid.validate())
+
+    def test_allocator_compares_quality_and_compact_candidates(self) -> None:
+        options = (
+            AllocationOption("snare-full", "snare.head", "SNRE_801", 10, 100, 7, 7, 700, ("s1",)),
+            AllocationOption("snare-compact", "snare.head", "SNRE_801", 6, 100, 4, 4, 350, ("s1",)),
+            AllocationOption("crash-full", "crash_1.bow", "CYMB_801", 10, 90, 5, 4, 500, ("c1",)),
+            AllocationOption("crash-compact", "crash_1.bow", "CYMB_801", 5, 90, 3, 2, 240, ("c1",)),
+        )
+        quality, compact = compare_allocations(options, 950)
+        self.assertEqual([option.identifier for option in quality.selected], ["snare-full", "crash-compact"])
+        self.assertEqual([option.identifier for option in compact.selected], ["snare-compact", "crash-compact"])
+        self.assertTrue(any("reduced quality" in warning for warning in quality.warnings))
 
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)

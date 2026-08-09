@@ -1,6 +1,7 @@
 from .backup import BackupRecord, validate_settings_backup
+from .allocator import AllocationOption, AllocationResult, compare_allocations
 from .ddrum4edit_backend import Ddrum4EditBackend
 from .nested import NestedRoute, NestedSound
 from .routing_contract import ContractRoute, RoutingContract
 
-__all__ = ["BackupRecord", "ContractRoute", "Ddrum4EditBackend", "NestedRoute", "NestedSound", "RoutingContract", "validate_settings_backup"]
+__all__ = ["AllocationOption", "AllocationResult", "BackupRecord", "ContractRoute", "Ddrum4EditBackend", "NestedRoute", "NestedSound", "RoutingContract", "compare_allocations", "validate_settings_backup"]
