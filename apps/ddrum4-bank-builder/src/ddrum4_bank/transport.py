@@ -28,46 +28,110 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
     if not path.is_file():
         raise ValueError(f"transfer file does not exist: {path}")
     name = resolve_port(list(mido.get_output_names()), port_query)
+    if suffix == ".syx":
+        # mido parses only framed MIDI messages; this deliberately refuses
+        # malformed binary data rather than placing arbitrary bytes on DIN.
+        messages = mido.parse_all(path.read_bytes())
+        if not messages or any(message.type != "sysex" for message in messages):
+            raise ValueError(".syx must contain one or more complete SysEx messages only")
+        return _send_sysex_messages(messages, name, sysex_pause)
+
+    file = mido.MidiFile(path)
+    messages = [message for message in mido.merge_tracks(file.tracks) if not message.is_meta]
+    if messages and all(message.type == "sysex" for message in messages):
+        return _send_sysex_messages(messages, name, sysex_pause)
+
+    # Preserve ordinary MIDI-file replay semantics for non-SysEx traces used
+    # by the MIDI lab.
     sent = 0
     with mido.open_output(name) as output:
-        if suffix == ".syx":
-            # mido parses only framed MIDI messages; this deliberately refuses
-            # malformed binary data rather than placing arbitrary bytes on DIN.
-            messages = mido.parse_all(path.read_bytes())
-            if not messages or any(message.type != "sysex" for message in messages):
-                raise ValueError(".syx must contain one or more complete SysEx messages only")
-            for message in messages:
-                output.send(message)
-                sent += 1
-                time.sleep(sysex_pause)
-        else:
-            file = mido.MidiFile(path)
-            messages = [message for message in mido.merge_tracks(file.tracks) if not message.is_meta]
-            if messages and all(message.type == "sysex" for message in messages):
-                # The SMF delta-times in a DDrum4UI sound file encode roughly
-                # the serial-wire duration (376 ms for B0), not the sender's
-                # inter-message pacing.  A native DDrum4UI capture measured a
-                # 400 ms packet interval.  Reproduce that observed transport
-                # rather than treating the sound file as a sequencer clip.
-                # The native sender also emits two MIDI Reset messages before
-                # the first packet and one immediately after the last one.
-                # The DDrum4 rejects a bare packet stream even when the bytes
-                # and 400 ms pace are otherwise correct.
-                output.send(mido.Message("reset"))
-                output.send(mido.Message("reset"))
-                for index, message in enumerate(messages):
-                    output.send(message)
-                    sent += 1
-                    if index + 1 < len(messages):
-                        time.sleep(sysex_pause)
-                output.send(mido.Message("reset"))
-            else:
-                # Preserve ordinary MIDI-file replay semantics for non-SysEx
-                # traces used by the MIDI lab.
-                for message in file.play(meta_messages=False):
-                    output.send(message)
-                    sent += 1
+        for message in file.play(meta_messages=False):
+            output.send(message)
+            sent += 1
     return sent
+
+
+def _send_sysex_messages(messages: list[mido.Message], name: str, sysex_pause: float) -> int:
+    """Send observed DDrum4UI framing through the native Windows-MM backend."""
+    if platform.system() == "Windows":
+        return _send_windows_long_messages(messages, name, sysex_pause)
+    with mido.open_output(name) as output:
+        output.send(mido.Message("reset"))
+        output.send(mido.Message("reset"))
+        for index, message in enumerate(messages):
+            output.send(message)
+            if index + 1 < len(messages):
+                time.sleep(sysex_pause)
+        output.send(mido.Message("reset"))
+    return len(messages)
+
+
+def _send_windows_long_messages(messages: list[mido.Message], name: str, sysex_pause: float) -> int:
+    """Reproduce DDrum4UI's WinMM `midiOutLongMsg` transport exactly."""
+    import ctypes as c
+    from ctypes import wintypes as w
+
+    output_names = list(mido.get_output_names())
+    device_index = output_names.index(name)
+    winmm = c.WinDLL("winmm")
+    dword_ptr = c.c_size_t
+    mhdr_done = 0x00000001
+
+    class MidiHeader(c.Structure):
+        _fields_ = [
+            ("lpData", c.c_void_p),
+            ("dwBufferLength", w.DWORD),
+            ("dwBytesRecorded", w.DWORD),
+            ("dwUser", dword_ptr),
+            ("dwFlags", w.DWORD),
+            ("lpNext", c.c_void_p),
+            ("reserved", dword_ptr),
+            ("dwOffset", w.DWORD),
+            ("dwReserved", dword_ptr * 8),
+        ]
+
+    handle = c.c_void_p()
+    header_size = c.sizeof(MidiHeader)
+    result = winmm.midiOutOpen(c.byref(handle), device_index, 0, 0, 0)
+    if result:
+        raise RuntimeError(f"Windows MM could not open MIDI output {name!r}: error {result}")
+    buffers: list[tuple[object, MidiHeader]] = []
+    try:
+        for _ in range(2):
+            result = winmm.midiOutShortMsg(handle, 0xFF)
+            if result:
+                raise RuntimeError(f"Windows MM could not send initial MIDI Reset: error {result}")
+        for index, message in enumerate(messages):
+            raw = bytes(message.bytes())
+            buffer = c.create_string_buffer(raw)
+            header = MidiHeader(c.cast(buffer, c.c_void_p), len(raw), 0, 0, 0, None, 0, 0, (dword_ptr * 8)())
+            result = winmm.midiOutPrepareHeader(handle, c.byref(header), header_size)
+            if result:
+                raise RuntimeError(f"Windows MM could not prepare SysEx packet: error {result}")
+            result = winmm.midiOutLongMsg(handle, c.byref(header), header_size)
+            if result:
+                raise RuntimeError(f"Windows MM could not send SysEx packet: error {result}")
+            buffers.append((buffer, header))
+            if index + 1 < len(messages):
+                time.sleep(sysex_pause)
+        result = winmm.midiOutShortMsg(handle, 0xFF)
+        if result:
+            raise RuntimeError(f"Windows MM could not send final MIDI Reset: error {result}")
+        for _, header in buffers:
+            deadline = time.monotonic() + 2.0
+            while not header.dwFlags & mhdr_done:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Windows MM did not complete a SysEx packet within two seconds")
+                time.sleep(0.002)
+            result = winmm.midiOutUnprepareHeader(handle, c.byref(header), header_size)
+            if result:
+                raise RuntimeError(f"Windows MM could not release SysEx packet: error {result}")
+        return len(messages)
+    except Exception:
+        winmm.midiOutReset(handle)
+        raise
+    finally:
+        winmm.midiOutClose(handle)
 
 
 def send_all(directory: Path, port_query: str, sysex_pause: float = 0.4) -> list[tuple[Path, int]]:

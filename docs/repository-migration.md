@@ -224,6 +224,11 @@ Expected result: `converter tests passed`.
   additionally proved the exact framing: two MIDI Reset messages before the
   11 SysEx packets and one Reset immediately after the final packet (not after
   another 400 ms pause). The replay now reproduces this sequence.
+- The general Python MIDI backend reproduced the stream on loopMIDI but was
+  still rejected by the physical module. DDrum4UI's binary reveals a WinMM
+  `midiOutLongMsg` sender, so all-SysEx sound replay now uses that same API.
+  Its isolated 1,172-byte B0 packets were captured intact through the virtual
+  bench before the next hardware attempt.
 - DDrum4UI's bundled native sender uses Windows MM/libremidi and exposes an
   inter-message-pause setting. Its public user documentation does not specify
   its exact packet framing or timing. A loopMIDI capture port was proven to

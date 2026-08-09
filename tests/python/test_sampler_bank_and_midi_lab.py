@@ -25,20 +25,7 @@ from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
-    def test_midi_sound_transfer_uses_observed_ddrum4ui_sysex_pacing(self) -> None:
-        class Output:
-            def __init__(self) -> None:
-                self.sent: list[mido.Message] = []
-
-            def __enter__(self) -> "Output":
-                return self
-
-            def __exit__(self, *args: object) -> None:
-                return None
-
-            def send(self, message: mido.Message) -> None:
-                self.sent.append(message)
-
+    def test_midi_sound_transfer_routes_an_all_sysex_file_to_native_sender(self) -> None:
         class SoundFile:
             tracks: list[object] = []
 
@@ -49,16 +36,15 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             sound = Path(temporary) / "fixture.mid"
             sound.touch()
-            output = Output()
             with patch("ddrum4_bank.transport.mido.get_output_names", return_value=["fixture-out"]), \
-                 patch("ddrum4_bank.transport.mido.open_output", return_value=output), \
                  patch("ddrum4_bank.transport.mido.MidiFile", return_value=SoundFile()), \
                  patch("ddrum4_bank.transport.mido.merge_tracks", return_value=[mido.Message("sysex", data=(1, 2, 3)), mido.Message("sysex", data=(4, 5, 6))]), \
-                 patch("ddrum4_bank.transport.time.sleep") as sleep:
+                 patch("ddrum4_bank.transport._send_sysex_messages", return_value=2) as native_sender:
                 self.assertEqual(send_midi_file(sound, "fixture-out"), 2)
-            self.assertEqual([message.type for message in output.sent], ["reset", "reset", "sysex", "sysex", "reset"])
-            self.assertEqual(sleep.call_count, 1)
-            sleep.assert_called_with(0.4)
+            sent_messages, sent_name, sent_pause = native_sender.call_args.args
+            self.assertEqual([message.type for message in sent_messages], ["sysex", "sysex"])
+            self.assertEqual(sent_name, "fixture-out")
+            self.assertEqual(sent_pause, 0.4)
 
     def test_capture_grid_is_dense_and_resumable(self) -> None:
         request = CaptureRequest("snare_main", "head", 38, (16, 64, 127), 2)

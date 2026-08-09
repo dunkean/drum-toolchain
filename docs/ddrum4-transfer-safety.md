@@ -65,6 +65,11 @@ produced an approximately 776 ms gap and a module `ERR` during the first
 characterization. Raw `.syx` files have no delta-times and use the same
 explicit inter-message pause.
 
+On Windows, DDrum4UI uses the WinMM `midiOutLongMsg` API. All-SysEx sound
+transfers use the same native API rather than the general Python MIDI backend.
+The latter can carry the bytes through a virtual port but was rejected by the
+physical DDrum4 even with identical framing and timing.
+
 ## Capturing a native DDrum4UI transfer on Windows
 
 The command below records a manually initiated DDrum4UI SysEx send without
