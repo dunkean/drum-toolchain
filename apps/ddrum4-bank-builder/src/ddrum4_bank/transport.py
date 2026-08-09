@@ -21,7 +21,14 @@ def resolve_port(names: list[str], query: str) -> str:
     return matches[0]
 
 
-def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int:
+def send_midi_file(
+    path: Path,
+    port_query: str,
+    sysex_pause: float = 0.4,
+    *,
+    sysex_chunk_bytes: int | None = None,
+    sysex_chunk_pause: float = 0.0,
+) -> int:
     suffix = path.suffix.lower()
     if suffix not in {".mid", ".midi", ".syx"}:
         raise ValueError("accepted transfer files are .mid, .midi and raw .syx")
@@ -34,12 +41,24 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
         messages = mido.parse_all(path.read_bytes())
         if not messages or any(message.type != "sysex" for message in messages):
             raise ValueError(".syx must contain one or more complete SysEx messages only")
-        return _send_sysex_messages(messages, name, sysex_pause)
+        return _send_sysex_messages(
+            messages,
+            name,
+            sysex_pause,
+            sysex_chunk_bytes=sysex_chunk_bytes,
+            sysex_chunk_pause=sysex_chunk_pause,
+        )
 
     file = mido.MidiFile(path)
     messages = [message for message in mido.merge_tracks(file.tracks) if not message.is_meta]
     if messages and all(message.type == "sysex" for message in messages):
-        return _send_sysex_messages(messages, name, sysex_pause)
+        return _send_sysex_messages(
+            messages,
+            name,
+            sysex_pause,
+            sysex_chunk_bytes=sysex_chunk_bytes,
+            sysex_chunk_pause=sysex_chunk_pause,
+        )
 
     # Preserve ordinary MIDI-file replay semantics for non-SysEx traces used
     # by the MIDI lab.
@@ -51,26 +70,49 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
     return sent
 
 
-def _send_sysex_messages(messages: list[mido.Message], name: str, sysex_pause: float) -> int:
+def _send_sysex_messages(
+    messages: list[mido.Message],
+    name: str,
+    sysex_pause: float,
+    *,
+    sysex_chunk_bytes: int | None = None,
+    sysex_chunk_pause: float = 0.0,
+) -> int:
     """Send observed DDrum4UI framing through the native Windows-MM backend."""
     if platform.system() == "Windows":
-        return _send_windows_long_messages(messages, name, sysex_pause)
+        return _send_windows_long_messages(
+            messages,
+            name,
+            sysex_pause,
+            sysex_chunk_bytes=sysex_chunk_bytes,
+            sysex_chunk_pause=sysex_chunk_pause,
+        )
+    if sysex_chunk_bytes is not None:
+        raise RuntimeError("chunked SysEx diagnostics are currently supported on Windows only")
     with mido.open_output(name) as output:
-        output.send(mido.Message("reset"))
-        output.send(mido.Message("reset"))
         for index, message in enumerate(messages):
             output.send(message)
             if index + 1 < len(messages):
                 time.sleep(sysex_pause)
-        output.send(mido.Message("reset"))
     return len(messages)
 
 
-def _send_windows_long_messages(messages: list[mido.Message], name: str, sysex_pause: float) -> int:
+def _send_windows_long_messages(
+    messages: list[mido.Message],
+    name: str,
+    sysex_pause: float,
+    *,
+    sysex_chunk_bytes: int | None = None,
+    sysex_chunk_pause: float = 0.0,
+) -> int:
     """Reproduce DDrum4UI's WinMM `midiOutLongMsg` transport exactly."""
     import ctypes as c
     from ctypes import wintypes as w
 
+    if sysex_chunk_bytes is not None and sysex_chunk_bytes < 3:
+        raise ValueError("sysex_chunk_bytes must be at least 3 when supplied")
+    if sysex_chunk_pause < 0:
+        raise ValueError("sysex_chunk_pause must not be negative")
     output_names = list(mido.get_output_names())
     device_index = output_names.index(name)
     winmm = c.WinDLL("winmm")
@@ -95,37 +137,51 @@ def _send_windows_long_messages(messages: list[mido.Message], name: str, sysex_p
     result = winmm.midiOutOpen(c.byref(handle), device_index, 0, 0, 0)
     if result:
         raise RuntimeError(f"Windows MM could not open MIDI output {name!r}: error {result}")
-    buffers: list[tuple[object, MidiHeader]] = []
+    # The Midiplus/Miditech MIDI4x4 has a documented Windows driver failure
+    # for SysEx messages above roughly 255 bytes.  When explicitly requested,
+    # send fragments as consecutive portions of *one* SysEx stream.  In
+    # particular, do not insert F0/F7 delimiters between fragments.
+    #
+    # Windows MM does not expose the physical DIN completion time for USB
+    # interfaces reliably, so a full MIDI wire-time delay is also retained for
+    # each fragment.  This is a diagnostic transport mode, never the default.
+    midi_wire_seconds_per_byte = 10.0 / 31_250.0
     try:
-        for _ in range(2):
-            result = winmm.midiOutShortMsg(handle, 0xFF)
-            if result:
-                raise RuntimeError(f"Windows MM could not send initial MIDI Reset: error {result}")
         for index, message in enumerate(messages):
+            packet_started = time.monotonic()
             raw = bytes(message.bytes())
-            buffer = c.create_string_buffer(raw)
-            header = MidiHeader(c.cast(buffer, c.c_void_p), len(raw), 0, 0, 0, None, 0, 0, (dword_ptr * 8)())
-            result = winmm.midiOutPrepareHeader(handle, c.byref(header), header_size)
-            if result:
-                raise RuntimeError(f"Windows MM could not prepare SysEx packet: error {result}")
-            result = winmm.midiOutLongMsg(handle, c.byref(header), header_size)
-            if result:
-                raise RuntimeError(f"Windows MM could not send SysEx packet: error {result}")
-            buffers.append((buffer, header))
+            chunks = (
+                [raw]
+                if sysex_chunk_bytes is None
+                else [raw[offset : offset + sysex_chunk_bytes] for offset in range(0, len(raw), sysex_chunk_bytes)]
+            )
+            for chunk_index, chunk in enumerate(chunks):
+                buffer = c.create_string_buffer(chunk)
+                header = MidiHeader(c.cast(buffer, c.c_void_p), len(chunk), 0, 0, 0, None, 0, 0, (dword_ptr * 8)())
+                result = winmm.midiOutPrepareHeader(handle, c.byref(header), header_size)
+                if result:
+                    raise RuntimeError(f"Windows MM could not prepare SysEx packet: error {result}")
+                result = winmm.midiOutLongMsg(handle, c.byref(header), header_size)
+                if result:
+                    raise RuntimeError(f"Windows MM could not send SysEx packet: error {result}")
+                # Keep the buffer valid until Windows MM has completed it,
+                # then release it before submitting the next physical chunk.
+                deadline = time.monotonic() + 2.0
+                while not header.dwFlags & mhdr_done:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Windows MM did not complete a SysEx fragment within two seconds")
+                    time.sleep(0.002)
+                result = winmm.midiOutUnprepareHeader(handle, c.byref(header), header_size)
+                if result:
+                    raise RuntimeError(f"Windows MM could not release SysEx fragment: error {result}")
+                if sysex_chunk_bytes is not None:
+                    # Ensure the interface cannot coalesce the next fragment
+                    # before this one has cleared the 31.25 kbit/s DIN wire.
+                    time.sleep(max(sysex_chunk_pause, len(chunk) * midi_wire_seconds_per_byte))
             if index + 1 < len(messages):
-                time.sleep(sysex_pause)
-        result = winmm.midiOutShortMsg(handle, 0xFF)
-        if result:
-            raise RuntimeError(f"Windows MM could not send final MIDI Reset: error {result}")
-        for _, header in buffers:
-            deadline = time.monotonic() + 2.0
-            while not header.dwFlags & mhdr_done:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError("Windows MM did not complete a SysEx packet within two seconds")
-                time.sleep(0.002)
-            result = winmm.midiOutUnprepareHeader(handle, c.byref(header), header_size)
-            if result:
-                raise RuntimeError(f"Windows MM could not release SysEx packet: error {result}")
+                remaining_pause = sysex_pause - (time.monotonic() - packet_started)
+                if remaining_pause > 0:
+                    time.sleep(remaining_pause)
         return len(messages)
     except Exception:
         winmm.midiOutReset(handle)

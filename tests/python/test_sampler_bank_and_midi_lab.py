@@ -45,6 +45,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual([message.type for message in sent_messages], ["sysex", "sysex"])
             self.assertEqual(sent_name, "fixture-out")
             self.assertEqual(sent_pause, 0.4)
+            self.assertEqual(native_sender.call_args.kwargs, {"sysex_chunk_bytes": None, "sysex_chunk_pause": 0.0})
 
     def test_capture_grid_is_dense_and_resumable(self) -> None:
         request = CaptureRequest("snare_main", "head", 38, (16, 64, 127), 2)

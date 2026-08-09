@@ -55,15 +55,31 @@ recording failure.
 A DDrum4UI-authored `.mid` sound contains SysEx delta-times of about 376 ms
 for B0, but these encode the serial-wire duration rather than the native
 sender's actual spacing. A direct Windows-MM capture measured the DDrum4UI
-sender at 400 ms between packets. Replay code therefore sends an all-SysEx
-sound `.mid` at that observed 400 ms pace and does not also honour its SMF
-delta-times. A complete native capture also contains two MIDI Reset messages
-immediately before the first packet and one Reset immediately after the last;
-the replay reproduces this framing, including no final 400 ms wait before the
-closing Reset. Applying both SMF and sender delays
-produced an approximately 776 ms gap and a module `ERR` during the first
-characterization. Raw `.syx` files have no delta-times and use the same
-explicit inter-message pause.
+sender at about 400 ms between packets. Replay therefore sends an all-SysEx
+sound `.mid` at that explicit pace and does not also honour its SMF
+delta-times. Raw `.syx` files have no delta-times and use the same explicit
+inter-message pause.
+
+The three `FF` short events observed beside a DDrum4UI send to a *virtual*
+loopback port are Windows/port-reset artefacts, not members of the 11-packet
+sound file. They must not be injected around a physical DDrum4 transfer: a
+MIDI System Reset can abort the module receiver before its Flash commit.
+
+### MIDI interface compatibility and fragmentation
+
+The connected MIDIPLUS/Miditech MIDI4x4 reports firmware `1.02` and is known
+to mishandle Windows SysEx messages above roughly 255 bytes. A DDrum4UI sound
+packet is 1,174 bytes. The transfer transport therefore has an explicit
+Windows diagnostic mode that fragments an existing SysEx stream into 255-byte
+pieces, keeps the single initial `F0` and final `F7`, waits for each fragment
+to clear at MIDI wire speed, and retains the 400 ms packet cadence. This is a
+transport adaptation only; it never alters the encoded sound bytes.
+
+For the B0 bench, the DDrum4 was reconnected through `UMC404HD MIDI Out 9` /
+`UMC404HD MIDI In 29`. The module displayed the expected B0 block countdown
+when sent with 255-byte fragments and no injected System Reset. This validates
+the receive path; audible B0 playback still requires temporarily assigning
+`KICK_999` to a kit channel and recording it through UMC inputs 1–2.
 
 On Windows, DDrum4UI uses the WinMM `midiOutLongMsg` API. All-SysEx sound
 transfers use the same native API rather than the general Python MIDI backend.
