@@ -55,10 +55,11 @@ def send_midi_file(path: Path, port_query: str, sysex_pause: float = 0.4) -> int
                 # and 400 ms pace are otherwise correct.
                 output.send(mido.Message("reset"))
                 output.send(mido.Message("reset"))
-                for message in messages:
+                for index, message in enumerate(messages):
                     output.send(message)
                     sent += 1
-                    time.sleep(sysex_pause)
+                    if index + 1 < len(messages):
+                        time.sleep(sysex_pause)
                 output.send(mido.Message("reset"))
             else:
                 # Preserve ordinary MIDI-file replay semantics for non-SysEx

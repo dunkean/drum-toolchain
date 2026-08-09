@@ -222,8 +222,8 @@ Expected result: `converter tests passed`.
   sound replay now uses that pace directly instead of applying both delays;
   the behavior is covered by a regression test. A complete native capture
   additionally proved the exact framing: two MIDI Reset messages before the
-  11 SysEx packets and one Reset immediately after. The replay now reproduces
-  this sequence.
+  11 SysEx packets and one Reset immediately after the final packet (not after
+  another 400 ms pause). The replay now reproduces this sequence.
 - DDrum4UI's bundled native sender uses Windows MM/libremidi and exposes an
   inter-message-pause setting. Its public user documentation does not specify
   its exact packet framing or timing. A loopMIDI capture port was proven to

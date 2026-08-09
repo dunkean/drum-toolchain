@@ -57,7 +57,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
                  patch("ddrum4_bank.transport.time.sleep") as sleep:
                 self.assertEqual(send_midi_file(sound, "fixture-out"), 2)
             self.assertEqual([message.type for message in output.sent], ["reset", "reset", "sysex", "sysex", "reset"])
-            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual(sleep.call_count, 1)
             sleep.assert_called_with(0.4)
 
     def test_capture_grid_is_dense_and_resumable(self) -> None:

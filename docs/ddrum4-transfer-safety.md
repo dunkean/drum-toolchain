@@ -59,7 +59,8 @@ sender at 400 ms between packets. Replay code therefore sends an all-SysEx
 sound `.mid` at that observed 400 ms pace and does not also honour its SMF
 delta-times. A complete native capture also contains two MIDI Reset messages
 immediately before the first packet and one Reset immediately after the last;
-the replay reproduces this framing. Applying both SMF and sender delays
+the replay reproduces this framing, including no final 400 ms wait before the
+closing Reset. Applying both SMF and sender delays
 produced an approximately 776 ms gap and a module `ERR` during the first
 characterization. Raw `.syx` files have no delta-times and use the same
 explicit inter-message pause.
