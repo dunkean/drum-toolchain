@@ -138,3 +138,11 @@ Expected result: `converter tests passed`.
   and refuses ambiguous MIDI-note-to-articulation mappings.
 - XML is parsed after generation in automated tests. Loading a real generated
   kit in the DrumGizmo engine remains pending on actual captured audio.
+
+## DDrum4 backend spike — 2026-08-09
+
+- Read-only `ddrum4edit` inspection and encoded-block parsing are demonstrated.
+- Configuration-to-sound rebuilding has not yet been proven with a local,
+  non-factory fixture. The build adapter therefore fails closed instead of
+  guessing flags or emitting transferable output. This is a prerequisite for
+  the synthetic B0 sound after the settings backup.

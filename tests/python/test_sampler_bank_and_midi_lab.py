@@ -6,6 +6,7 @@ import sys
 
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
+from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend
 from ddrum4_bank.backup import validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.plan import compare_plan, render_comparison
@@ -166,6 +167,10 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
 
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)
+
+    def test_backend_refuses_unverified_sound_build_invocation(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "intentionally disabled"):
+            Ddrum4EditBackend(Path("ddrum4edit.exe")).build(Path("input.cfg"), Path("output.mid"))
 
     def test_settings_backup_validator_requires_real_midi_content(self) -> None:
         import mido

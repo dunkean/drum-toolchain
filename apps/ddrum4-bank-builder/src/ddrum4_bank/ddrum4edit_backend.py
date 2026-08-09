@@ -27,9 +27,12 @@ class Ddrum4EditBackend:
         return count
 
     def build(self, config: Path, output: Path, *, syx: bool = False, markers: bool = False) -> None:
-        arguments = ["-c", str(config), "-o", str(output)]
-        if syx:
-            arguments.append("--syx")
-        if markers:
-            arguments.append("--markers")
-        self._run(arguments)
+        # The documented command-line parser is able to inspect existing
+        # sounds. Its configuration-to-sound invocation has not yet been
+        # demonstrated with a reproducible non-factory test fixture on this
+        # installation. Refuse to create a potentially malformed transferable
+        # sound instead of guessing command switches.
+        raise RuntimeError(
+            "ddrum4edit build is intentionally disabled until a verified "
+            "configuration-to-sound fixture establishes the exact command line"
+        )
