@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 
 
@@ -67,6 +68,55 @@ class CaptureSessionPlan:
                 for repetition in range(1, request.repetitions + 1):
                     planned.append(PlannedTake(request, velocity, repetition))
         return tuple(planned)
+
+    def to_document(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "kind": "capture-session",
+            "midi_output": self.midi_output,
+            "audio_input": self.audio_input,
+            "channels": list(self.channels),
+            "sample_rate": self.sample_rate,
+            "preroll_ms": self.preroll_ms,
+            "gate_ms": self.gate_ms,
+            "tail_ms": self.tail_ms,
+            "cooldown_ms": self.cooldown_ms,
+            "requests": [{
+                "instrument": request.instrument,
+                "articulation": request.articulation,
+                "note": request.note,
+                "channel": request.channel,
+                "velocities": list(request.velocities),
+                "repetitions": request.repetitions,
+            } for request in self.requests],
+        }
+
+    def write(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_document(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    @classmethod
+    def read(cls, path: Path) -> "CaptureSessionPlan":
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if document.get("schema_version") != 1 or document.get("kind") != "capture-session":
+            raise ValueError("unsupported capture-session document")
+        requests = document.get("requests")
+        channels = document.get("channels")
+        if not isinstance(requests, list) or not isinstance(channels, list):
+            raise ValueError("capture-session requests and channels must be lists")
+        try:
+            parsed_requests = tuple(CaptureRequest(
+                instrument=item["instrument"], articulation=item["articulation"], note=item["note"],
+                channel=item.get("channel", 10), velocities=tuple(item["velocities"]), repetitions=item["repetitions"],
+            ) for item in requests)
+            return cls(
+                midi_output=document["midi_output"], audio_input=document["audio_input"],
+                channels=tuple(channels), requests=parsed_requests,
+                sample_rate=document.get("sample_rate", 44100), preroll_ms=document.get("preroll_ms", 100),
+                gate_ms=document.get("gate_ms", 100), tail_ms=document.get("tail_ms", 5000), cooldown_ms=document.get("cooldown_ms", 300),
+            )
+        except (KeyError, TypeError) as error:
+            raise ValueError("invalid capture-session document") from error
 
     def incomplete_takes(self, raw_directory: Path) -> tuple[PlannedTake, ...]:
         return tuple(take for take in self.takes() if not (raw_directory / take.raw_filename()).is_file())
