@@ -22,6 +22,30 @@ class BackupRecord:
         path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+@dataclass(frozen=True)
+class BackupInspection:
+    """Read-only structural facts about a received settings dump.
+
+    This reports MIDI framing only: it neither decodes vendor payload semantics
+    nor replays anything to a module.
+    """
+
+    record: BackupRecord
+    message_types: dict[str, int]
+    sysex_data_lengths: tuple[int, ...]
+    sysex_prefixes: dict[str, int]
+
+    def to_document(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "kind": "ddrum4-settings-backup-inspection",
+            "backup": asdict(self.record),
+            "message_types": self.message_types,
+            "sysex_data_lengths": list(self.sysex_data_lengths),
+            "sysex_prefixes": self.sysex_prefixes,
+        }
+
+
 def validate_settings_backup(path: Path) -> BackupRecord:
     """Reject empty/corrupt MIDI files; do not assert what a dump contains."""
     if not path.is_file() or path.stat().st_size == 0:
@@ -36,3 +60,20 @@ def validate_settings_backup(path: Path) -> BackupRecord:
         message_count=len(messages),
         sysex_count=sum(message.type == "sysex" for message in messages),
     )
+
+
+def inspect_settings_backup(path: Path) -> BackupInspection:
+    """Inspect a saved settings dump locally after validating it."""
+    record = validate_settings_backup(path)
+    midi = mido.MidiFile(path)
+    messages = [message for track in midi.tracks for message in track if not message.is_meta]
+    message_types: dict[str, int] = {}
+    prefixes: dict[str, int] = {}
+    lengths: set[int] = set()
+    for message in messages:
+        message_types[message.type] = message_types.get(message.type, 0) + 1
+        if message.type == "sysex":
+            lengths.add(len(message.data))
+            prefix = " ".join(f"{byte:02X}" for byte in message.data[:4])
+            prefixes[prefix] = prefixes.get(prefix, 0) + 1
+    return BackupInspection(record, dict(sorted(message_types.items())), tuple(sorted(lengths)), dict(sorted(prefixes.items())))

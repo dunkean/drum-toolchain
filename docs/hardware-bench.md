@@ -7,9 +7,9 @@ Scripts must resolve a unique name, never use a numeric device index.
 ## First action: settings backup
 
 No test sound, SysEx request, sound upload, or bulk transfer may be sent until
-a DDrum4 settings dump has been captured and validated. The repository does
-not guess a request SysEx command. Start the dump manually from the module or
-ddrum4UI, then run the receiver in a separate terminal:
+a DDrum4 settings dump was captured and validated on 2026-08-10. The
+repository does not guess a request SysEx command. Start the dump manually
+from the module or ddrum4UI, then run the receiver in a separate terminal:
 
 ```powershell
 $env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
@@ -22,6 +22,15 @@ The command only opens the named MIDI input. It writes the received MIDI file,
 rejects an empty/corrupt file, calculates a SHA-256 hash and writes adjacent
 metadata. Backups stay outside Git. A settings dump is not evidence that the
 module's audio sound files are backed up; those are a separate concern.
+
+On this PC, use `--input 'MIDI4x4 30'` if the generic name is ambiguous.
+The receiver now prefers an exact port-name match before performing a partial
+match. The validated local backup is outside Git at
+`D:\Studio\ddrum4-backups\settings-20260810.mid`, with SHA-256
+`4c05512746282701aefe2ee3af24d30aa7909ccda2c5cbdecf4e83f733fea037`.
+It contains 56 SysEx messages. Its structural inspection reports payload
+lengths 112, 121, and 578 bytes; these are framing facts only, not a decoded
+DDrum4 protocol specification.
 
 After validation, record the module firmware/version, safe sound-ID range, and
 a user-confirmed inventory/free-memory observation. Only then may a separate

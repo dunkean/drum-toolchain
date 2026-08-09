@@ -7,12 +7,13 @@ import sys
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend
-from ddrum4_bank.backup import validate_settings_backup
+from ddrum4_bank.backup import inspect_settings_backup, validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.plan import compare_plan, render_comparison
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
+from ddrum4_bank.transport import resolve_port
 from drum_domain import validate_document
 
 
@@ -184,6 +185,20 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             record = validate_settings_backup(path)
             self.assertEqual(record.message_count, 1)
             self.assertEqual(record.sysex_count, 1)
+            inspection = inspect_settings_backup(path)
+            self.assertEqual(inspection.message_types, {"sysex": 1})
+            self.assertEqual(inspection.sysex_data_lengths, (3,))
+            self.assertEqual(inspection.sysex_prefixes, {"01 02 03": 1})
+
+    def test_ddrum4_port_resolution_prefers_exact_name(self) -> None:
+        self.assertEqual(
+            resolve_port(["MIDI4x4 30", "MIDIIN2 (MIDI4x4) 31", "MIDI4x4"], "MIDI4x4"),
+            "MIDI4x4",
+        )
+        self.assertEqual(
+            resolve_port(["MIDI4x4 30", "MIDIIN2 (MIDI4x4) 31"], "MIDI4x4 30"),
+            "MIDI4x4 30",
+        )
 
     def test_routing_contract_is_valid_and_serializable(self) -> None:
         contract = RoutingContract(

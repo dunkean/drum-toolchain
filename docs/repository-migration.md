@@ -146,3 +146,16 @@ Expected result: `converter tests passed`.
   non-factory fixture. The build adapter therefore fails closed instead of
   guessing flags or emitting transferable output. This is a prerequisite for
   the synthetic B0 sound after the settings backup.
+
+## Hardware bench backup — 2026-08-10
+
+- Captured a user-initiated `D.AL` DDrum4 settings dump through Midiface port
+  1 input (`MIDI4x4 30`): 56 SysEx messages, with adjacent SHA-256 metadata.
+- The backup is stored outside Git at
+  `D:\Studio\ddrum4-backups\settings-20260810.mid`; no MIDI/SysEx was sent to
+  the module and no sound or setting was modified.
+- Added a local-only inspection command that reports dump framing facts, plus
+  exact-name MIDI port preference so the Midiface port-1 alias is handled
+  safely. Vendor payload semantics remain intentionally undecoded.
+- Remaining B0 gate: record firmware/version, observed free memory and a
+  user-confirmed sacrificial Sound ID before any transfer characterization.

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .ddrum4edit_backend import Ddrum4EditBackend
 from .ddrum4ui import discover
-from .backup import validate_settings_backup
+from .backup import inspect_settings_backup, validate_settings_backup
 from .transport import receive_midi_dump
 from .plan import compare_plan, render_comparison
 
@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--output", required=True, type=Path)
     backup.add_argument("--seconds", type=float, default=30.0)
     backup.add_argument("--confirm-listening", action="store_true", help="required: open the selected MIDI input and wait for a dump")
+    inspect_backup = subparsers.add_parser("inspect-settings-backup", help="print read-only structural facts for a saved settings dump")
+    inspect_backup.add_argument("backup", type=Path)
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
     allocation.add_argument("--output", type=Path, help="optional Markdown report path")
@@ -62,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {args.output}")
         else:
             print(report)
+        return 0
+    if args.command == "inspect-settings-backup":
+        print(json.dumps(inspect_settings_backup(args.backup).to_document(), indent=2, sort_keys=True))
         return 0
     backend = _backend(args.ddrum4edit)
     if args.command == "inspect":

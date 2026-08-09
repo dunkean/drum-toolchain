@@ -11,6 +11,9 @@ def ports() -> tuple[list[str], list[str]]:
 
 
 def resolve_port(names: list[str], query: str) -> str:
+    exact_matches = [name for name in names if name.casefold() == query.casefold()]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
     matches = [name for name in names if query.lower() in name.lower()]
     if len(matches) != 1:
         raise ValueError(f"expected one port containing {query!r}, found {matches}")
