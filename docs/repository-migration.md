@@ -50,7 +50,7 @@ cd D:\Workspace\Self\Studio\ddrum4_converter\build-core
 
 Expected result: `converter tests passed`.
 
-## M1 scaffold — in progress
+## M1 scaffold — complete
 
 - Created the `drum-toolchain` Git monorepo scaffold.
 - Added ignore rules for all generated binaries, dumps, audio, local settings,
@@ -77,7 +77,7 @@ Expected result: `converter tests passed`.
 
 ### Verification status
 
-- The new shared Python test entry point passes twelve tests, including the
+- The new shared Python test entry point passes fifteen tests, including the
   original planning, velocity-window, mapping-generation, WAV-processing, and
   quality-profile behavior.
 - PlatformIO native test execution was attempted through the documented
@@ -88,3 +88,16 @@ Expected result: `converter tests passed`.
 - CMake is not on `PATH`, but the Visual Studio 2022 bundled CMake and MSVC
   toolchain are present. A clean modernizer core build and test pass through
   the documented Visual Studio developer environment.
+- Safe command-line entry points now create neutral sampler fixtures, discover
+  and inspect the local `ddrum4edit` backend, and list/match/record/replay MIDI
+  traces. MIDI replay requires the explicit `--send` hardware-write flag.
+
+## M8 merge gate — ready for review
+
+- `scripts/test-all.ps1` is the single non-hardware verification command.
+- `scripts/write-merge-baseline.ps1` writes the ignored operational report at
+  `build/reports/merge-baseline.md` after that suite passes.
+- The report generator does not open MIDI ports, send MIDI/SysEx, capture audio,
+  or transfer a sound. No hardware action has been performed in this phase.
+- The DDrum4 hardware bench and backup procedure are the next gated phase; no
+  soundbank transfer is permitted yet.

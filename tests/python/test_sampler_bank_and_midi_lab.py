@@ -30,6 +30,31 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             library.write(path)
             self.assertEqual(SampleLibrary.read(path), library)
 
+    def test_safe_cli_entry_points_create_and_inspect_metadata(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "fixture.json"
+            sampler = subprocess.run(
+                [sys.executable, "-m", "drum_sampler.cli", "fixture", "--output", str(fixture)],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(sampler.returncode, 0, sampler.stderr)
+            self.assertEqual(len(SampleLibrary.read(fixture).takes), 6)
+            midi_trace = Path(temporary) / "trace.jsonl"
+            MidiTrace("fixture", (TraceEvent(0, "note_on", 10, 36, 120),)).write(midi_trace)
+            midi_lab = subprocess.run(
+                [sys.executable, "-m", "midi_lab.cli", "trace-info", str(midi_trace)],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(midi_lab.returncode, 0, midi_lab.stderr)
+            self.assertIn("events=1", midi_lab.stdout)
+            bank = subprocess.run(
+                [sys.executable, "-m", "ddrum4_bank.cli", "discover", "--root", "D:/Studio/ddrum4ui"],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(bank.returncode, 0, bank.stderr)
+            self.assertIn("ddrum4edit.exe", bank.stdout)
+
     def test_nested_layout_enforces_ddrum4_limits(self) -> None:
         sound = NestedSound("CYMB_801", 4, (
             NestedRoute("crash_1", 1, 5, 5, 1),
@@ -76,3 +101,15 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         self.assertEqual(resolve_unique_port(["MIDI4x4", "MIDIOUT2 (MIDI4x4)"], "MIDI4x4"), "MIDI4x4")
         with self.assertRaises(ValueError):
             resolve_unique_port(["MIDI4x4", "MIDIOUT2 (MIDI4x4)"], "midi")
+
+    def test_midi_replay_requires_explicit_hardware_write_flag(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "trace.jsonl"
+            MidiTrace("fixture", ()).write(path)
+            result = subprocess.run(
+                [sys.executable, "-m", "midi_lab.cli", "replay", str(path), "--output", "MIDI4x4"],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--send", result.stderr)
