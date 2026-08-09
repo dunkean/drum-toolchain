@@ -4,7 +4,7 @@ import unittest
 import subprocess
 import sys
 
-from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, library_from_captures, library_from_plan
+from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.backup import validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
@@ -84,6 +84,28 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertTrue(all(take.status == "captured" for take in library.takes))
             self.assertTrue(all(take.channels == ("kick", "snare", "left", "right") for take in library.takes))
             self.assertTrue(all(take.frames == 8 for take in library.takes))
+
+    def test_drumgizmo_export_creates_valid_stereo_or_multichannel_xml(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        requests = (CaptureRequest("kick_main", "head", 36, (64,), 1), CaptureRequest("snare_main", "head", 38, (64,), 1))
+        session = CaptureSessionPlan("fixture-midi", "fixture-audio", ("kick", "snare", "left", "right"), requests, tail_ms=10)
+        def fake_capture(**kwargs: object) -> Path:
+            output = kwargs["output"]
+            assert isinstance(output, Path)
+            wavfile.write(output, 44100, np.zeros((8, 4), dtype=np.int16))
+            return output
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            capture_pending(session, root, capture=fake_capture)
+            library = library_from_captures("fixture", session, root, source="test", license_statement="user-owned")
+            export = export_drumgizmo(library, audio_root=root, output_directory=root / "kit")
+            self.assertTrue(export.drumkit.is_file())
+            self.assertTrue(export.midimap.is_file())
+            self.assertEqual(len(export.instruments), 2)
+            self.assertEqual(len(export.copied_audio), 2)
+            self.assertIn('samplerate="44100"', export.drumkit.read_text(encoding="utf-8"))
+            self.assertIn('note="38"', export.midimap.read_text(encoding="utf-8"))
 
     def test_safe_cli_entry_points_create_and_inspect_metadata(self) -> None:
         root = Path(__file__).resolve().parents[2]
