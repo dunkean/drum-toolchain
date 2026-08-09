@@ -117,3 +117,12 @@ Expected result: `converter tests passed`.
   receiver is implemented but has not been run against the module yet.
 - All changes were verified with `scripts/test-all.ps1`: 20 Python tests, the
   portable firmware core test, and the clean modernizer core build/test pass.
+
+## Sampling S0 discovery — 2026-08-09
+
+- Read-only audio-device enumeration found UMC404HD physical input pairs and
+  output pairs, but no identifiable UMC loopback capture device.
+- SD3 is currently routed to UMC OUT 1/2. The next SD3 capture proof therefore
+  needs either host/DAW internal rendering/recording or an explicit physical
+  OUT 1/2 -> IN 3/4 patch with separate monitoring. This is recorded in
+  `docs/capture-workflow.md`; no capture was attempted.
