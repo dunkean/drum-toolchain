@@ -1,0 +1,29 @@
+# Example: ten physical DDTi inputs select ten different electronic samples
+# embedded as velocity-exclusive layers in ONE ddrum4 sound.  They are not
+# random variations: each incoming pad has a deterministic output window.
+project: { name: ddti-ten-pad-electronic-bank }
+module: { memory_blocks: 8192 }
+midi:
+  ddrum_output_channel: 10
+  sources:
+    ddti: { channel: 10 }
+    edrumin: { channel: 11 }
+
+sounds:
+  - { id: ELEC_801, category: PERC, allocation_blocks: 700, sample_slots: 10, layers: 10, variations: 1, description: Ten DDTi pads encoded as exclusive velocity layers }
+
+hihat: { mode: direct_cc4, source: edrumin, input_cc: 4, output_cc: 4, input_closed: 0, input_open: 127, output_closed: 0, output_open: 127, invert: false }
+
+# In ddrum4UI: import one sample per layer of ELEC_801 and make each layer
+# active only in the listed velocity range. Note # is 60; Note P is 1.
+routes:
+  - { id: elec_01, source: ddti, input_note: 36, articulation: Electronic 01, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 1, output_max: 12 } } }
+  - { id: elec_02, source: ddti, input_note: 37, articulation: Electronic 02, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 13, output_max: 24 } } }
+  - { id: elec_03, source: ddti, input_note: 38, articulation: Electronic 03, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 25, output_max: 36 } } }
+  - { id: elec_04, source: ddti, input_note: 39, articulation: Electronic 04, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 37, output_max: 48 } } }
+  - { id: elec_05, source: ddti, input_note: 40, articulation: Electronic 05, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 49, output_max: 60 } } }
+  - { id: elec_06, source: ddti, input_note: 41, articulation: Electronic 06, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 61, output_max: 72 } } }
+  - { id: elec_07, source: ddti, input_note: 42, articulation: Electronic 07, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 73, output_max: 84 } } }
+  - { id: elec_08, source: ddti, input_note: 43, articulation: Electronic 08, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 85, output_max: 96 } } }
+  - { id: elec_09, source: ddti, input_note: 44, articulation: Electronic 09, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 97, output_max: 108 } } }
+  - { id: elec_10, source: ddti, input_note: 45, articulation: Electronic 10, target: { output_note: 60, sound: ELEC_801, position: 1, velocity: { output_min: 109, output_max: 127 } } }

@@ -70,10 +70,15 @@ Expected result: `converter tests passed`.
 - Migrated Arduino firmware source, generator, and native test source.
 - Migrated modernizer source/configuration/tests without copying CMake build
   trees.
+- Copied the legacy extended-kit and electronic-bank manifests into
+  `profiles/legacy` as regression fixtures. They are explicitly legacy combined
+  manifests, not the future composable profile format.
 
 ### Verification status
 
-- The new shared Python test entry point passes seven tests.
+- The new shared Python test entry point passes twelve tests, including the
+  original planning, velocity-window, mapping-generation, WAV-processing, and
+  quality-profile behavior.
 - PlatformIO native test execution was attempted through the documented
   fallback executable. It cannot compile because `gcc` and `g++` are absent.
   This is an environment blocker, not a source failure. An MSVC bridge-core

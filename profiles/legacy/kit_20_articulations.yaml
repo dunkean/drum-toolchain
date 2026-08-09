@@ -1,0 +1,59 @@
+# Extended planning template: 23 playable articulations packed in ten ddrum4
+# sound containers. Input notes are TEMPLATE values and must be learned/changed
+# before this becomes the flashed Arduino routing table.
+project: { name: greg-ddrum4-20-articulation-backup }
+module: { memory_blocks: 8192 }
+midi:
+  ddrum_output_channel: 10
+  sources:
+    ddti: { channel: 10 }
+    edrumin: { channel: 11 }
+
+sounds:
+  - { id: KICK_801, category: KICK, allocation_blocks: 620, sample_slots: 4, layers: 6, variations: 3, description: Main kick }
+  - { id: SNRE_801, category: SNRE, allocation_blocks: 760, sample_slots: 6, layers: 8, variations: 4, description: Main snare }
+  - { id: RIM_801, category: PERC, allocation_blocks: 170, sample_slots: 3, layers: 4, variations: 2, description: Rim/cross-stick }
+  - { id: TOM_801, category: TOM, allocation_blocks: 430, sample_slots: 4, layers: 6, variations: 3, description: High tom }
+  - { id: TOM_802, category: TOM, allocation_blocks: 470, sample_slots: 4, layers: 6, variations: 3, description: Mid tom }
+  - { id: TOM_803, category: TOM, allocation_blocks: 520, sample_slots: 4, layers: 6, variations: 3, description: Low tom }
+  - { id: PERC_801, category: PERC, allocation_blocks: 280, sample_slots: 4, layers: 5, variations: 2, description: Auxiliary tom/snare }
+  - { id: CYMB_801, category: CYMB, allocation_blocks: 940, sample_slots: 6, layers: 8, variations: 3, description: Ride 3-zone }
+  - { id: CYMB_802, category: CYMB, allocation_blocks: 1560, sample_slots: 10, layers: 10, variations: 4, description: Crash/splash/china bank }
+  - { id: HHAT_801, category: HHAT, allocation_blocks: 980, sample_slots: 8, layers: 10, variations: 4, description: Zeitgeist direct CC4 template }
+
+hihat:
+  mode: direct_cc4
+  source: edrumin
+  input_cc: 4
+  output_cc: 4
+  input_closed: 0
+  input_open: 127
+  output_closed: 0
+  output_open: 127
+  invert: false
+
+# input notes are a controlled custom MIDI map to configure/learn on each source.
+routes:
+  - { id: kick, source: ddti, input_note: 36, articulation: Kick, target: { output_note: 36, sound: KICK_801, position: 1 } }
+  - { id: snare_head, source: ddti, input_note: 38, articulation: Snare head, target: { output_note: 40, sound: SNRE_801, position: 1 } }
+  - { id: snare_rim, source: ddti, input_note: 40, articulation: Snare rim, target: { output_note: 41, sound: SNRE_801, position: 2 } }
+  - { id: cross_stick, source: ddti, input_note: 37, articulation: Cross-stick, target: { output_note: 50, sound: RIM_801, position: 1 } }
+  - { id: tom_1, source: ddti, input_note: 48, articulation: Tom 1, target: { output_note: 45, sound: TOM_801, position: 1 } }
+  - { id: tom_2, source: ddti, input_note: 45, articulation: Tom 2, target: { output_note: 47, sound: TOM_802, position: 1 } }
+  - { id: tom_3, source: ddti, input_note: 43, articulation: Tom 3, target: { output_note: 50, sound: TOM_803, position: 1 } }
+  - { id: tom_4, source: ddti, input_note: 41, articulation: Tom 4/aux, target: { output_note: 55, sound: PERC_801, position: 1 } }
+  - { id: ride_bow, source: edrumin, input_note: 51, articulation: Ride bow, target: { output_note: 70, sound: CYMB_801, position: 1 } }
+  - { id: ride_bell, source: edrumin, input_note: 53, articulation: Ride bell, target: { output_note: 72, sound: CYMB_801, position: 3 } }
+  - { id: ride_edge, source: edrumin, input_note: 59, articulation: Ride edge, target: { output_note: 74, sound: CYMB_801, position: 5 } }
+  - { id: crash_a_bow, source: edrumin, input_note: 49, articulation: Crash A bow, target: { output_note: 80, sound: CYMB_802, position: 1 } }
+  - { id: crash_a_edge, source: edrumin, input_note: 57, articulation: Crash A edge, target: { output_note: 81, sound: CYMB_802, position: 2 } }
+  - { id: crash_b_bow, source: edrumin, input_note: 52, articulation: Crash B bow, target: { output_note: 82, sound: CYMB_802, position: 3 } }
+  - { id: crash_b_edge, source: edrumin, input_note: 55, articulation: Crash B edge, target: { output_note: 83, sound: CYMB_802, position: 4 } }
+  - { id: splash_1, source: ddti, input_note: 56, articulation: Splash 1, target: { output_note: 84, sound: CYMB_802, position: 5 } }
+  - { id: splash_2, source: ddti, input_note: 58, articulation: Splash 2, target: { output_note: 85, sound: CYMB_802, position: 6 } }
+  - { id: china_1, source: ddti, input_note: 60, articulation: China 1, target: { output_note: 86, sound: CYMB_802, position: 7 } }
+  - { id: china_2, source: ddti, input_note: 61, articulation: China 2, target: { output_note: 87, sound: CYMB_802, position: 8 } }
+  - { id: hihat_bow, source: edrumin, input_note: 42, articulation: ZG H-12 bow, target: { output_note: 91, sound: HHAT_801, position: 2 } }
+  - { id: hihat_edge, source: edrumin, input_note: 46, articulation: ZG H-12 edge, target: { output_note: 94, sound: HHAT_801, position: 5 } }
+  - { id: hihat_chick, source: edrumin, input_note: 44, articulation: ZG H-12 chick, target: { output_note: 90, sound: HHAT_801, position: 1 } }
+  - { id: hihat_splash, source: edrumin, input_note: 21, articulation: ZG H-12 splash, target: { output_note: 93, sound: HHAT_801, position: 4 } }
