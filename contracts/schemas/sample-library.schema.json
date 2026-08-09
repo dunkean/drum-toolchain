@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "required": ["schema_version", "kind", "id", "channel_layout", "takes"], "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1}, "kind": {"const": "neutral-sample-library"}, "id": {"type": "string", "minLength": 1}, "channel_layout": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "takes": {"type": "array", "items": {"type": "object", "required": ["instrument", "articulation", "note", "channel", "velocity", "repetition", "raw_file", "channels", "source", "license_statement", "processing_history", "status"], "additionalProperties": false, "properties": {"instrument": {"type": "string"}, "articulation": {"type": "string"}, "note": {"type": "integer", "minimum": 0, "maximum": 127}, "channel": {"type": "integer", "minimum": 1, "maximum": 16}, "velocity": {"type": "integer", "minimum": 1, "maximum": 127}, "repetition": {"type": "integer", "minimum": 1}, "raw_file": {"type": "string", "minLength": 1}, "prepared_file": {"type": ["string", "null"]}, "sample_rate": {"type": ["integer", "null"]}, "channels": {"type": "array", "items": {"type": "string"}}, "frames": {"type": ["integer", "null"]}, "peak_dbfs": {"type": ["number", "null"]}, "rms_dbfs": {"type": ["number", "null"]}, "clipped": {"type": ["boolean", "null"]}, "sha256": {"type": ["string", "null"]}, "capture_duration_ms": {"type": ["integer", "null"]}, "source": {"type": "string"}, "license_statement": {"type": "string"}, "processing_history": {"type": "array", "items": {"type": "string"}}, "status": {"type": "string"}}}}
+  }
+}

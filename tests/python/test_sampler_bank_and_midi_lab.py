@@ -12,6 +12,7 @@ from ddrum4_bank.plan import compare_plan, render_comparison
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
+from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
@@ -32,6 +33,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             path = Path(temporary) / "session.json"
             plan.write(path)
             self.assertEqual(CaptureSessionPlan.read(path), plan)
+            validate_document(plan.to_document(), Path(__file__).resolve().parents[2] / "contracts/schemas/capture-session.schema.json")
             result = subprocess.run(
                 [sys.executable, "-m", "drum_sampler.cli", "capture", "--session", str(path), "--raw-directory", temporary, "--library-output", str(Path(temporary) / "library.json"), "--id", "fixture", "--source", "test", "--license", "test"],
                 text=True, capture_output=True, check=False,
@@ -46,6 +48,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             path = Path(temporary) / "library.json"
             library.write(path)
             self.assertEqual(SampleLibrary.read(path), library)
+            validate_document(library.to_document(), Path(__file__).resolve().parents[2] / "contracts/schemas/sample-library.schema.json")
 
     def test_wav_analysis_returns_portable_library_facts(self) -> None:
         import numpy as np
@@ -167,6 +170,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         self.assertEqual(document["kind"], "ddrum4-routing-contract")
         self.assertEqual(document["routes"][0]["velocity"]["output_max"], 127)
         root = Path(__file__).resolve().parents[2]
+        validate_document(document, root / "contracts/schemas/routing-contract.schema.json")
         generator = root / "firmware/ddrum4-midi-bridge/tools/generate_mapping.py"
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "routing-contract.json"

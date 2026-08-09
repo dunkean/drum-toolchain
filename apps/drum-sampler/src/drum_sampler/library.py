@@ -51,12 +51,18 @@ class SampleLibrary:
     takes: tuple[SampleTake, ...]
 
     def to_document(self) -> dict[str, object]:
+        takes: list[dict[str, object]] = []
+        for take in self.takes:
+            record = asdict(take)
+            record["channels"] = list(take.channels)
+            record["processing_history"] = list(take.processing_history)
+            takes.append(record)
         return {
             "schema_version": 1,
             "kind": "neutral-sample-library",
             "id": self.identifier,
             "channel_layout": list(self.channel_layout),
-            "takes": [asdict(take) for take in self.takes],
+            "takes": takes,
         }
 
     def write(self, path: Path) -> None:

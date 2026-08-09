@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "required": ["schema_version", "kind", "bank_id", "midi", "hihat", "routes"], "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1}, "kind": {"const": "ddrum4-routing-contract"}, "bank_id": {"type": "string", "minLength": 1},
+    "midi": {"type": "object", "required": ["ddrum_output_channel", "sources"], "additionalProperties": false, "properties": {"ddrum_output_channel": {"type": "integer", "minimum": 1, "maximum": 16}, "sources": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "required": ["channel"], "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 1, "maximum": 16}}}}}},
+    "hihat": {"type": "object"},
+    "routes": {"type": "array", "items": {"type": "object", "required": ["identifier", "source", "input_note", "output_note", "sound_id", "position", "velocity"], "additionalProperties": false, "properties": {"identifier": {"type": "string"}, "source": {"type": "string"}, "input_note": {"type": "integer", "minimum": 0, "maximum": 127}, "output_note": {"type": "integer", "minimum": 0, "maximum": 127}, "sound_id": {"type": "string"}, "position": {"type": ["integer", "null"], "minimum": 1, "maximum": 8}, "velocity": {"type": "object", "required": ["input_min", "input_max", "output_min", "output_max"], "additionalProperties": false, "properties": {"input_min": {"type": "integer", "minimum": 1, "maximum": 127}, "input_max": {"type": "integer", "minimum": 1, "maximum": 127}, "output_min": {"type": "integer", "minimum": 1, "maximum": 127}, "output_max": {"type": "integer", "minimum": 1, "maximum": 127}}}}}}
+  }
+}

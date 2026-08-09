@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from drum_domain import LogicalEvent, PhysicalKit, load_setup
+from drum_domain import LogicalEvent, PhysicalKit, load_setup, validate_document, validate_yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,3 +25,15 @@ class DomainTests(unittest.TestCase):
             LogicalEvent("snare_main", "head", velocity=0)
         with self.assertRaises(ValueError):
             LogicalEvent("snare_main", "head", openness=1.01)
+
+    def test_current_composable_profiles_validate_against_contract_schemas(self) -> None:
+        schemas = ROOT / "contracts/schemas"
+        validate_yaml(ROOT / "profiles/physical/greg-hybrid-kit.yaml", schemas / "physical-kit.schema.json")
+        validate_yaml(ROOT / "profiles/wiring/snare-via-edrumin.yaml", schemas / "wiring-profile.schema.json")
+        validate_yaml(ROOT / "profiles/targets/ddrum4-standalone.yaml", schemas / "target-profile.schema.json")
+        validate_yaml(ROOT / "profiles/banks/metalcore-main.yaml", schemas / "ddrum4-bank.schema.json")
+
+    def test_schema_validation_rejects_invalid_midi_channel(self) -> None:
+        document = {"profile": "invalid", "status": "template", "midi": {"output_channel": 17}, "module": {"memory_blocks": 1}, "notes": []}
+        with self.assertRaises(ValueError):
+            validate_document(document, ROOT / "contracts/schemas/target-profile.schema.json")

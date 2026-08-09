@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "required": ["schema_version", "kind", "midi_output", "audio_input", "channels", "requests"], "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1}, "kind": {"const": "capture-session"}, "midi_output": {"type": "string", "minLength": 1}, "audio_input": {"type": "string", "minLength": 1}, "channels": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "sample_rate": {"type": "integer", "minimum": 8000}, "preroll_ms": {"type": "integer", "minimum": 0}, "gate_ms": {"type": "integer", "minimum": 0}, "tail_ms": {"type": "integer", "minimum": 0}, "cooldown_ms": {"type": "integer", "minimum": 0},
+    "requests": {"type": "array", "items": {"type": "object", "required": ["instrument", "articulation", "note", "channel", "velocities", "repetitions"], "additionalProperties": false, "properties": {"instrument": {"type": "string", "minLength": 1}, "articulation": {"type": "string", "minLength": 1}, "note": {"type": "integer", "minimum": 0, "maximum": 127}, "channel": {"type": "integer", "minimum": 1, "maximum": 16}, "velocities": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 127}}, "repetitions": {"type": "integer", "minimum": 1}}}}
+  }
+}
