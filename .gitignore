@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.venv/
+venv/
+
+# CMake / JUCE
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+_deps/
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+
+# PlatformIO / Arduino
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Generated, local, and hardware artifacts
+contracts/generated/*
+!contracts/generated/.gitkeep
+firmware/ddrum4-midi-bridge/generated/*
+!firmware/ddrum4-midi-bridge/generated/.gitkeep
+build/
+local/
+*.local.yaml
+*.local.json
+*.mid
+*.midi
+*.syx
+*.wav
+*.aiff
+*.flac
+*.mp3
+
+# Reference assets and downloaded tools
+reference-assets/
+vendor/
+public/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
