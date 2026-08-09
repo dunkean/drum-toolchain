@@ -37,3 +37,8 @@ the module emits it.
 After validation, record the module firmware/version, safe sound-ID range, and
 a user-confirmed inventory/free-memory observation. Only then may a separate
 explicitly confirmed transfer command be introduced or used.
+
+For this DDrum4 SE, the firmware version appears at power-on. `SHIFT` +
+`MEM.LEFT` shows unused sound memory in blocks (for example `1.28` means 1,280
+blocks); it is read-only. Do not use the adjacent mark/delete controls while
+performing this observation.

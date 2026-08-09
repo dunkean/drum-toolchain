@@ -167,5 +167,6 @@ Expected result: `converter tests passed`.
   overwrite either file and has no MIDI-port or module-write capability.
 - Added `docs/ddrum4-transfer-safety.md`, which records the remaining explicit
   inventory and one-time ddrum4UI build evidence required before transfer.
-- Verified fixture framing (16 kHz, 2,880 frames) and the full suite: 28
+- Verified fixture framing at the module-native 44.1 kHz (7,938 frames) and
+  the full suite: 28
   Python tests, firmware bridge-core and modernizer-core all pass.

@@ -14,7 +14,9 @@ import wave
 class B0Fixture:
     """A short synthetic click, intended only to prove the transfer path."""
 
-    sample_rate: int = 16000
+    # Match the DDrum4 SE native playback rate for a transfer-path test that
+    # does not silently exercise sample-rate conversion instead.
+    sample_rate: int = 44100
     duration_ms: int = 180
     frequency_hz: float = 440.0
     peak: float = 0.75

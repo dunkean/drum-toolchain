@@ -2,7 +2,7 @@
 
 The B0 sound is a disposable transfer-path test, not a musical sound and not
 part of the final bank. Its source is a deterministic, non-copyrighted,
-short mono sine-decay WAV created locally by the bank-builder command.
+short 44.1 kHz mono sine-decay WAV created locally by the bank-builder command.
 
 ```powershell
 $env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
@@ -25,6 +25,11 @@ record all of the following in the bench log:
 4. The exact ddrum4UI/ddrum4edit version, operation and generated output file.
 5. After transmission, the observed Sound ID, audible playback at several MIDI
    velocities, UMC recording path and actual encoded block count.
+
+The module's software version is shown briefly at power-on. To observe free
+memory without modifying a sound, press `SHIFT` + `MEM.LEFT`; record the
+displayed block count exactly (for example, `1.28` means 1,280 blocks). Do not
+use `SHIFT` + `MARK`, `DELETE`, or any `F.*` factory-initialization option.
 
 Do not send a generated file merely because it has a `.mid`, `.midi`, or
 `.syx` suffix. The current backend intentionally cannot build transfer files
