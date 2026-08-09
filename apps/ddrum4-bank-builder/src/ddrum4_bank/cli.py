@@ -11,6 +11,7 @@ from .backup import inspect_settings_backup, validate_settings_backup
 from .transport import receive_midi_dump
 from .plan import compare_plan, render_comparison
 from .b0 import B0Fixture, write_fixture_manifest
+from .compiler import compile_nested_file, write_compilation
 
 
 def _backend(value: str | None) -> Ddrum4EditBackend:
@@ -39,6 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
     fixture = subparsers.add_parser("create-b0-fixture", help="write a non-overwriting synthetic WAV for the offline B0 transfer bench")
     fixture.add_argument("--wav", required=True, type=Path)
     fixture.add_argument("--manifest", required=True, type=Path)
+    nested = subparsers.add_parser("compile-nested", help="compile declared nested layouts into routing-contract JSON and coverage report")
+    nested.add_argument("plan", type=Path)
+    nested.add_argument("--routing-contract", required=True, type=Path)
+    nested.add_argument("--report", required=True, type=Path)
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
     allocation.add_argument("--output", type=Path, help="optional Markdown report path")
@@ -74,6 +79,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "create-b0-fixture":
         print(json.dumps(write_fixture_manifest(B0Fixture(), args.wav, args.manifest), indent=2, sort_keys=True))
+        return 0
+    if args.command == "compile-nested":
+        compilation = compile_nested_file(args.plan)
+        write_compilation(compilation, args.routing_contract, args.report)
+        print(f"wrote {args.routing_contract} and {args.report}")
         return 0
     backend = _backend(args.ddrum4edit)
     if args.command == "inspect":

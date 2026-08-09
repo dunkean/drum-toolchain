@@ -16,3 +16,12 @@ To remove this block, perform one manual reference export/build using
 ddrum4UI/ddrum4edit on a disposable synthetic sound after the settings backup
 is verified. Record the exact successful command line and files, then add it
 as a regression fixture before enabling bulk builds.
+
+## Nested compiler boundary
+
+`compile-nested` is now the backend-neutral compilation step. It accepts a
+declared layout, validates the DDrum4 ten-slot/ten-layer and Note P position
+limits, and emits the matching `routing-contract.json` plus a coverage report.
+It does not claim to encode a DDrum4 sound file; that remains blocked on one
+verified ddrum4UI/ddrum4edit build fixture. See
+`profiles/banks/nested-compiler-fixture.yaml` for the minimal safe example.

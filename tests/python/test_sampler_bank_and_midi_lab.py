@@ -15,6 +15,7 @@ from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 from ddrum4_bank.transport import resolve_port
 from ddrum4_bank.b0 import B0Fixture, write_fixture_manifest
+from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from drum_domain import validate_document
 
 
@@ -227,6 +228,27 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual(len(str(document["sha256"])), 64)
             with self.assertRaises(FileExistsError):
                 write_fixture_manifest(B0Fixture(), wav, root / "other.json")
+
+    def test_nested_compiler_generates_contract_and_rejects_impossible_layout(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        compilation = compile_nested_file(root / "profiles/banks/nested-compiler-fixture.yaml")
+        self.assertEqual(compilation.contract.routes[0].output_note, 38)
+        self.assertEqual(compilation.contract.routes[1].position, 2)
+        validate_document(compilation.contract.to_document(), root / "contracts/schemas/routing-contract.schema.json")
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            write_compilation(compilation, output / "routing-contract.json", output / "coverage.md")
+            self.assertIn("SNRE_801", (output / "coverage.md").read_text(encoding="utf-8"))
+            with self.assertRaises(FileExistsError):
+                write_compilation(compilation, output / "routing-contract.json", output / "other.md")
+        bad = {
+            "bank": {"id": "bad"}, "midi": {"ddrum_output_channel": 10, "sources": {"ddti": {"channel": 10}}}, "sounds": [{"id": "CYMB_801", "output_note": 49, "note_p": 2, "routes": [
+                {"id": "a", "source": "ddti", "input_note": 49, "position": 1, "sample_slots": 6, "layers": 5},
+                {"id": "b", "source": "ddti", "input_note": 50, "position": 1, "sample_slots": 5, "layers": 6},
+            ]}],
+        }
+        with self.assertRaisesRegex(ValueError, "nested positions must be unique"):
+            compile_nested(bad)
 
     def test_routing_contract_is_valid_and_serializable(self) -> None:
         contract = RoutingContract(

@@ -1,0 +1,35 @@
+bank:
+  id: nested-compiler-fixture
+midi:
+  ddrum_output_channel: 10
+  sources:
+    edrumin: {channel: 11}
+    ddti: {channel: 10}
+hihat:
+  mode: direct_cc4
+  source: edrumin
+  input_cc: 4
+  output_cc: 4
+  input_closed: 0
+  input_open: 127
+  output_closed: 0
+  output_open: 127
+sounds:
+  - id: SNRE_801
+    output_note: 38
+    note_p: 2
+    routes:
+      - id: snare_main.head
+        source: edrumin
+        input_note: 38
+        position: 1
+        sample_slots: 7
+        layers: 7
+        priority: 100
+      - id: snare_main.rim
+        source: edrumin
+        input_note: 40
+        position: 2
+        sample_slots: 2
+        layers: 2
+        priority: 96

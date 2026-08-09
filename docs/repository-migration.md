@@ -170,3 +170,12 @@ Expected result: `converter tests passed`.
 - Verified fixture framing at the module-native 44.1 kHz (7,938 frames) and
   the full suite: 28
   Python tests, firmware bridge-core and modernizer-core all pass.
+
+## Nested compiler foundation — 2026-08-10
+
+- Added the backend-neutral `compile-nested` command and a minimal fixture.
+  One declared nested layout now produces both the Arduino-facing routing
+  contract and an articulation-coverage report, while invalid positions or
+  aggregate sample/layer budgets fail with direct explanations.
+- Sound encoding and DDrum4UI transfer remain deliberately separate and gated
+  on the verified backend build fixture and hardware inventory.
