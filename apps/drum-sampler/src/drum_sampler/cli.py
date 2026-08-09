@@ -11,6 +11,8 @@ from pathlib import Path
 
 from .library import library_from_plan
 from .recorder import capture_pending, library_from_captures
+from .exporters import export_drumgizmo
+from .library import SampleLibrary
 from .session import CaptureRequest, CaptureSessionPlan
 
 
@@ -49,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--source", required=True)
     capture.add_argument("--license", required=True)
     capture.add_argument("--confirm-capture", action="store_true", help="required: sends MIDI and records the named audio input")
+    drumgizmo = subparsers.add_parser("export-drumgizmo", help="export a captured neutral library as a DrumGizmo 2.0 kit")
+    drumgizmo.add_argument("--library", required=True, type=Path)
+    drumgizmo.add_argument("--audio-root", required=True, type=Path)
+    drumgizmo.add_argument("--output-directory", required=True, type=Path)
+    drumgizmo.add_argument("--title")
+    drumgizmo.add_argument("--reference-audio", action="store_true", help="reference source WAV paths instead of copying them into the kit")
     return parser
 
 
@@ -61,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         channels = tuple(item.strip() for item in args.channels.split(",") if item.strip())
         session = CaptureSessionPlan(args.midi_output, args.audio_input, channels, tuple(args.request))
     else:
+        if args.command == "export-drumgizmo":
+            export = export_drumgizmo(SampleLibrary.read(args.library), audio_root=args.audio_root, output_directory=args.output_directory, title=args.title, copy_audio=not args.reference_audio)
+            print(f"wrote DrumGizmo kit {export.drumkit} with {len(export.instruments)} instruments")
+            return 0
         if not args.confirm_capture:
             raise ValueError("capture sends MIDI and records audio; pass --confirm-capture after checking the session")
         session = CaptureSessionPlan.read(args.session)
