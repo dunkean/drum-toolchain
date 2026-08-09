@@ -4,7 +4,7 @@ import unittest
 import subprocess
 import sys
 
-from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, library_from_plan
+from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.backup import validate_settings_backup
 from ddrum4_bank.nested import NestedRoute, NestedSound
@@ -30,6 +30,19 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             path = Path(temporary) / "library.json"
             library.write(path)
             self.assertEqual(SampleLibrary.read(path), library)
+
+    def test_wav_analysis_returns_portable_library_facts(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "take.wav"
+            wavfile.write(path, 44100, np.array([[0], [16384], [-16384]], dtype=np.int16))
+            facts = analyze_wav(path)
+            self.assertEqual(facts["sample_rate"], 44100)
+            self.assertEqual(facts["frames"], 3)
+            self.assertEqual(facts["channels"], 1)
+            self.assertFalse(facts["clipped"])
+            self.assertEqual(len(str(facts["sha256"])), 64)
 
     def test_safe_cli_entry_points_create_and_inspect_metadata(self) -> None:
         root = Path(__file__).resolve().parents[2]

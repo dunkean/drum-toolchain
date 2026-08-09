@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import time
 from math import gcd
+from hashlib import sha256
 
 import mido
 import numpy as np
@@ -90,6 +91,27 @@ def _to_float(data: np.ndarray) -> np.ndarray:
     if np.issubdtype(data.dtype, np.integer):
         return data.astype(np.float32) / max(abs(np.iinfo(data.dtype).min), np.iinfo(data.dtype).max)
     return data.astype(np.float32)
+
+
+def analyze_wav(path: Path) -> dict[str, int | float | bool | str]:
+    """Return reproducible audio facts for a raw or prepared WAV file."""
+    rate, raw = wavfile.read(path)
+    samples = _to_float(raw)
+    if samples.ndim == 1:
+        samples = samples[:, None]
+    peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+    rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+    def dbfs(value: float) -> float:
+        return -float("inf") if value == 0 else float(20 * np.log10(value))
+    return {
+        "sample_rate": int(rate),
+        "frames": int(samples.shape[0]),
+        "channels": int(samples.shape[1]),
+        "peak_dbfs": dbfs(peak),
+        "rms_dbfs": dbfs(rms),
+        "clipped": bool(peak >= 0.999),
+        "sha256": sha256(path.read_bytes()).hexdigest(),
+    }
 
 
 def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str, int | float]:

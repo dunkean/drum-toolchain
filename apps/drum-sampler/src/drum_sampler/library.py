@@ -20,7 +20,15 @@ class SampleTake:
     prepared_file: str | None = None
     sample_rate: int | None = None
     channels: tuple[str, ...] = ()
+    frames: int | None = None
+    peak_dbfs: float | None = None
+    rms_dbfs: float | None = None
+    clipped: bool | None = None
     sha256: str | None = None
+    capture_duration_ms: int | None = None
+    source: str = "unassigned"
+    license_statement: str = "unassigned"
+    processing_history: tuple[str, ...] = ()
     status: str = "planned"
 
     @classmethod
@@ -74,10 +82,14 @@ class SampleLibrary:
             if not isinstance(take, dict):
                 raise ValueError("each sample-library take must be an object")
             take_data = dict(take)
-            channels = take_data.get("channels", ())
+            channels = take_data.get("channels", [])
             if not isinstance(channels, list) or not all(isinstance(item, str) and item for item in channels):
                 raise ValueError("sample-library take channels must be a string list")
             take_data["channels"] = tuple(channels)
+            history = take_data.get("processing_history", [])
+            if not isinstance(history, list) or not all(isinstance(item, str) and item for item in history):
+                raise ValueError("sample-library processing_history must be a string list")
+            take_data["processing_history"] = tuple(history)
             parsed_takes.append(SampleTake(**take_data))
         return cls(identifier, tuple(layout), tuple(parsed_takes))
 
