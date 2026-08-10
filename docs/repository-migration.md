@@ -342,6 +342,19 @@ Expected result: `converter tests passed`.
   has been changed: a three-pad trace-and-echo proof remains the next hardware
   gate.
 
+## Local-OFF echo and palette-scene evidence — 2026-08-10
+
+- The Local-OFF bench revealed that this DDrum4 path retransmits received MIDI
+  events to MIDI OUT. `DdrumBridge` now has a bounded immediate-echo guard;
+  native tests include both ordinary and out-of-order return echoes. The guard
+  is comparison-only and does not introduce a timing delay.
+- A temporary diagnostic profile is retained at
+  `profiles/diagnostics/ddrum4-local-off-cymb2-echo.yaml`. It records the
+  observed C12/note-17 CYMB2-input proof and is not a production kit map.
+- Palette selection is now an explicit cross-engine scene concept, documented
+  in `docs/ddrum4-palettes-and-pc-scenes.md`. Its concrete emitted MIDI event
+  is still a learn gate, not an assumption.
+
 ## DrumGizmo actual export — 2026-08-10
 
 - The dense original SD3 kick/tom capture library was exported as a

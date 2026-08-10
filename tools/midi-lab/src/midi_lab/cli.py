@@ -1,4 +1,4 @@
-"""MIDI discovery and trace inspection. No command sends MIDI events."""
+"""MIDI discovery, trace inspection, and explicitly confirmed test relays."""
 from __future__ import annotations
 
 import argparse
@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 
 from .ports import resolve_unique_port
-from .traces import MidiTrace
+from .traces import MidiTrace, TraceEvent
 
 
 def _port_names(direction: str) -> list[str]:
@@ -26,7 +26,7 @@ def _mido():
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="midi-lab", description="Safely discover MIDI ports and inspect saved traces.")
+    parser = argparse.ArgumentParser(prog="midi-lab", description="Safely discover MIDI ports, inspect traces, and run bounded confirmed relays.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     list_parser = subparsers.add_parser("list", help="list currently visible MIDI ports")
     list_parser.add_argument("--direction", choices=("input", "output"), default="input")
@@ -43,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("trace", type=Path)
     replay.add_argument("--output", required=True, help="unique MIDI output name")
     replay.add_argument("--send", action="store_true", help="required: actually send messages to the output")
+    bridge = subparsers.add_parser("bridge", help="run a bounded two-leg live MIDI relay")
+    bridge.add_argument("--input-a", required=True, help="first explicit MIDI input")
+    bridge.add_argument("--output-a", required=True, help="destination for input A")
+    bridge.add_argument("--input-b", required=True, help="second explicit MIDI input")
+    bridge.add_argument("--output-b", required=True, help="destination for input B")
+    bridge.add_argument("--seconds", required=True, type=float, help="positive bounded relay duration")
+    bridge.add_argument("--send", action="store_true", help="required: actually send MIDI to both outputs")
     return parser
 
 
@@ -70,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(0.001)
         MidiTrace(name, tuple(events)).write(args.output)
         print(f"recorded {len(events)} events to {args.output}")
-    else:
+    elif args.command == "replay":
         if not args.send:
             raise ValueError("replay is a MIDI write; pass --send after checking the output name")
         mido = _mido()
@@ -94,6 +101,30 @@ def main(argv: list[str] | None = None) -> int:
                         values["value"] = event.data2
                 output_port.send(mido.Message(event.message_type, **values))
         print(f"replayed {len(trace.events)} events to {name}")
+    else:
+        if not args.send:
+            raise ValueError("bridge is a MIDI write; pass --send after checking all four port names")
+        if args.seconds <= 0:
+            raise ValueError("--seconds must be positive")
+        mido = _mido()
+        input_a = resolve_unique_port(mido.get_input_names(), args.input_a)
+        output_a = resolve_unique_port(mido.get_output_names(), args.output_a)
+        input_b = resolve_unique_port(mido.get_input_names(), args.input_b)
+        output_b = resolve_unique_port(mido.get_output_names(), args.output_b)
+        started = time.monotonic()
+        a_to_b = 0
+        b_to_a = 0
+        with mido.open_input(input_a) as port_a, mido.open_output(output_a) as destination_a, \
+             mido.open_input(input_b) as port_b, mido.open_output(output_b) as destination_b:
+            while time.monotonic() - started < args.seconds:
+                for message in port_a.iter_pending():
+                    destination_a.send(message)
+                    a_to_b += 1
+                for message in port_b.iter_pending():
+                    destination_b.send(message)
+                    b_to_a += 1
+                time.sleep(0.001)
+        print(f"bridged {a_to_b} messages {input_a} -> {output_a}; {b_to_a} messages {input_b} -> {output_b}")
     return 0
 
 

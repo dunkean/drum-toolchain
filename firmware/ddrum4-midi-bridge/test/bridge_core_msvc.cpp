@@ -14,6 +14,7 @@ const NoteRoute routes[] = {
     {11, 42, 91, 1, 127, 1, 127},
     {11, 46, 94, 1, 127, 1, 127},
     {10, 36, 60, 1, 127, 13, 24},
+    {12, 17, 17, 1, 127, 1, 127},
 };
 const uint8_t programChannels[] = {10, 11, 12};
 
@@ -57,6 +58,25 @@ void test_third_source_program_change_is_relayed() {
   require(output.channel == 10 && output.data1 == 7, "third source ProgramChange differs");
 }
 
+void test_immediate_ddrum4_echo_is_suppressed() {
+  DdrumBridge bridge(config);
+  MidiEvent output{};
+  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
+  require(bridge.process(hit, &output, 1) == 1, "DDrum4 source note missing");
+  require(bridge.process(output, &output, 1) == 0, "DDrum4 echo was not suppressed");
+  require(bridge.suppressedEchoMessages() == 1, "suppressed echo count differs");
+}
+
+void test_out_of_order_echo_does_not_block_later_echo() {
+  DdrumBridge bridge(config);
+  MidiEvent first{};
+  MidiEvent second{};
+  require(bridge.process({MidiEventType::NoteOn, 12, 17, 70}, &first, 1) == 1, "first source note missing");
+  require(bridge.process({MidiEventType::NoteOn, 12, 17, 100}, &second, 1) == 1, "second source note missing");
+  require(bridge.process(second, &second, 1) == 0, "out-of-order later echo was not suppressed");
+  require(bridge.process(first, &first, 1) == 0, "out-of-order first echo was not suppressed");
+}
+
 }  // namespace
 
 int main() {
@@ -65,6 +85,8 @@ int main() {
     test_cc_and_unknown_message_policy();
     test_velocity_window();
     test_third_source_program_change_is_relayed();
+    test_immediate_ddrum4_echo_is_suppressed();
+    test_out_of_order_echo_does_not_block_later_echo();
     std::cout << "firmware bridge core tests passed\n";
     return 0;
   } catch (const std::exception& error) {

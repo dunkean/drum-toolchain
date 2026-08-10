@@ -28,6 +28,13 @@ The Arduino has one MIDI output only: DDrum4 MIDI IN. It does not send the
 selected output back to the merger. Each input source must use a distinct MIDI
 channel, so the bridge can distinguish otherwise-identical note numbers.
 
+Some tested DDrum4 Local-OFF paths retransmit a received MIDI-IN event through
+MIDI OUT. The Arduino firmware consequently has a bounded immediate-echo
+guard: it remembers its own outgoing messages and consumes a matching return
+before route lookup. This is an in-memory comparison, not a delay or a MIDI
+timer; it adds no audible latency. The guard must remain enabled for every
+standalone Local-OFF profile.
+
 Suggested channel reservation, pending a trace from each device:
 
 | Source | Proposed channel | Role |
@@ -89,3 +96,18 @@ channel and note.
 entry in `midi.sources`; it is no longer hard-coded to only DDTi and eDRUMin.
 Generic note routes were already source-channel based. This makes a declared
 `ddrum4` source a normal route producer rather than a special case.
+
+## Hardware evidence — 2026-08-10
+
+- With `C12` and `L.OF`, an actual snare pad temporarily connected to the
+  DDrum4 CYMB2 input emitted channel 12, note 17, with observed Note-On
+  velocities from 10 to 127. It also emitted polyphonic pressure messages;
+  this is expected from the unsuitable temporary pad/input pairing and is not
+  yet a final trigger calibration.
+- A first PC-assisted relay without echo protection produced approximately
+  8,883 messages in 45 seconds, proving the DDrum4 return echo exists.
+- With the bounded firmware echo guard, the same test remained bounded
+  (133 UMC-to-Arduino messages and 102 Arduino-to-UMC messages over 15
+  seconds). The remaining traffic was pressure-rich source data, not an
+  escalating loop. No DDrum4 kit sound assignment was assumed, so this is a
+  MIDI transport proof rather than an audio audition.

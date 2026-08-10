@@ -7,6 +7,7 @@ static const NoteRoute routes[] = {
     {11, 44, 90, 1, 127, 1, 127}, // chick -> position 1
     {11, 21, 93, 1, 127, 1, 127}, // splash -> position 4
     {10, 36, 60, 1, 127, 13, 24}, // electronic pad B -> layer velocity window B
+    {12, 17, 17, 1, 127, 1, 127}, // Local-OFF DDrum4 CYMB2 diagnostic pad
 };
 static const uint8_t programChannels[] = {10, 11, 12};
 
@@ -64,6 +65,25 @@ void test_declared_third_source_can_change_kit() {
   TEST_ASSERT_EQUAL_UINT8(7, output.data1);
 }
 
+void test_local_off_ddrum4_midi_echo_is_not_reprocessed() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(output, &output, 1));
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
+}
+
+void test_out_of_order_local_off_echo_is_still_suppressed() {
+  DdrumBridge bridge(config);
+  MidiEvent first;
+  MidiEvent second;
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 70}, &first, 1));
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 100}, &second, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(second, &second, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(first, &first, 1));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zeitgeist_bow_maps_to_hihat_position_2);
@@ -71,5 +91,7 @@ int main(int, char**) {
   RUN_TEST(test_unmapped_events_are_not_blindly_forwarded);
   RUN_TEST(test_pad_can_select_a_velocity_window_inside_one_sound);
   RUN_TEST(test_declared_third_source_can_change_kit);
+  RUN_TEST(test_local_off_ddrum4_midi_echo_is_not_reprocessed);
+  RUN_TEST(test_out_of_order_local_off_echo_is_still_suppressed);
   return UNITY_END();
 }

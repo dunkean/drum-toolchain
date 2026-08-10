@@ -2,6 +2,32 @@
 
 DdrumBridge::DdrumBridge(const BridgeConfig& config) : config_(config) {}
 
+bool DdrumBridge::consumeExpectedEcho(const MidiEvent& input) {
+  if (!expectedEchoCount_) return false;
+  for (size_t i = 0; i < expectedEchoCount_; ++i) {
+    const MidiEvent& expected = expectedEchoes_[i];
+    if (input.type != expected.type || input.channel != expected.channel ||
+        input.data1 != expected.data1 || input.data2 != expected.data2) {
+      continue;
+    }
+    for (size_t remaining = i + 1; remaining < expectedEchoCount_; ++remaining) {
+      expectedEchoes_[remaining - 1] = expectedEchoes_[remaining];
+    }
+    --expectedEchoCount_;
+    ++suppressedEchoMessages_;
+    return true;
+  }
+  return false;
+}
+
+void DdrumBridge::rememberExpectedEcho(const MidiEvent& output) {
+  if (expectedEchoCount_ == kEchoGuardCapacity) {
+    for (size_t i = 1; i < expectedEchoCount_; ++i) expectedEchoes_[i - 1] = expectedEchoes_[i];
+    --expectedEchoCount_;
+  }
+  expectedEchoes_[expectedEchoCount_++] = output;
+}
+
 const NoteRoute* DdrumBridge::findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const {
   for (size_t i = 0; i < config_.noteRouteCount; ++i) {
     const NoteRoute& route = config_.noteRoutes[i];
@@ -47,6 +73,7 @@ uint8_t DdrumBridge::mapHihatCc(uint8_t value) const {
 
 size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t capacity) {
   if (!capacity) return 0;
+  if (consumeExpectedEcho(input)) return 0;
 
   // The direct CC4 engine is deliberately handled before note routing. CC4 is
   // recognised by ddrum4; quantisation is an explicit future fallback only.
@@ -61,6 +88,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     hasLastHihatCc_ = true;
     lastHihatCc_ = mapped;
     *output = {MidiEventType::ControlChange, config_.outputChannel, h.outputCc, mapped};
+    rememberExpectedEcho(*output);
     return 1;
   }
 
@@ -68,6 +96,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     for (size_t i = 0; i < config_.relayProgramChannelCount; ++i) {
       if (input.channel == config_.relayProgramChannels[i]) {
         *output = {MidiEventType::ProgramChange, config_.outputChannel, input.data1, 0};
+        rememberExpectedEcho(*output);
         return 1;
       }
     }
@@ -90,5 +119,6 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   uint8_t value = input.data2;
   if (input.type == MidiEventType::NoteOn && input.data2 != 0) value = mapVelocity(*route, input.data2);
   *output = {input.type, config_.outputChannel, route->outputNote, value};
+  rememberExpectedEcho(*output);
   return 1;
 }
