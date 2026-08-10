@@ -310,8 +310,8 @@ Expected result: `converter tests passed`.
   `D:\Studio\drumgizmo\sd3-modern-metal-core-kick-toms`. It contains eight
   instrument XML files and 168 copied captured WAVs; generated XML is parsed
   by the exporter. This is intentionally independent of the compact DDrum4
-  selections. A complete all-articulation kit still needs the target MIDI map
-  that resolves note collisions such as hi-hat articulations.
+  selections. The subsequent consolidated kit resolves its target MIDI-note
+  collisions explicitly rather than discarding those articulations.
 - That target map is now implemented and a complete consolidated stereo kit
   was generated at
   `D:\Studio\drumgizmo\sd3-modern-metal-djentle-beast-stereo-v1`.
