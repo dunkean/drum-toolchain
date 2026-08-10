@@ -242,3 +242,23 @@ Expected result: `converter tests passed`.
   timing only, while the user observes the module display. Do not attempt a
   bulk bank transfer before this produces the expected block countdown and
   audible test sound.
+
+## B0/B1 complete-path verification — 2026-08-10
+
+- The B0 transfer was accepted through `UMC404HD 192k MIDI Out 9` with
+  255-byte SysEx transport fragments: the module displayed all 11 blocks and
+  `KICK_999` was heard with `SHIFT + LISTEN`.
+- `ddrum4edit` configuration export and reconstruction are now demonstrated
+  locally. `-e -i <sound.mid>` exports its `.cfg` and sample files; `-c
+  <config.cfg>` creates the destination declared inside that configuration.
+  The rebuilt disposable fixture parses at 11 encoded blocks. The bank backend
+  enforces that output declaration and refuses overwrites.
+- A local Superior Drummer 3 Modern Metal EZX / Djentle Beast snare WAV was
+  prepared and encoded as `SNRE_999` (137 blocks), transferred to the module,
+  and audibly confirmed. This is the first complete original-audio pipeline;
+  no factory audio is present in the generated sound.
+- A seven-layer B1 velocity-crossfade configuration was generated from an
+  original SD3 capture selection. It uses documented DDrum4 layer velocity
+  curves, prepared mono source WAVs and 94 actual encoded blocks as
+  `SNRE_998`; transfer completed without a PC or module error. The remaining
+  B1 gate is a module output velocity/position sweep with recordings.

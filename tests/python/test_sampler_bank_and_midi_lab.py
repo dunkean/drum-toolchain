@@ -10,6 +10,7 @@ import mido
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend, _declared_output
+from ddrum4_bank.sound_config import materialize_sound_config, snare_velocity_layers
 from ddrum4_bank.backup import inspect_settings_backup, validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.plan import compare_plan, render_comparison
@@ -221,6 +222,36 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             backend = Ddrum4EditBackend(Path("ddrum4edit.exe"))
             with self.assertRaisesRegex(RuntimeError, "configuration declares output"):
                 backend.build(config, root / "other.mid")
+
+    def test_snare_config_materializes_velocity_crossfade_without_source_paths(self) -> None:
+        self.assertEqual(len(snare_velocity_layers(7)), 7)
+        with self.assertRaisesRegex(ValueError, "1..7"):
+            snare_velocity_layers(8)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            template = root / "template.cfg"
+            template.write_text(
+                "-Begin-Layers-\nold\n-End-Layers-\n"
+                "-Begin-Variations-\nVL1 old\n-End-Variations-\n"
+                "-Begin-Sample-Files-\nold\n-End-Sample-Files-\n"
+                "-Begin-Sample-Name-\nold\n-End-Sample-Name-\n"
+                "-Begin-Sound-File-Out-\nold.mid\n-End-Sound-File-Out-\n",
+                encoding="utf-8",
+            )
+            config = materialize_sound_config(
+                template,
+                root / "SNRE_999.cfg",
+                sound_name="SNRE_999",
+                output_sound=root / "SNRE_999.mid",
+                sample_files=("SNRE_999_s01.wav", "SNRE_999_s02.wav"),
+                layer_rows=snare_velocity_layers(2),
+            )
+            text = config.read_text(encoding="utf-8")
+            self.assertIn("L01 00 00 02", text)
+            self.assertIn("L02 01 00 02", text)
+            self.assertIn("VL1 01 01 00", text)
+            self.assertIn("S02 SNRE_999_s02.wav", text)
+            self.assertNotIn("sample-library", text)
 
     def test_settings_backup_validator_requires_real_midi_content(self) -> None:
         import mido

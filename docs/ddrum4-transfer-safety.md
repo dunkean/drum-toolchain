@@ -28,8 +28,9 @@ python -m ddrum4_bank.cli verify-b0-build `
 This only invokes `ddrum4edit -p`, checks the fixture WAV hash and records the
 actual encoded block count. It has no MIDI output path.
 
-Before a human performs the one required ddrum4UI import/build/send operation,
-record all of the following in the bench log:
+The initial manual DDrum4UI operation has now been replaced by a verified
+`ddrum4edit` command-line round-trip. Before any new hardware build/send
+operation, record all of the following in the bench log:
 
 1. DDrum4 firmware/version shown by the module.
 2. Observed free-memory value and the screen/menu that reported it.
@@ -45,10 +46,10 @@ displayed block count exactly (for example, `1.28` means 1,280 blocks). Do not
 use `SHIFT` + `MARK`, `DELETE`, or any `F.*` factory-initialization option.
 
 Do not send a generated file merely because it has a `.mid`, `.midi`, or
-`.syx` suffix. The current backend intentionally cannot build transfer files
-until one manual, reproducible UI build identifies the correct format and
-command semantics. Stop the queue on the first build, send, playback, or
-recording failure.
+`.syx` suffix. `Ddrum4EditBackend.build()` accepts only an auditable `.cfg`
+whose declared output path exactly matches the requested target, refuses an
+existing output, and re-inspects the encoded block count after building. Stop
+the queue on the first build, send, playback, or recording failure.
 
 ## Timed MIDI-file replay
 
@@ -77,9 +78,12 @@ transport adaptation only; it never alters the encoded sound bytes.
 
 For the B0 bench, the DDrum4 was reconnected through `UMC404HD MIDI Out 9` /
 `UMC404HD MIDI In 29`. The module displayed the expected B0 block countdown
-when sent with 255-byte fragments and no injected System Reset. This validates
-the receive path; audible B0 playback still requires temporarily assigning
-`KICK_999` to a kit channel and recording it through UMC inputs 1–2.
+when sent with 255-byte fragments and no injected System Reset. `KICK_999`
+was then heard through `SHIFT + LISTEN`. A real SD3-derived snare was built
+and loaded as `SNRE_999` (one source layer, 137 blocks), proving the complete
+capture-to-module path. A seven-layer velocity-crossfade candidate was then
+built as `SNRE_998` (94 blocks); its runtime velocity sweep remains the B1
+listening test.
 
 On Windows, DDrum4UI uses the WinMM `midiOutLongMsg` API. All-SysEx sound
 transfers use the same native API rather than the general Python MIDI backend.

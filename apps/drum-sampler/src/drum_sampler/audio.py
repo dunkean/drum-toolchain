@@ -24,6 +24,8 @@ class QualityProfile:
     fade_out_ms: float = 8.0
     highpass_hz: float | None = None
     lowpass_hz: float | None = None
+    max_duration_seconds: float | None = None
+    force_mono: bool = False
 
 
 def load_quality_profile(path: Path, name: str) -> QualityProfile:
@@ -35,7 +37,7 @@ def load_quality_profile(path: Path, name: str) -> QualityProfile:
     values = profiles.get(name)
     if not isinstance(values, dict):
         raise ValueError(f"quality profile {name!r} not found in {path}")
-    keys = {"target_sample_rate", "trim_threshold_db", "normalize_dbfs", "fade_in_ms", "fade_out_ms", "highpass_hz", "lowpass_hz"}
+    keys = {"target_sample_rate", "trim_threshold_db", "normalize_dbfs", "fade_in_ms", "fade_out_ms", "highpass_hz", "lowpass_hz", "max_duration_seconds", "force_mono"}
     unknown = set(values) - keys
     if unknown:
         raise ValueError(f"unknown quality profile fields: {sorted(unknown)}")
@@ -144,6 +146,17 @@ def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str
     peak_value = float(np.max(np.abs(samples))) if samples.size else 0.0
     if peak_value:
         samples *= (10 ** (profile.normalize_dbfs / 20.0)) / peak_value
+    if profile.target_sample_rate != rate:
+        divisor = gcd(rate, profile.target_sample_rate)
+        samples = resample_poly(samples, profile.target_sample_rate // divisor, rate // divisor, axis=0)
+        rate = profile.target_sample_rate
+    if profile.force_mono and samples.shape[1] > 1:
+        samples = np.mean(samples, axis=1, keepdims=True)
+    if profile.max_duration_seconds is not None:
+        if profile.max_duration_seconds <= 0:
+            raise ValueError("max_duration_seconds must be positive when supplied")
+        maximum_frames = max(1, round(profile.max_duration_seconds * rate))
+        samples = samples[:maximum_frames]
     for duration_ms, at_start in ((profile.fade_in_ms, True), (profile.fade_out_ms, False)):
         count = min(len(samples), round(rate * duration_ms / 1000.0))
         if count:
@@ -152,10 +165,6 @@ def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str
                 samples[:count] *= ramp[:, None]
             else:
                 samples[-count:] *= ramp[::-1, None]
-    if profile.target_sample_rate != rate:
-        divisor = gcd(rate, profile.target_sample_rate)
-        samples = resample_poly(samples, profile.target_sample_rate // divisor, rate // divisor, axis=0)
-        rate = profile.target_sample_rate
     output.parent.mkdir(parents=True, exist_ok=True)
     wavfile.write(output, rate, _float_to_pcm(samples))
     return {"sample_rate": rate, "frames": len(samples), "channels": samples.shape[1],

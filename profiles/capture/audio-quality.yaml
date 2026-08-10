@@ -24,3 +24,15 @@ profiles:
     fade_out_ms: 5.0
     highpass_hz: 35
     lowpass_hz: 15000
+  ddrum4_snare:
+    # Mono, short tails preserve the seven head layers inside the measured
+    # 1,270-block free-memory budget while retaining the snare transient.
+    target_sample_rate: 44100
+    trim_threshold_db: -48
+    normalize_dbfs: -1.5
+    fade_in_ms: 2.0
+    fade_out_ms: 10.0
+    highpass_hz: 35
+    lowpass_hz: 16500
+    max_duration_seconds: 1.35
+    force_mono: true
