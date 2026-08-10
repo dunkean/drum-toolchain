@@ -66,3 +66,8 @@ used for the flagship bank yet. Applying the flagship profile yielded only
 **planned, not executed**. First select or configure SD3 articulations whose
 source has a musical decay beyond four seconds; then repeat the one-hit proof
 and only then capture the complete grid.
+
+Holding note 49 for 3 seconds before its Note Off only increased the prepared
+duration to 2.83 seconds. The current result is therefore not caused primarily
+by the sampler's normal 100 ms MIDI gate. Keep the short gate for the eventual
+batch unless the newly selected SD3 articulation proves otherwise.
