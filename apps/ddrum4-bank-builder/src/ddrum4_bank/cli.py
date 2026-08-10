@@ -16,6 +16,7 @@ from .b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from .compiler import compile_nested_file, write_compilation
 from .actual_bank import report_actual_bank
 from .hardware import transfer_one_sound
+from .render_compare import compare_renders
 
 
 def _backend(value: str | None) -> Ddrum4EditBackend:
@@ -78,6 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
     transfer.add_argument("--sysex-pause", type=float, default=0.4)
     transfer.add_argument("--sysex-chunk-bytes", type=int, help="Windows diagnostic fragmentation, e.g. 255 for Midiface")
     transfer.add_argument("--confirm-hardware-write", action="store_true", help="required after verifying backup, Sound ID and live memory")
+    render = subparsers.add_parser("compare-render", help="write objective source-versus-module WAV measurements; never records or transfers")
+    render.add_argument("--source", required=True, type=Path)
+    render.add_argument("--module", required=True, type=Path)
+    render.add_argument("--output", required=True, type=Path)
     return parser
 
 
@@ -131,6 +136,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         receipt.write(args.receipt)
         print(f"sent {receipt.messages_sent} messages to {receipt.midi_output}; wrote {args.receipt}")
+        return 0
+    if args.command == "compare-render":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite render comparison: {args.output}")
+        comparison = compare_renders(args.source, args.module)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(comparison.to_document(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"wrote {args.output}; onset delta {comparison.onset_delta_ms:.2f} ms")
         return 0
     if args.command == "inspect-settings-backup":
         print(json.dumps(inspect_settings_backup(args.backup).to_document(), indent=2, sort_keys=True))

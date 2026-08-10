@@ -22,6 +22,7 @@ from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 from ddrum4_bank.transport import resolve_port, send_midi_file
 from ddrum4_bank.b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from ddrum4_bank.hardware import transfer_one_sound
+from ddrum4_bank.render_compare import compare_renders
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
 from drum_sampler.library import SampleTake, merge_libraries
@@ -29,6 +30,20 @@ from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
+    def test_render_comparison_measures_onset_level_tail_and_tone(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = np.concatenate((np.zeros(10), np.linspace(1, 0, 90))).astype(np.float32)
+            module = np.concatenate((np.zeros(20), np.linspace(0.5, 0, 90))).astype(np.float32)
+            wavfile.write(root / "source.wav", 44100, source)
+            wavfile.write(root / "module.wav", 44100, module)
+            comparison = compare_renders(root / "source.wav", root / "module.wav")
+            self.assertAlmostEqual(comparison.onset_delta_ms, 10 / 44.1, places=3)
+            self.assertLess(comparison.module_minus_source_peak_db, -5.9)
+            self.assertLess(comparison.module_pre_onset_rms_dbfs, -100)
+
     def test_hardware_transfer_requires_confirmation_and_receipt_follows_success(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             sound = Path(temporary) / "fixture.mid"

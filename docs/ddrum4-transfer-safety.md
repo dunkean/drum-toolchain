@@ -108,6 +108,23 @@ python -m ddrum4_bank.cli transfer-sound D:\Studio\ddrum4-b3\rim-999\RIM_999.mid
   --confirm-hardware-write
 ```
 
+## B1 source-versus-module comparison
+
+After recording a module velocity or positional-sweep WAV through the UMC,
+compare it with the corresponding original SD3 capture without rewriting
+either file. The report measures onset offset, peak-level delta, decay/tail,
+spectral-centroid delta and pre-onset module noise. It records facts, not a
+musical pass/fail verdict; audition remains mandatory for layer gaps and
+musical timbre.
+
+```powershell
+$env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
+python -m ddrum4_bank.cli compare-render `
+  --source D:\Studio\sample-library\source.wav `
+  --module D:\Studio\ddrum4-b1\module-render.wav `
+  --output D:\Studio\ddrum4-b1\render-comparison.json
+```
+
 ## Capturing a native DDrum4UI transfer on Windows
 
 The command below records a manually initiated DDrum4UI SysEx send without
