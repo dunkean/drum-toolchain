@@ -100,6 +100,23 @@ the Arduino transmits, but it cannot by itself change the DDrum4's `L.ON` /
 `L.OF` setting; that remains a manual module setting until a safe DDrum4
 configuration command has been researched and verified.
 
+### First diagnostic for standalone silence
+
+The following observation was reproduced on 2026-08-10 after a physical cable
+contact issue: when the PC sees `C12/note 17` and poly-aftertouch on the UMC
+input, the DDrum4 pad, its MIDI OUT, shield MIDI IN and hardware THRU are all
+working. In `L.OF`, silence at the DDrum4 then narrows the fault to the return
+leg, not trigger threshold or the palette sound:
+
+1. Ensure the RUN/PGM switch is at `RUN`.
+2. Check the DIN cable from the socket labelled **MIDI OUT** on the shield to
+   **MIDI IN** on the DDrum4. Do not use the shield's THRU socket for this
+   return leg.
+3. Re-seat or replace that cable before changing any DDrum4 MIDI map or
+   Arduino code.
+
+This diagnostic preserves the raw PC monitor and needs no MIDI reconfiguration.
+
 ## Future merger constraint
 
 When the external MIDI merger is added, it must combine DDrum4 OUT, DDTi DIN

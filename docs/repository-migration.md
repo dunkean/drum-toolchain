@@ -359,11 +359,13 @@ Expected result: `converter tests passed`.
 
 - The first complete Local-OFF POC is hardware-verified: a temporary DDrum
   mesh snare connected to CYMB2 emitted C12/note 17; the PC relay carried it
-  through the Arduino; the generated diagnostic mapping produced C12/note 18
+  through the Arduino; the initial diagnostic mapping produced C12/note 18
   at velocity 110; DDrum4 CYMB2 (`Note P 2`) played `CYMB_995` in headphones.
   The final trace also showed corresponding Note-Off translation. This is the
   proof that a physical DDrum4 pad can be centrally routed into a selected
-  nested DDrum4 branch.
+  nested DDrum4 branch. That mapping is now changed to preserve velocity for
+  the dynamic-layer audition; the original fixed-110 result remains POC
+  evidence, not a calibration target.
 - Temporary bench settings: CYMB2 trigger `nh1`, threshold 40, `CYMB_995` in
   Palette mode. These are explicitly not calibration or final sound-bank
   approvals. The compact CYMB_995 candidate is audibly unsuitable as a main

@@ -24,7 +24,7 @@ routes:
     input_note: 17
     target:
       output_note: 18
-      # CYMB_995's current compact layer programming is audible at 110 but
-      # silent around the observed temporary-pad values 54..63.  Fixing this
-      # diagnostic output window proves both nested note and velocity routing.
-      velocity: {input_min: 1, input_max: 127, output_min: 110, output_max: 110}
+      # Preserve the pad dynamics.  The DDrum4 sound itself selects its
+      # velocity layer from this returned value; per-pad curves belong in the
+      # production routing profile after the trigger is calibrated.
+      velocity: {input_min: 1, input_max: 127, output_min: 1, output_max: 127}
