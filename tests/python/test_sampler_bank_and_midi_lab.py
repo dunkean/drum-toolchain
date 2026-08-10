@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+from hashlib import sha256
 import unittest
 import subprocess
 import sys
@@ -405,7 +406,9 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             contract.write(input_path)
             result = subprocess.run([sys.executable, str(generator), str(input_path), "--output", str(output_path)], text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("{10, 38, 40, 1, 127, 1, 127}", output_path.read_text(encoding="utf-8"))
+            generated = output_path.read_text(encoding="utf-8")
+            self.assertIn("{10, 38, 40, 1, 127, 1, 127}", generated)
+            self.assertIn(sha256(input_path.read_bytes()).hexdigest(), generated)
 
     def test_trace_round_trip_and_unique_port_matching(self) -> None:
         trace = MidiTrace("edrumin", (TraceEvent(0, "note_on", 11, 42, 100),))
