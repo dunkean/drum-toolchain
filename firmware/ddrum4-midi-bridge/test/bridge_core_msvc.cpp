@@ -77,6 +77,15 @@ void test_out_of_order_echo_does_not_block_later_echo() {
   require(bridge.process(first, &first, 1) == 0, "out-of-order first echo was not suppressed");
 }
 
+void test_stale_echo_does_not_suppress_a_future_note_off() {
+  DdrumBridge bridge(config);
+  MidiEvent output{};
+  require(bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &output, 1, 1) == 1, "source note missing");
+  require(bridge.process({MidiEventType::NoteOff, 12, 17, 0}, &output, 1, 30) == 1,
+          "stale echo suppressed a real later note off");
+  require(output.type == MidiEventType::NoteOff, "later note off type differs");
+}
+
 }  // namespace
 
 int main() {
@@ -87,6 +96,7 @@ int main() {
     test_third_source_program_change_is_relayed();
     test_immediate_ddrum4_echo_is_suppressed();
     test_out_of_order_echo_does_not_block_later_echo();
+    test_stale_echo_does_not_suppress_a_future_note_off();
     std::cout << "firmware bridge core tests passed\n";
     return 0;
   } catch (const std::exception& error) {

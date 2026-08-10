@@ -2,7 +2,20 @@
 
 DdrumBridge::DdrumBridge(const BridgeConfig& config) : config_(config) {}
 
-bool DdrumBridge::consumeExpectedEcho(const MidiEvent& input) {
+void DdrumBridge::discardStaleEchoes(uint32_t nowMs) {
+  if (!nowMs) return;
+  constexpr uint32_t kEchoWindowMs = 20;
+  size_t retained = 0;
+  for (size_t i = 0; i < expectedEchoCount_; ++i) {
+    if ((uint32_t)(nowMs - expectedEchoTimes_[i]) > kEchoWindowMs) continue;
+    expectedEchoes_[retained] = expectedEchoes_[i];
+    expectedEchoTimes_[retained++] = expectedEchoTimes_[i];
+  }
+  expectedEchoCount_ = retained;
+}
+
+bool DdrumBridge::consumeExpectedEcho(const MidiEvent& input, uint32_t nowMs) {
+  discardStaleEchoes(nowMs);
   if (!expectedEchoCount_) return false;
   for (size_t i = 0; i < expectedEchoCount_; ++i) {
     const MidiEvent& expected = expectedEchoes_[i];
@@ -12,6 +25,7 @@ bool DdrumBridge::consumeExpectedEcho(const MidiEvent& input) {
     }
     for (size_t remaining = i + 1; remaining < expectedEchoCount_; ++remaining) {
       expectedEchoes_[remaining - 1] = expectedEchoes_[remaining];
+      expectedEchoTimes_[remaining - 1] = expectedEchoTimes_[remaining];
     }
     --expectedEchoCount_;
     ++suppressedEchoMessages_;
@@ -20,12 +34,16 @@ bool DdrumBridge::consumeExpectedEcho(const MidiEvent& input) {
   return false;
 }
 
-void DdrumBridge::rememberExpectedEcho(const MidiEvent& output) {
+void DdrumBridge::rememberExpectedEcho(const MidiEvent& output, uint32_t nowMs) {
   if (expectedEchoCount_ == kEchoGuardCapacity) {
-    for (size_t i = 1; i < expectedEchoCount_; ++i) expectedEchoes_[i - 1] = expectedEchoes_[i];
+    for (size_t i = 1; i < expectedEchoCount_; ++i) {
+      expectedEchoes_[i - 1] = expectedEchoes_[i];
+      expectedEchoTimes_[i - 1] = expectedEchoTimes_[i];
+    }
     --expectedEchoCount_;
   }
   expectedEchoes_[expectedEchoCount_++] = output;
+  expectedEchoTimes_[expectedEchoCount_ - 1] = nowMs;
 }
 
 const NoteRoute* DdrumBridge::findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const {
@@ -71,9 +89,9 @@ uint8_t DdrumBridge::mapHihatCc(uint8_t value) const {
   return h.outputOpen >= h.outputClosed ? h.outputClosed + mapped : h.outputClosed - mapped;
 }
 
-size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t capacity) {
+size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t capacity, uint32_t nowMs) {
   if (!capacity) return 0;
-  if (consumeExpectedEcho(input)) return 0;
+  if (consumeExpectedEcho(input, nowMs)) return 0;
 
   // The direct CC4 engine is deliberately handled before note routing. CC4 is
   // recognised by ddrum4; quantisation is an explicit future fallback only.
@@ -88,7 +106,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     hasLastHihatCc_ = true;
     lastHihatCc_ = mapped;
     *output = {MidiEventType::ControlChange, config_.outputChannel, h.outputCc, mapped};
-    rememberExpectedEcho(*output);
+    rememberExpectedEcho(*output, nowMs);
     return 1;
   }
 
@@ -96,7 +114,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     for (size_t i = 0; i < config_.relayProgramChannelCount; ++i) {
       if (input.channel == config_.relayProgramChannels[i]) {
         *output = {MidiEventType::ProgramChange, config_.outputChannel, input.data1, 0};
-        rememberExpectedEcho(*output);
+        rememberExpectedEcho(*output, nowMs);
         return 1;
       }
     }
@@ -119,6 +137,6 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   uint8_t value = input.data2;
   if (input.type == MidiEventType::NoteOn && input.data2 != 0) value = mapVelocity(*route, input.data2);
   *output = {input.type, config_.outputChannel, route->outputNote, value};
-  rememberExpectedEcho(*output);
+  rememberExpectedEcho(*output, nowMs);
   return 1;
 }

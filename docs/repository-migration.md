@@ -355,6 +355,20 @@ Expected result: `converter tests passed`.
   in `docs/ddrum4-palettes-and-pc-scenes.md`. Its concrete emitted MIDI event
   is still a learn gate, not an assumption.
 
+## Nested MIDI-to-audio POC passed — 2026-08-10
+
+- The first complete Local-OFF POC is hardware-verified: a temporary DDrum
+  mesh snare connected to CYMB2 emitted C12/note 17; the PC relay carried it
+  through the Arduino; the generated diagnostic mapping produced C12/note 18
+  at velocity 110; DDrum4 CYMB2 (`Note P 2`) played `CYMB_995` in headphones.
+  The final trace also showed corresponding Note-Off translation. This is the
+  proof that a physical DDrum4 pad can be centrally routed into a selected
+  nested DDrum4 branch.
+- Temporary bench settings: CYMB2 trigger `nh1`, threshold 40, `CYMB_995` in
+  Palette mode. These are explicitly not calibration or final sound-bank
+  approvals. The compact CYMB_995 candidate is audibly unsuitable as a main
+  crash (late/soft attack and too-short tail) and will be replaced.
+
 ## DrumGizmo actual export — 2026-08-10
 
 - The dense original SD3 kick/tom capture library was exported as a

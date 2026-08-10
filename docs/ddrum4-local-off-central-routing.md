@@ -111,3 +111,17 @@ Generic note routes were already source-channel based. This makes a declared
   seconds). The remaining traffic was pressure-rich source data, not an
   escalating loop. No DDrum4 kit sound assignment was assumed, so this is a
   MIDI transport proof rather than an audio audition.
+- **End-to-end nested branch POC passed:** a temporary mesh snare pad on the
+  CYMB2 input was configured `C12`, `Local OFF`, `Note # 17`, `Note P 2` and
+  threshold 40. Its observed C12/note-17 events went through the PC relay to
+  the Arduino; the Arduino returned C12/note-18 at fixed velocity 110; the
+  DDrum4 played the CYMB2-assigned `CYMB_995` through its headphones. The
+  final live audit recorded both Note-On and Note-Off translations, including
+  source velocities 44 and 127. This proves the complete pad → Arduino
+  branch-selection → DDrum4 audio path.
+- `CYMB_995` is deliberately a compact transport candidate, not an approved
+  crash. Its late attack/short tail and silence below its current low velocity
+  range were heard during this proof. The diagnostic therefore projects to
+  velocity 110. Replacing it with a long, correctly trimmed crash and a
+  position-distinct nested sound is a required sound-bank task, not a routing
+  failure.

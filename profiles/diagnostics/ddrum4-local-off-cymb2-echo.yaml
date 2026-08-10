@@ -1,8 +1,10 @@
 # Temporary hardware proof only.  Derived from the observed UMC trace on
 # 2026-08-10: a snare pad on the DDrum4 CYMB2 trigger input emits C12/note 17.
-# It deliberately returns the identical note, making no musical mapping claim.
+# It deliberately selects the second CYMB2 Note-P branch.  The source pad
+# emits note 17; the bridge returns note 18.  CYMB2 must be configured with
+# Note # 17 and Note P 2 before this diagnostic is flashed.
 bank:
-  id: ddrum4-local-off-cymb2-echo
+  id: ddrum4-local-off-cymb2-nested-branch
 midi:
   ddrum_output_channel: 12
   sources:
@@ -17,9 +19,12 @@ hihat:
   output_closed: 0
   output_open: 127
 routes:
-  - id: diagnostic.cymb2.identity
+  - id: diagnostic.cymb2.second_note_p_branch
     source: ddrum4
     input_note: 17
     target:
-      output_note: 17
-      velocity: {input_min: 1, input_max: 127, output_min: 1, output_max: 127}
+      output_note: 18
+      # CYMB_995's current compact layer programming is audible at 110 but
+      # silent around the observed temporary-pad values 54..63.  Fixing this
+      # diagnostic output window proves both nested note and velocity routing.
+      velocity: {input_min: 1, input_max: 127, output_min: 110, output_max: 110}

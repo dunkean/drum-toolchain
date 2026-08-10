@@ -45,7 +45,7 @@ void MidiDinAdapter::dispatch(uint8_t status, uint8_t data1, uint8_t data2) {
     default: return;
   }
   MidiEvent output;
-  if (bridge_.process(input, &output, 1)) emit(output);
+  if (bridge_.process(input, &output, 1, millis())) emit(output);
 }
 
 void MidiDinAdapter::emit(const MidiEvent& event) {

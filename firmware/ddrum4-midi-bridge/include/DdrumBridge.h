@@ -61,7 +61,7 @@ struct BridgeConfig {
 class DdrumBridge {
  public:
   explicit DdrumBridge(const BridgeConfig& config);
-  size_t process(const MidiEvent& input, MidiEvent* output, size_t capacity);
+  size_t process(const MidiEvent& input, MidiEvent* output, size_t capacity, uint32_t nowMs = 0);
   uint32_t ignoredMessages() const { return ignoredMessages_; }
   uint32_t duplicateCcMessages() const { return duplicateCcMessages_; }
   uint32_t suppressedEchoMessages() const { return suppressedEchoMessages_; }
@@ -78,12 +78,14 @@ class DdrumBridge {
   // Local-OFF routing safe without treating arbitrary input as a blind Thru.
   static constexpr size_t kEchoGuardCapacity = 64;
   MidiEvent expectedEchoes_[kEchoGuardCapacity]{};
+  uint32_t expectedEchoTimes_[kEchoGuardCapacity]{};
   size_t expectedEchoCount_ = 0;
   uint32_t suppressedEchoMessages_ = 0;
 
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   uint8_t mapVelocity(const NoteRoute& route, uint8_t velocity) const;
   uint8_t mapHihatCc(uint8_t value) const;
-  bool consumeExpectedEcho(const MidiEvent& input);
-  void rememberExpectedEcho(const MidiEvent& output);
+  bool consumeExpectedEcho(const MidiEvent& input, uint32_t nowMs);
+  void rememberExpectedEcho(const MidiEvent& output, uint32_t nowMs);
+  void discardStaleEchoes(uint32_t nowMs);
 };

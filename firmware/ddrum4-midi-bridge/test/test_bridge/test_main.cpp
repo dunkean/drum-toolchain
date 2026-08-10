@@ -84,6 +84,14 @@ void test_out_of_order_local_off_echo_is_still_suppressed() {
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process(first, &first, 1));
 }
 
+void test_stale_local_off_echo_does_not_consume_later_note_off() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &output, 1, 1));
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOff, 12, 17, 0}, &output, 1, 30));
+  TEST_ASSERT_EQUAL(MidiEventType::NoteOff, output.type);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zeitgeist_bow_maps_to_hihat_position_2);
@@ -93,5 +101,6 @@ int main(int, char**) {
   RUN_TEST(test_declared_third_source_can_change_kit);
   RUN_TEST(test_local_off_ddrum4_midi_echo_is_not_reprocessed);
   RUN_TEST(test_out_of_order_local_off_echo_is_still_suppressed);
+  RUN_TEST(test_stale_local_off_echo_does_not_consume_later_note_off);
   return UNITY_END();
 }
