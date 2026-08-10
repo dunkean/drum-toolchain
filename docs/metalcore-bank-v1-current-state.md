@@ -49,9 +49,14 @@ gate passed: the owner confirmed the sound is good.
 
 `CYMB_991` is the second long mono crash candidate. It uses the independent
 `crash_main_2` source at velocity 88, the same 6.5-second preparation and one
-active layer. Its 327-packet UMC transfer completed successfully. Its module
-allocation and audition remain pending; based on `CYMB_993`, reserve about 950
-real blocks rather than trusting the 327 encoded packets.
+active layer. The PC sender completed its 327-packet UMC transmission, but the
+module did **not** accept/store it: `MEM.LEFT` remained `5.93` MB. Direct audio
+probes sent from that UMC MIDI output likewise produced only the input noise
+floor. The likely cause is that the UMC MIDI OUT no longer reaches DDrum4 MIDI
+IN (which is currently needed by the Arduino loop). Do not retransmit this
+sound until the single physical DDrum4 MIDI-IN source is confirmed. Once the
+route is restored, reserve about 950 real blocks rather than trusting the 327
+encoded packets.
 
 ## Important audio finding
 
