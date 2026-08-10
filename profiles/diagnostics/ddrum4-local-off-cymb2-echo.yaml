@@ -28,3 +28,12 @@ routes:
       # velocity layer from this returned value; per-pad curves belong in the
       # production routing profile after the trigger is calibrated.
       velocity: {input_min: 1, input_max: 127, output_min: 1, output_max: 127}
+  # The temporary mono cymbal pad on the same CYMB2 input emits the second
+  # physical Note-P value itself.  Keep it as an explicit direct route rather
+  # than applying any trigger-side correction in firmware.
+  - id: diagnostic.cymb2.physical_second_note_p
+    source: ddrum4
+    input_note: 18
+    target:
+      output_note: 18
+      velocity: {input_min: 1, input_max: 127, output_min: 1, output_max: 127}
