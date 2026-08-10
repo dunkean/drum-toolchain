@@ -287,3 +287,8 @@ Expected result: `converter tests passed`.
   blocks. Do not transfer ride, percussion, or any further sound until the
   module's live free-memory display is read and the listening pass approves
   the quality trade-offs.
+- The module was then read with `SHIFT+MEM.LEFT`: **45 blocks free**. This is
+  the authoritative post-transfer value; it differs by seven blocks from the
+  offline 52-block remainder, consistent with module-side allocation. The
+  first core is therefore memory-full for practical purposes. Future sounds
+  require replacing an existing Sound ID or a smaller rebuilt candidate.
