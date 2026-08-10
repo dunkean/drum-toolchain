@@ -1,21 +1,23 @@
 # DDrum4 Backend Notes
 
-`ddrum4edit` 1.3.0 is the current backend. Its read-only `-p` inspection has
-been demonstrated locally on a copied reference sound and reports the encoded
-block count (for example, 38 blocks for one reference snare). This is useful
-for measuring final user-created sounds, not a licence to reuse factory audio.
+`ddrum4edit` 1.3.0 is the current backend. Both directions were demonstrated
+locally with the disposable `KICK_999` click fixture:
 
-The configuration-to-sound command line has not yet been demonstrated with a
-reproducible, non-factory fixture. A binary-string inspection reveals
-configuration and input/output options, but the obvious combinations did not
-generate an exported configuration on this installation. The bank builder
-therefore fails closed for `build()` rather than guessing an encoded format or
-creating a possibly malformed transfer file.
+1. `ddrum4edit -e -i KICK_999.mid -n ignored.cfg` exports
+   `KICK_999.cfg` and `KICK_999_s1.smp` in the working directory. The output
+   name is derived from the input name; the `-n` argument does not control it.
+2. Copy/modify that configuration and its sample files, then run
+   `ddrum4edit -c ROUNDTRIP_999.cfg`. The destination comes from the
+   `-Begin-Sound-File-Out-` section of the configuration.
+3. The round-trip generated a non-empty 11-block sound that `-p` parses
+   successfully. It is not byte-identical to the input because file/path
+   metadata is encoded, which is expected.
 
-To remove this block, perform one manual reference export/build using
-ddrum4UI/ddrum4edit on a disposable synthetic sound after the settings backup
-is verified. Record the exact successful command line and files, then add it
-as a regression fixture before enabling bulk builds.
+`Ddrum4EditBackend.build()` now follows exactly that verified command. It
+requires the requested output path to equal the configuration's declared path,
+refuses to overwrite an existing file, and verifies the newly generated file
+with `-p` before returning. This is useful for creating original user samples;
+it is not a licence to reuse factory audio.
 
 ## Nested compiler boundary
 

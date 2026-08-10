@@ -9,7 +9,7 @@ import mido
 
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
-from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend
+from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend, _declared_output
 from ddrum4_bank.backup import inspect_settings_backup, validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.plan import compare_plan, render_comparison
@@ -200,9 +200,27 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)
 
-    def test_backend_refuses_unverified_sound_build_invocation(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "intentionally disabled"):
-            Ddrum4EditBackend(Path("ddrum4edit.exe")).build(Path("input.cfg"), Path("output.mid"))
+    def test_backend_reads_declared_build_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "fixture.cfg"
+            config.write_text(
+                "-Begin-Sound-File-Out-\nresult.mid\n-End-Sound-File-Out-\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(_declared_output(config), root / "result.mid")
+
+    def test_backend_rejects_mismatched_or_missing_build_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "fixture.cfg"
+            config.write_text(
+                "-Begin-Sound-File-Out-\nactual.mid\n-End-Sound-File-Out-\n",
+                encoding="utf-8",
+            )
+            backend = Ddrum4EditBackend(Path("ddrum4edit.exe"))
+            with self.assertRaisesRegex(RuntimeError, "configuration declares output"):
+                backend.build(config, root / "other.mid")
 
     def test_settings_backup_validator_requires_real_midi_content(self) -> None:
         import mido
