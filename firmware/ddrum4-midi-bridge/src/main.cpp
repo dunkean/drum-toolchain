@@ -42,7 +42,7 @@ const BridgeConfig BRIDGE_CONFIG = {
   HIHAT_CC4,
   NOTE_ROUTES,
   NOTE_ROUTE_COUNT,
-  true, // Program Change from either source -> selected ddrum4 kit
+  false, // POC: never select a DDrum4 kit from incoming MIDI
 };
 DdrumBridge bridge(BRIDGE_CONFIG);
 // CC119 on channel 16 selects nested / PC-clean / bypass without a cable swap.
