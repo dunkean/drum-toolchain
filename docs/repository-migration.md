@@ -298,6 +298,10 @@ Expected result: `converter tests passed`.
   blocks. This reclaims approximately 107 blocks while preserving the richer
   seven-layer `SNRE_998` main snare. The next live memory reading must confirm
   the reclaimed amount before adding the ride.
+- A compact three-file ride candidate is built but intentionally not yet
+  transferred: bow 20 blocks, bell 20 blocks, edge 89 blocks. The revised
+  offline complete-kit report is 1,240 / 1,270 blocks (30 nominal free); use
+  the post-replacement `MEM.LEFT` display as the final go/no-go gate.
 
 ## DrumGizmo actual export — 2026-08-10
 
