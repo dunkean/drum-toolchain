@@ -292,3 +292,8 @@ Expected result: `converter tests passed`.
   offline 52-block remainder, consistent with module-side allocation. The
   first core is therefore memory-full for practical purposes. Future sounds
   require replacing an existing Sound ID or a smaller rebuilt candidate.
+- `SNRE_999`, the one-layer transfer proof, was subsequently replaced with
+  `RIM_999`: two rimshot dynamics plus cross-stick source, encoded at 30
+  blocks. This reclaims approximately 107 blocks while preserving the richer
+  seven-layer `SNRE_998` main snare. The next live memory reading must confirm
+  the reclaimed amount before adding the ride.
