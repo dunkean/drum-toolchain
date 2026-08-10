@@ -47,6 +47,8 @@ profiles:
     max_duration_seconds: 1.0
     force_mono: true
   ddrum4_cymbal:
+    # Compact transport candidate. Do not use it for either flagship crash:
+    # the 1.75-second limit made CYMB_995 audibly unnatural on the module.
     target_sample_rate: 44100
     trim_threshold_db: -52
     normalize_dbfs: -2.0
@@ -55,4 +57,17 @@ profiles:
     highpass_hz: 30
     lowpass_hz: 15500
     max_duration_seconds: 1.75
+    force_mono: true
+  ddrum4_cymbal_flagship:
+    # Capture for ten seconds, then preserve enough mono material for a real
+    # four-second decay on the module. Measure encoded blocks after building;
+    # do not estimate them from this policy.
+    target_sample_rate: 44100
+    trim_threshold_db: -66
+    normalize_dbfs: -2.0
+    fade_in_ms: 1.0
+    fade_out_ms: 20.0
+    highpass_hz: 30
+    lowpass_hz: 15500
+    max_duration_seconds: 4.5
     force_mono: true

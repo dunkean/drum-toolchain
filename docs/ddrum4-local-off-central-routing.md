@@ -47,8 +47,10 @@ Suggested channel reservation, pending a trace from each device:
 The DDrum4 uses one MIDI channel for both transmission and reception, so its
 source and the Arduino's return channel are deliberately both 12. In `Local
 OFF`, locally generated pad hits are transmitted and incoming notes play the
-module; normal note data is not echoed back again. The numbers are
-reservations, not verified settings. The production profile is
+module. The measured module also re-emits received Note events, so the
+firmware's immediate echo guard is required and PC monitoring must follow the
+mode contract in `ddrum4-midi-loop-modes.md`. The numbers are reservations,
+not verified settings. The production profile is
 only generated after recording a MIDI trace of every source; the Arduino must
 not be flashed with guessed notes.
 

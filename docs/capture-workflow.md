@@ -30,3 +30,39 @@ names, and records the source/licensing declaration in its neutral library.
 It also enforces the session's explicit `cooldown_ms` between newly captured
 takes, so dense VST or module sessions do not depend on an undocumented
 one-off delay. Already-complete takes remain skipped and do not add a delay.
+
+## Current flagship cymbal sequence
+
+The previous cymbal session is retained as evidence only: it recorded a
+four-second source and its compact DDrum4 profile subsequently limited each
+candidate to at most 1.75 seconds. `CYMB_995` was therefore useful for MIDI
+transport proof but failed the listening test.
+
+Use the two versioned sessions under `profiles/capture/` in this order:
+
+1. `sd3-djentle-beast-long-tail-proof.json` records one crash hit at velocity
+   110 for ten seconds. Confirm the physical SD3 OUT 1/2 -> UMC IN 3/4 patch,
+   waveform onset, absence of clipping, and an audible decay past four
+   seconds before continuing.
+2. `sd3-djentle-beast-long-tail-cymbals.json` captures the two primary
+   crashes at five mandatory velocities (24, 56, 88, 110, 127), three round
+   robins each. It then captures the ride and secondary cymbals at reduced
+   density. Its raw stereo material is also the DrumGizmo source.
+3. Build each chosen DDrum4 crash with `ddrum4_cymbal_flagship`, never with
+   the compact cymbal profile. Measure its real encoded block count, transfer
+   it to an unused sound ID, and record a module render before accepting it.
+
+The saved device indices are currently valid only for this PC: `out_WORLDE 2`
+and UMC input `2` (IN 3-4). Re-list devices immediately before capture if the
+interface topology changed.
+
+### First long-tail diagnostic — 2026-08-10
+
+The route itself passed: two new stereo raw WAVs were recorded for 10.2
+seconds without clipping. However, the current SD3 note selection must not be
+used for the flagship bank yet. Applying the flagship profile yielded only
+2.68 seconds for `crash_main_1` (note 49, velocity 110) and 1.93 seconds for
+`crash_main_2` (note 57, velocity 110). The complete session remains
+**planned, not executed**. First select or configure SD3 articulations whose
+source has a musical decay beyond four seconds; then repeat the one-hit proof
+and only then capture the complete grid.

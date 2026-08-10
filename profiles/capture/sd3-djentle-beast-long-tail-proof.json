@@ -1,0 +1,23 @@
+{
+  "audio_input": "2",
+  "channels": ["left", "right"],
+  "cooldown_ms": 600,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 100,
+  "requests": [
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_main_1",
+      "note": 49,
+      "repetitions": 1,
+      "velocities": [110]
+    }
+  ],
+  "sample_rate": 44100,
+  "schema_version": 1,
+  "tail_ms": 10000
+}

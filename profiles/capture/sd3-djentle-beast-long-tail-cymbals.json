@@ -1,0 +1,86 @@
+{
+  "audio_input": "2",
+  "channels": ["left", "right"],
+  "cooldown_ms": 600,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 100,
+  "requests": [
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_main_1",
+      "note": 49,
+      "repetitions": 3,
+      "velocities": [24, 56, 88, 110, 127]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_main_2",
+      "note": 57,
+      "repetitions": 3,
+      "velocities": [24, 56, 88, 110, 127]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "ride",
+      "note": 51,
+      "repetitions": 2,
+      "velocities": [32, 64, 96, 127]
+    },
+    {
+      "articulation": "bell",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "ride",
+      "note": 53,
+      "repetitions": 2,
+      "velocities": [32, 64, 96, 127]
+    },
+    {
+      "articulation": "edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "ride",
+      "note": 59,
+      "repetitions": 2,
+      "velocities": [48, 88, 127]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "china",
+      "note": 52,
+      "repetitions": 2,
+      "velocities": [48, 88, 127]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "splash",
+      "note": 55,
+      "repetitions": 2,
+      "velocities": [48, 88, 127]
+    },
+    {
+      "articulation": "note_054",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "aux_cymbal",
+      "note": 54,
+      "repetitions": 2,
+      "velocities": [48, 88, 127]
+    }
+  ],
+  "sample_rate": 44100,
+  "schema_version": 1,
+  "tail_ms": 10000
+}

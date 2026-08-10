@@ -9,6 +9,7 @@ from scipy.io import wavfile
 
 from drum_domain.project import KitProject
 from drum_sampler.audio import QualityProfile, load_quality_profile, process_wav
+from drum_sampler import CaptureSessionPlan
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,3 +66,17 @@ class LegacyCompatibilityTests(unittest.TestCase):
         profile = load_quality_profile(ROOT / "profiles/capture/audio-quality.yaml", "compact")
         self.assertEqual(profile.lowpass_hz, 15000)
         self.assertEqual(profile.target_sample_rate, 44100)
+
+    def test_flagship_cymbal_capture_contract_is_long_tail_and_dense(self) -> None:
+        profile = load_quality_profile(ROOT / "profiles/capture/audio-quality.yaml", "ddrum4_cymbal_flagship")
+        self.assertEqual(profile.max_duration_seconds, 4.5)
+        self.assertTrue(profile.force_mono)
+        proof = CaptureSessionPlan.read(ROOT / "profiles/capture/sd3-djentle-beast-long-tail-proof.json")
+        full = CaptureSessionPlan.read(ROOT / "profiles/capture/sd3-djentle-beast-long-tail-cymbals.json")
+        self.assertEqual(proof.tail_ms, 10000)
+        self.assertEqual(len(proof.takes()), 1)
+        self.assertEqual(full.tail_ms, 10000)
+        self.assertEqual(len(full.takes()), 70)
+        crash_one = next(request for request in full.requests if request.instrument == "crash_main_1")
+        self.assertEqual(crash_one.velocities, (24, 56, 88, 110, 127))
+        self.assertEqual(crash_one.repetitions, 3)
