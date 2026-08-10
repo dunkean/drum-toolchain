@@ -21,7 +21,7 @@ const uint8_t programChannels[] = {10, 11, 12};
 const BridgeConfig config = {
     10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
     {11, 4, 4, 0, 127, 0, 127, false},
-    routes, sizeof(routes) / sizeof(routes[0]), true,
+    routes, sizeof(routes) / sizeof(routes[0]), true, true,
 };
 
 void test_note_and_note_off() {
@@ -85,6 +85,17 @@ void test_exact_echo_is_consumed_without_a_time_window() {
   require(bridge.suppressedEchoMessages() == 1, "exact echo count differs");
 }
 
+void test_direct_transport_does_not_suppress_identical_source_hits() {
+  BridgeConfig direct = config;
+  direct.suppressReturnEcho = false;
+  DdrumBridge bridge(direct);
+  MidiEvent output{};
+  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
+  require(bridge.process(hit, &output, 1) == 1, "first direct source hit missing");
+  require(bridge.process(hit, &output, 1) == 1, "second direct source hit was suppressed");
+  require(bridge.suppressedEchoMessages() == 0, "direct transport cannot suppress echoes");
+}
+
 }  // namespace
 
 int main() {
@@ -96,6 +107,7 @@ int main() {
     test_immediate_ddrum4_echo_is_suppressed();
     test_out_of_order_echo_does_not_block_later_echo();
     test_exact_echo_is_consumed_without_a_time_window();
+    test_direct_transport_does_not_suppress_identical_source_hits();
     std::cout << "firmware bridge core tests passed\n";
     return 0;
   } catch (const std::exception& error) {

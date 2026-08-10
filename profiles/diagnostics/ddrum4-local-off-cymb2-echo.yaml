@@ -29,11 +29,12 @@ routes:
       # production routing profile after the trigger is calibrated.
       velocity: {input_min: 1, input_max: 127, output_min: 1, output_max: 127}
   # A genuine DDrum cymbal in CYb mode emits both Note-P positions, 17 and 18.
-  # Cross-map them so each raw source event and its returned module echo remain
-  # different notes.  This is the declared two-position nested layout.
+  # The current CYMB_995 audition has one confirmed playable input branch,
+  # note 18.  The P.OF hardware trace has no return echo, so both physical
+  # positions explicitly target that branch without transport filtering.
   - id: diagnostic.cymb2.first_note_p_branch
     source: ddrum4
     input_note: 18
     target:
-      output_note: 17
+      output_note: 18
       velocity: {input_min: 1, input_max: 127, output_min: 1, output_max: 127}

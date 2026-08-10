@@ -84,13 +84,13 @@ uint8_t DdrumBridge::mapHihatCc(uint8_t value) const {
 
 size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t capacity, uint32_t) {
   if (!capacity) return 0;
-  if (consumeExpectedEcho(input)) return 0;
+  if (config_.suppressReturnEcho && consumeExpectedEcho(input)) return 0;
 
   if (mode_ == BridgeMode::Silent) return 0;
 
   if (mode_ == BridgeMode::Bypass) {
     *output = input;
-    rememberExpectedEcho(*output);
+    if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
     return 1;
   }
 
@@ -107,7 +107,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     hasLastHihatCc_ = true;
     lastHihatCc_ = mapped;
     *output = {MidiEventType::ControlChange, config_.outputChannel, h.outputCc, mapped};
-    rememberExpectedEcho(*output);
+    if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
     return 1;
   }
 
@@ -115,7 +115,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     for (size_t i = 0; i < config_.relayProgramChannelCount; ++i) {
       if (input.channel == config_.relayProgramChannels[i]) {
         *output = {MidiEventType::ProgramChange, config_.outputChannel, input.data1, 0};
-        rememberExpectedEcho(*output);
+        if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
         return 1;
       }
     }
@@ -138,6 +138,6 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   uint8_t value = input.data2;
   if (input.type == MidiEventType::NoteOn && input.data2 != 0) value = mapVelocity(*route, input.data2);
   *output = {input.type, config_.outputChannel, route->outputNote, value};
-  rememberExpectedEcho(*output);
+  if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
   return 1;
 }

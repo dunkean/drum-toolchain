@@ -43,6 +43,7 @@ const BridgeConfig BRIDGE_CONFIG = {
   NOTE_ROUTES,
   NOTE_ROUTE_COUNT,
   false, // POC: never select a DDrum4 kit from incoming MIDI
+  false, // POC trace in P.OF showed no DDrum4 return echo
 };
 DdrumBridge bridge(BRIDGE_CONFIG);
 // CC119 on channel 16 selects nested / PC-clean / bypass without a cable swap.

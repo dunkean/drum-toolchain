@@ -66,6 +66,9 @@ struct BridgeConfig {
   const NoteRoute* noteRoutes;
   size_t noteRouteCount;
   bool relayProgramChange;
+  // Enable only after a trace proves that this particular module/cabling sends
+  // a returned copy of Arduino DIN OUT through its MIDI OUT.
+  bool suppressReturnEcho;
 };
 
 // Pure, allocation-free routing core. It has no Arduino dependency so tests can

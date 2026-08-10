@@ -14,7 +14,7 @@ static const uint8_t programChannels[] = {10, 11, 12};
 static const BridgeConfig config = {
     10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
     {11, 4, 4, 0, 127, 0, 127, false},
-    routes, sizeof(routes) / sizeof(routes[0]), true,
+    routes, sizeof(routes) / sizeof(routes[0]), true, true,
 };
 
 void test_zeitgeist_bow_maps_to_hihat_position_2() {
@@ -123,6 +123,17 @@ void test_exact_echo_is_consumed_without_a_time_window() {
   TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
 }
 
+void test_direct_transport_does_not_suppress_identical_source_hits() {
+  BridgeConfig direct = config;
+  direct.suppressReturnEcho = false;
+  DdrumBridge bridge(direct);
+  MidiEvent output;
+  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
+  TEST_ASSERT_EQUAL_UINT32(0, bridge.suppressedEchoMessages());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zeitgeist_bow_maps_to_hihat_position_2);
@@ -136,5 +147,6 @@ int main(int, char**) {
   RUN_TEST(test_mode_change_clears_pending_echoes);
   RUN_TEST(test_out_of_order_local_off_echo_is_still_suppressed);
   RUN_TEST(test_exact_echo_is_consumed_without_a_time_window);
+  RUN_TEST(test_direct_transport_does_not_suppress_identical_source_hits);
   return UNITY_END();
 }
