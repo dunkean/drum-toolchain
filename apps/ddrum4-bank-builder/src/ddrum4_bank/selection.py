@@ -76,8 +76,12 @@ def select_snare(library: SampleLibrary, instrument: str = "snare_main", head_la
     if not 1 <= head_layers <= 7 or not 1 <= rim_layers <= 2:
         raise ValueError("snare selection supports 1..7 head and 1..2 rim layers")
     head = select_velocity_layers(library, instrument, "head", head_layers)
-    rim = select_velocity_layers(library, instrument, "rim", rim_layers)
     warnings: list[str] = []
+    try:
+        rim = select_velocity_layers(library, instrument, "rim", rim_layers)
+    except ValueError:
+        rim = select_velocity_layers(library, instrument, "rimshot", rim_layers)
+        warnings.append("using captured rimshot layers as the DDrum4 rim candidate")
     try:
         accent = select_velocity_layers(library, instrument, "cross_stick", 1)[0]
     except ValueError:
