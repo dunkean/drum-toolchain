@@ -70,3 +70,30 @@ For this DDrum4 SE, the firmware version appears at power-on. `SHIFT` +
 `MEM.LEFT` shows unused sound memory in blocks (for example `1.28` means 1,280
 blocks); it is read-only. Do not use the adjacent mark/delete controls while
 performing this observation.
+
+## Replacing a sound ID
+
+The DDrum4 does **not** overwrite a stored sound in place.  On 2026-08-10 the
+module displayed `dUP` when it received a sound file whose group/number was
+already present.  This is the documented duplicate error: the incoming data is
+ignored, rather than replacing the existing sound.  `dUP` is not a receive or
+progress indicator.
+
+For an intentional replacement, use this order:
+
+1. In Palette mode, use `SHIFT` + `SOUND` and the rotary control to select the
+   exact existing sound, including its group (for example `CYMB 995`).
+2. Press `SHIFT` + `MARK`; the selected sound flashes.
+3. Press `SHIFT` + `DELETE`, inspect the flashing block count, then press
+   `SHIFT` + `DELETE` again to confirm.
+4. Wait for the deletion countdown to reach `0` and for normal panel operation
+   to resume. Never power off during this countdown.
+5. Send the replacement once. A successful Windows send receipt proves only
+   completion by the sender; auditioning or a subsequent sound-memory check is
+   still required to confirm the module accepted it.
+
+One long 905-block sound is 905 DDrum SysEx packets (about 1.06 MB on the MIDI
+wire), not one MIDI message. With conservative 0.6-second inter-packet pacing,
+such a transfer is expected to take roughly 14 minutes. Do not start a second
+sender while one transfer is active; cancellation leaves the sound unmodified,
+but requires a complete retry.

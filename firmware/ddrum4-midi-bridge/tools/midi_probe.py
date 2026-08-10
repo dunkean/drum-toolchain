@@ -63,6 +63,76 @@ def audio_scan(*, output_name, audio_input, pairs, slot_seconds, note_length_sec
         print(f"channel={channel:02d} note={note:03d} rms={rms:.7f} peak={peak:.7f}")
 
 
+def audio_monitor(*, audio_input, duration):
+    """Measure a single live audio window without sending any MIDI.
+
+    This is used to validate the physical DDrum4 -> Arduino -> DDrum4 loop
+    from its resulting audio, even when the module deliberately does not echo
+    incoming MIDI back to its MIDI OUT port.
+    """
+    import numpy as np
+    import sounddevice as sd
+
+    input_index = int(audio_input.split(":", 1)[0]) if audio_input.split(":", 1)[0].isdigit() else audio_input
+    print(f"Monitoring {audio_input} for {duration:.1f}s: play one deliberate pad hit now.")
+    recording = sd.rec(round(duration * 44100), samplerate=44100, channels=2,
+                       dtype="float32", device=input_index)
+    sd.wait()
+    magnitude = np.max(np.abs(recording), axis=1)
+    peak = float(np.max(magnitude))
+    rms = float(np.sqrt(np.mean(np.square(recording))))
+    threshold = max(0.003, peak * 0.02)
+    active = np.flatnonzero(magnitude >= threshold)
+    if not len(active):
+        print(f"NO AUDIO: peak={peak:.7f}, rms={rms:.7f}")
+        return
+    first, last = int(active[0]), int(active[-1])
+    print(f"AUDIO DETECTED: peak={peak:.4f}, rms={rms:.6f}, "
+          f"activity={first / 44100:.3f}s..{last / 44100:.3f}s "
+          f"({(last - first) / 44100:.3f}s above {threshold:.5f})")
+
+
+def audio_note_measure(*, output_name, audio_input, channel, note, velocity, duration):
+    """Trigger one MIDI note and report both the body and low-level tail time.
+
+    A DDrum sound is normally one-shot, so a short Note On/Off pair models a
+    pad event while still allowing the recording to expose a long cymbal tail.
+    Nothing is saved and no module setting is changed.
+    """
+    import numpy as np
+    import sounddevice as sd
+
+    sample_rate = 44100
+    lead_seconds = 0.25
+    input_index = int(audio_input.split(":", 1)[0]) if audio_input.split(":", 1)[0].isdigit() else audio_input
+    print(f"Measuring C{channel} note {note} on {output_name} through {audio_input} for {duration:.1f}s.")
+    recording = sd.rec(round(duration * sample_rate), samplerate=sample_rate, channels=2,
+                       dtype="float32", device=input_index)
+    time.sleep(lead_seconds)
+    with mido.open_output(output_name) as out:
+        out.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
+        time.sleep(0.08)
+        out.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
+    sd.wait()
+    magnitude = np.max(np.abs(recording), axis=1)
+    peak = float(np.max(magnitude))
+    rms = float(np.sqrt(np.mean(np.square(recording))))
+    noise = float(np.sqrt(np.mean(np.square(recording[: round(lead_seconds * sample_rate)]))))
+    body_threshold = max(0.003, peak * 0.02)
+    tail_threshold = max(0.001, noise * 4.0)
+    def last_active(threshold):
+        indices = np.flatnonzero(magnitude >= threshold)
+        return None if not len(indices) else max(0.0, indices[-1] / sample_rate - lead_seconds)
+    body = last_active(body_threshold)
+    tail = last_active(tail_threshold)
+    if body is None:
+        print(f"NO AUDIO: peak={peak:.7f}, rms={rms:.7f}, noise={noise:.7f}")
+        return
+    print(f"AUDIO DETECTED: peak={peak:.4f}, rms={rms:.6f}; "
+          f"body={body:.3f}s (>{body_threshold:.5f}), "
+          f"tail={tail:.3f}s (>{tail_threshold:.5f})")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="show Windows MIDI input/output port names")
@@ -83,6 +153,10 @@ def main():
     parser.add_argument("--value", type=int, default=127, choices=range(128),
                         help="CC value used with --controller (default: 127)")
     parser.add_argument("--audio-input", help="audio input index/name used by a MIDI-to-audio scan")
+    parser.add_argument("--monitor-audio", action="store_true",
+                        help="measure live audio only; sends no MIDI")
+    parser.add_argument("--measure-note", action="store_true",
+                        help="trigger --channel/--note once and measure its audio body and tail")
     parser.add_argument("--scan-channels", action="store_true",
                         help="send the chosen note on all 16 MIDI channels and rank audio energy")
     parser.add_argument("--scan-notes", action="store_true",
@@ -95,7 +169,7 @@ def main():
                         help="per-note scan window in milliseconds (default: 400)")
     args = parser.parse_args()
     inputs, outputs = mido.get_input_names(), mido.get_output_names()
-    if args.list or not (args.send or args.listen):
+    if args.list or not (args.send or args.listen or args.monitor_audio or args.measure_note):
         print("MIDI inputs:")
         print(*inputs, sep="\n  ") if inputs else print("  (none)")
         print("MIDI outputs:")
@@ -106,6 +180,10 @@ def main():
         parser.error("choose either --scan-channels or --scan-notes")
     if (args.scan_channels or args.scan_notes) and not args.audio_input:
         parser.error("--audio-input is required for an audio scan")
+    if args.monitor_audio and not args.audio_input:
+        parser.error("--audio-input is required for --monitor-audio")
+    if args.measure_note and not (args.audio_input and args.send):
+        parser.error("--measure-note requires both --send and --audio-input")
     if args.note_start > args.note_end:
         parser.error("--note-start must not exceed --note-end")
     if args.loopback_out:
@@ -148,7 +226,7 @@ def main():
         else:
             print("FAIL: expected routed MIDI event did not return.", file=sys.stderr)
             raise SystemExit(1)
-    if args.send and not (args.scan_channels or args.scan_notes):
+    if args.send and not (args.scan_channels or args.scan_notes or args.measure_note):
         name = resolve(outputs, args.send)
         message = mido.Message("note_on", channel=args.channel - 1, note=args.note, velocity=args.velocity)
         print(f"> {name}: {message}")
@@ -167,6 +245,13 @@ def main():
                  else [(args.channel, note) for note in range(args.note_start, args.note_end + 1)])
         audio_scan(output_name=name, audio_input=args.audio_input, pairs=pairs,
                    slot_seconds=args.slot_ms / 1000, note_length_seconds=min(0.08, args.slot_ms / 2000))
+    if args.monitor_audio:
+        audio_monitor(audio_input=args.audio_input, duration=args.duration or 8.0)
+    if args.measure_note:
+        name = resolve(outputs, args.send)
+        audio_note_measure(output_name=name, audio_input=args.audio_input,
+                           channel=args.channel, note=args.note, velocity=args.velocity,
+                           duration=args.duration or 8.0)
     if args.listen:
         name = resolve(inputs, args.listen)
         print(f"Listening on {name}; press Ctrl+C to stop.")
