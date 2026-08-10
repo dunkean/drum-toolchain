@@ -5,6 +5,8 @@ Examples:
   python tools/midi_probe.py --list
   python tools/midi_probe.py --send "MidiFace.*Out 3" --channel 10 --note 38
   python tools/midi_probe.py --listen "MidiFace.*In 3"
+  python tools/midi_probe.py --send "UMC404HD.*Out 9" --audio-input 3 \
+      --scan-notes --channel 12 --note-start 0 --note-end 127
 """
 import argparse
 import re
@@ -20,6 +22,45 @@ def resolve(names, pattern):
         print(f"Expected exactly one MIDI port matching {pattern!r}; found: {matches}", file=sys.stderr)
         raise SystemExit(2)
     return matches[0]
+
+
+def audio_scan(*, output_name, audio_input, pairs, slot_seconds, note_length_seconds):
+    """Send a deterministic note grid and print the measured input level per hit.
+
+    This is deliberately diagnostic-only: audio stays in memory and no module
+    or project setting is written. It makes a DDrum4 MIDI input-map search
+    repeatable even when its panel does not reveal the active receive note.
+    """
+    import numpy as np
+    import sounddevice as sd
+
+    if not pairs or slot_seconds <= 0 or not 0 < note_length_seconds < slot_seconds:
+        raise ValueError("scan needs at least one pair and 0 < note length < slot length")
+    input_index = int(audio_input.split(":", 1)[0]) if audio_input.split(":", 1)[0].isdigit() else audio_input
+    lead_seconds = 0.25
+    duration = lead_seconds + len(pairs) * slot_seconds + 0.25
+    recording = sd.rec(round(duration * 44100), samplerate=44100, channels=2,
+                       dtype="float32", device=input_index)
+    time.sleep(lead_seconds)
+    with mido.open_output(output_name) as out:
+        for channel, note in pairs:
+            out.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=110))
+            time.sleep(note_length_seconds)
+            out.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
+            time.sleep(slot_seconds - note_length_seconds)
+    sd.wait()
+    levels = []
+    for index, (channel, note) in enumerate(pairs):
+        start = round((lead_seconds + index * slot_seconds) * 44100)
+        end = round((lead_seconds + (index + 1) * slot_seconds) * 44100)
+        window = recording[start:end]
+        rms = float(np.sqrt(np.mean(np.square(window))))
+        peak = float(np.max(np.abs(window)))
+        levels.append((rms, peak, channel, note))
+    baseline = sorted(level[0] for level in levels)[len(levels) // 2]
+    print(f"Audio baseline RMS: {baseline:.7f}")
+    for rms, peak, channel, note in sorted(levels, reverse=True):
+        print(f"channel={channel:02d} note={note:03d} rms={rms:.7f} peak={peak:.7f}")
 
 
 def main():
@@ -41,6 +82,17 @@ def main():
                         help="send this CC instead of a note in --loopback")
     parser.add_argument("--value", type=int, default=127, choices=range(128),
                         help="CC value used with --controller (default: 127)")
+    parser.add_argument("--audio-input", help="audio input index/name used by a MIDI-to-audio scan")
+    parser.add_argument("--scan-channels", action="store_true",
+                        help="send the chosen note on all 16 MIDI channels and rank audio energy")
+    parser.add_argument("--scan-notes", action="store_true",
+                        help="send a MIDI-note range on --channel and rank audio energy")
+    parser.add_argument("--note-start", type=int, default=0, choices=range(128),
+                        help="first note for --scan-notes (default: 0)")
+    parser.add_argument("--note-end", type=int, default=127, choices=range(128),
+                        help="last note for --scan-notes (default: 127)")
+    parser.add_argument("--slot-ms", type=int, default=400,
+                        help="per-note scan window in milliseconds (default: 400)")
     args = parser.parse_args()
     inputs, outputs = mido.get_input_names(), mido.get_output_names()
     if args.list or not (args.send or args.listen):
@@ -50,6 +102,12 @@ def main():
         print(*outputs, sep="\n  ") if outputs else print("  (none)")
     if bool(args.loopback_out) != bool(args.loopback_in):
         parser.error("--loopback-out and --loopback-in must be provided together")
+    if args.scan_channels and args.scan_notes:
+        parser.error("choose either --scan-channels or --scan-notes")
+    if (args.scan_channels or args.scan_notes) and not args.audio_input:
+        parser.error("--audio-input is required for an audio scan")
+    if args.note_start > args.note_end:
+        parser.error("--note-start must not exceed --note-end")
     if args.loopback_out:
         output_name = resolve(outputs, args.loopback_out)
         input_name = resolve(inputs, args.loopback_in)
@@ -90,7 +148,7 @@ def main():
         else:
             print("FAIL: expected routed MIDI event did not return.", file=sys.stderr)
             raise SystemExit(1)
-    if args.send:
+    if args.send and not (args.scan_channels or args.scan_notes):
         name = resolve(outputs, args.send)
         message = mido.Message("note_on", channel=args.channel - 1, note=args.note, velocity=args.velocity)
         print(f"> {name}: {message}")
@@ -98,6 +156,17 @@ def main():
             out.send(message)
             time.sleep(0.3)
             out.send(mido.Message("note_off", channel=args.channel - 1, note=args.note, velocity=0))
+    if args.scan_channels or args.scan_notes:
+        # A send/scan target intentionally shares --send to avoid a second
+        # ambiguous MIDI-output selector. The scan never runs unless the user
+        # explicitly supplies it.
+        if not args.send:
+            parser.error("--send selects the MIDI output for an audio scan")
+        name = resolve(outputs, args.send)
+        pairs = ([(channel, args.note) for channel in range(1, 17)] if args.scan_channels
+                 else [(args.channel, note) for note in range(args.note_start, args.note_end + 1)])
+        audio_scan(output_name=name, audio_input=args.audio_input, pairs=pairs,
+                   slot_seconds=args.slot_ms / 1000, note_length_seconds=min(0.08, args.slot_ms / 2000))
     if args.listen:
         name = resolve(inputs, args.listen)
         print(f"Listening on {name}; press Ctrl+C to stop.")

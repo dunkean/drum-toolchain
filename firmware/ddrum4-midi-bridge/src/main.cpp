@@ -12,6 +12,12 @@
 #ifndef ROUTER_TX_SELF_TEST
 #define ROUTER_TX_SELF_TEST 0
 #endif
+#ifndef ROUTER_MODE_CONTROL_CHANNEL
+#define ROUTER_MODE_CONTROL_CHANNEL 16
+#endif
+#ifndef ROUTER_MODE_CONTROL_CC
+#define ROUTER_MODE_CONTROL_CC 119
+#endif
 
 #if ROUTER_USE_SD
 #include <SPI.h>
@@ -39,7 +45,10 @@ const BridgeConfig BRIDGE_CONFIG = {
   true, // Program Change from either source -> selected ddrum4 kit
 };
 DdrumBridge bridge(BRIDGE_CONFIG);
-MidiDinAdapter midi(MIDI_PORT, bridge);
+// CC119 on channel 16 selects nested / PC-clean / bypass without a cable swap.
+// The values are 0..41=NESTED, 42..83=SILENT, 84..127=BYPASS.
+MidiDinAdapter midi(MIDI_PORT, bridge,
+                    {ROUTER_MODE_CONTROL_CHANNEL, ROUTER_MODE_CONTROL_CC});
 
 void setup() {
 #if ROUTER_DEBUG

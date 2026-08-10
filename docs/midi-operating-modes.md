@@ -78,9 +78,11 @@ permanently connected to DDrum4 MIDI IN.
   hardware THRU.
 
 The bridge core implements these states and its native tests cover the
-transition semantics. A physical button and reserved control message remain
-firmware integration work; neither has been flashed or configured on hardware
-yet.
+transition semantics. Firmware now reserves channel 16 / CC119 as a local
+mode control: values 0–41 select `NESTED`, 42–83 select `SILENT`, and 84–127
+select `BYPASS`. The control is consumed by the Arduino and never reaches the
+DDrum4. It has not yet been flashed to the hardware. A physical button remains
+a later convenience feature.
 
 The current UMC + MIDI4x4 + PC developer relay remains useful while the final
 fixed cabling is not yet connected.

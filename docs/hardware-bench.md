@@ -1,8 +1,28 @@
 # DDrum4 Hardware Bench
 
-The observed connection is `MIDI4x4` output to DDrum4 MIDI IN, `MIDI4x4` input
-from DDrum4 MIDI OUT, and DDrum4 audio outputs 1/2 to UMC404HD inputs 1/2.
-Scripts must resolve a unique name, never use a numeric device index.
+The historical transfer bench used `MIDI4x4` for DDrum4 MIDI I/O. The current+permanent loop is documented in `ddrum4-midi-loop-modes.md`: DDrum4 OUT goes+to Arduino IN, Arduino THRU goes to UMC MIDI IN, and Arduino OUT goes to+DDrum4 IN. DDrum4 audio outputs 1/2 remain connected to UMC404HD inputs 1/2.+MIDI scripts resolve a unique port name; audio scan input `3` is the current+Windows UMC IN 1-2 device index and must be rechecked if interfaces change.
+
+## Repeatable MIDI-input scan
+
+`firmware/ddrum4-midi-bridge/tools/midi_probe.py` can correlate a MIDI note
+grid with DDrum4 audio on UMC input 1–2 without saving a WAV or modifying the
+module. It is for identifying the *currently active* MIDI input note/channel
+after a palette or cabling change.
+
+```powershell
+# Scan every receiver note on MIDI channel 12; audio input 3 is UMC IN 1-2 on
+# this Windows machine. The output port must be physically connected to the
+# DDrum4 MIDI IN for this to be a hardware test.
+python firmware/ddrum4-midi-bridge/tools/midi_probe.py `
+  --send '^UMC404HD 192k MIDI Out 9$' --audio-input 3 `
+  --scan-notes --channel 12 --note-start 0 --note-end 127 --slot-ms 400
+```
+
+The tool prints the RMS/peak score for each probe and does not infer a
+successful module transfer merely because Windows accepted MIDI bytes. In the
+current permanent Arduino loop, UMC MIDI OUT is **not** connected to DDrum4
+MIDI IN, so this scan and a SysEx upload require either a temporary direct
+connection or a future MIDI merger/proxy path.
 
 ## First action: settings backup
 

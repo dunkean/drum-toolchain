@@ -52,11 +52,18 @@ messages so a bad configuration cannot silently eat expressive input.
 
 ## Mode selection
 
-The bridge shall eventually support both mechanisms:
+The firmware now accepts a reserved bridge-local message: **channel 16 / CC
+119**. It is consumed by the Arduino and never emitted from Arduino OUT; the
+hardware THRU copy still reaches the PC. Its value selects the output role:
 
-- a debounced physical mode button, with a visible mode LED; and
-- a reserved, explicitly configured control message, e.g. channel 16 / CC119,
-  which is consumed by the bridge and never forwarded to the DDrum4.
+| CC119 value | Arduino mode | Intended DDrum4 Local state |
+| ---: | --- | --- |
+| 0–41 | `NESTED` | `L.OF` |
+| 42–83 | `SILENT` | `L.ON` for PC-clean |
+| 84–127 | `BYPASS` | `L.OF`, only with the future PC return filter |
+
+This requires the forthcoming firmware flash. A debounced physical mode
+button with a visible mode LED remains a later convenience feature.
 
 A mode change affects future messages only; it must release or flush no notes
 artificially. `L.ON` / `L.OF` remains a DDrum4 module setting until its remote
