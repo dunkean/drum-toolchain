@@ -35,9 +35,13 @@ Suggested channel reservation, pending a trace from each device:
 | DDTi | 10 | existing trigger source |
 | eDRUMin | 11 | expressive snare/hat/cymbals |
 | DDrum4 Local-OFF pads | 12 | native DDrum4 trigger inputs |
-| Arduino -> DDrum4 | 1 | final sound-bank input |
+| Arduino -> DDrum4 | 12 | final sound-bank input; this must match DDrum4 MIDI receive channel |
 
-The numbers are reservations, not verified settings. The production profile is
+The DDrum4 uses one MIDI channel for both transmission and reception, so its
+source and the Arduino's return channel are deliberately both 12. In `Local
+OFF`, locally generated pad hits are transmitted and incoming notes play the
+module; normal note data is not echoed back again. The numbers are
+reservations, not verified settings. The production profile is
 only generated after recording a MIDI trace of every source; the Arduino must
 not be flashed with guessed notes.
 
