@@ -23,7 +23,7 @@ from ddrum4_bank.transport import resolve_port, send_midi_file
 from ddrum4_bank.b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
-from drum_sampler.library import SampleTake
+from drum_sampler.library import SampleTake, merge_libraries
 from drum_domain import validate_document
 
 
@@ -269,6 +269,16 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual(report.to_document()["sounds"][0]["bytes"], 5)
             with self.assertRaisesRegex(ValueError, "duplicate"):
                 report_actual_bank(100, ((first, 1), (first, 1)))
+
+    def test_neutral_libraries_merge_without_moving_audio(self) -> None:
+        take = SampleTake("kick", "main", 36, 10, 100, 1, "raw.wav", status="captured")
+        first = SampleLibrary("first", ("left", "right"), (take,))
+        second = SampleLibrary("second", ("left", "right"), (take,))
+        merged = merge_libraries("merged", ((first, "core/raw"), (second, "snare/raw")))
+        self.assertEqual([take.raw_file for take in merged.takes], ["core/raw/raw.wav", "snare/raw/raw.wav"])
+        incompatible = SampleLibrary("bad", ("mono",), (take,))
+        with self.assertRaisesRegex(ValueError, "same channel layout"):
+            merge_libraries("bad", ((first, "core"), (incompatible, "bad")))
 
     def test_settings_backup_validator_requires_real_midi_content(self) -> None:
         import mido

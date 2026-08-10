@@ -107,3 +107,30 @@ def library_from_plan(identifier: str, channel_layout: tuple[str, ...], takes: t
         replace(SampleTake.from_planned_take(take), channels=channel_layout)
         for take in takes
     ))
+
+
+def merge_libraries(identifier: str, sources: tuple[tuple[SampleLibrary, str], ...]) -> SampleLibrary:
+    """Merge independent capture manifests without relocating their audio.
+
+    Each prefix is relative to the future shared ``audio_root`` and becomes
+    part of every non-absolute raw/prepared file reference. This preserves the
+    provenance-rich neutral manifests while making a merged export portable.
+    """
+    if not identifier or not sources:
+        raise ValueError("identifier and at least one source library are required")
+    layout = sources[0][0].channel_layout
+    merged: list[SampleTake] = []
+    for library, prefix in sources:
+        if library.channel_layout != layout:
+            raise ValueError("all merged libraries must use the same channel layout")
+        normalized_prefix = Path(prefix)
+        if normalized_prefix.is_absolute() or str(normalized_prefix) in {"", "."}:
+            raise ValueError("each library prefix must be a non-empty relative path")
+        for take in library.takes:
+            def prefixed(value: str | None) -> str | None:
+                if value is None or Path(value).is_absolute():
+                    return value
+                return (normalized_prefix / value).as_posix()
+            merged.append(replace(take, raw_file=prefixed(take.raw_file) or take.raw_file,
+                                  prepared_file=prefixed(take.prepared_file)))
+    return SampleLibrary(identifier, layout, tuple(merged))
