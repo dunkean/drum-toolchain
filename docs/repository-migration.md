@@ -297,3 +297,13 @@ Expected result: `converter tests passed`.
   blocks. This reclaims approximately 107 blocks while preserving the richer
   seven-layer `SNRE_998` main snare. The next live memory reading must confirm
   the reclaimed amount before adding the ride.
+
+## DrumGizmo actual export — 2026-08-10
+
+- The dense original SD3 kick/tom capture library was exported as a
+  self-contained stereo DrumGizmo 2.0 kit at
+  `D:\Studio\drumgizmo\sd3-modern-metal-core-kick-toms`. It contains eight
+  instrument XML files and 168 copied captured WAVs; generated XML is parsed
+  by the exporter. This is intentionally independent of the compact DDrum4
+  selections. A complete all-articulation kit still needs the target MIDI map
+  that resolves note collisions such as hi-hat articulations.
