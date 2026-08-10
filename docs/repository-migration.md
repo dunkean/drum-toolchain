@@ -221,9 +221,10 @@ Expected result: `converter tests passed`.
   DDrum4UI capture proved that its real packet interval is 400 ms, so the
   sound replay now uses that pace directly instead of applying both delays;
   the behavior is covered by a regression test. A complete native capture
-  additionally proved the exact framing: two MIDI Reset messages before the
-  11 SysEx packets and one Reset immediately after the final packet (not after
-  another 400 ms pause). The replay now reproduces this sequence.
+  additionally showed two MIDI Reset observations before the 11 SysEx packets
+  and one afterward. Follow-up physical testing established these as
+  Windows/port-reset artefacts, not sound-file bytes: replay deliberately
+  excludes them because a System Reset can abort the DDrum4 receiver.
 - The general Python MIDI backend reproduced the stream on loopMIDI but was
   still rejected by the physical module. DDrum4UI's binary reveals a WinMM
   `midiOutLongMsg` sender, so all-SysEx sound replay now uses that same API.
