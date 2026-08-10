@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
@@ -65,6 +66,19 @@ def build_parser() -> argparse.ArgumentParser:
     snare.add_argument("--instrument", default="snare_main")
     snare.add_argument("--head-layers", default=7, type=int)
     snare.add_argument("--rim-layers", default=2, type=int)
+    cymbal = subparsers.add_parser("build-flagship-cymbal", help="prepare and locally build an auditable flagship cymbal; never sends MIDI")
+    cymbal.add_argument("--library", required=True, type=Path)
+    cymbal.add_argument("--raw-directory", required=True, type=Path)
+    cymbal.add_argument("--output-directory", required=True, type=Path)
+    cymbal.add_argument("--sound-id", required=True)
+    cymbal.add_argument("--instrument", required=True)
+    cymbal.add_argument("--template", required=True, type=Path)
+    cymbal.add_argument("--quality-profile", required=True, type=Path)
+    cymbal.add_argument("--quality-name", default="ddrum4_cymbal_flagship")
+    cymbal.add_argument("--velocities", type=int, nargs="+", default=[56, 88, 110, 127])
+    cymbal.add_argument("--max-duration-seconds", type=float)
+    cymbal.add_argument("--trim-threshold-db", type=float)
+    cymbal.add_argument("--report", required=True, type=Path)
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
     allocation.add_argument("--output", type=Path, help="optional Markdown report path")
@@ -180,6 +194,31 @@ def main(argv: list[str] | None = None) -> int:
         selection = select_snare(SampleLibrary.read(args.library), args.instrument, args.head_layers, args.rim_layers)
         selection.write(args.output)
         print(f"wrote {args.output} with {len(selection.head)} head and {len(selection.rim)} rim layers")
+        return 0
+    if args.command == "build-flagship-cymbal":
+        from drum_sampler.audio import load_quality_profile
+        from drum_sampler.library import SampleLibrary
+        from .cymbal_build import materialize_flagship_cymbal
+        if args.report.exists():
+            raise FileExistsError(f"refusing to overwrite build report: {args.report}")
+        profile = load_quality_profile(args.quality_profile, args.quality_name)
+        overrides = {
+            key: value for key, value in {
+                "max_duration_seconds": args.max_duration_seconds,
+                "trim_threshold_db": args.trim_threshold_db,
+            }.items() if value is not None
+        }
+        build = materialize_flagship_cymbal(
+            SampleLibrary.read(args.library), raw_directory=args.raw_directory,
+            output_directory=args.output_directory, sound_id=args.sound_id,
+            instrument=args.instrument, template=args.template,
+            profile=replace(profile, **overrides), velocities=args.velocities,
+        )
+        backend = _backend(args.ddrum4edit)
+        backend.build(build.config, build.sound)
+        blocks = backend.encoded_blocks(build.sound)
+        build.write_report(args.report, blocks)
+        print(f"built {build.sound_id}: {blocks} blocks at {build.profile.max_duration_seconds}s; wrote {args.report}")
         return 0
     backend = _backend(args.ddrum4edit)
     if args.command == "inspect":

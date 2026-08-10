@@ -25,11 +25,45 @@ from ddrum4_bank.hardware import transfer_one_sound
 from ddrum4_bank.render_compare import compare_renders
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
+from ddrum4_bank.cymbal_build import materialize_flagship_cymbal
+from drum_sampler.audio import QualityProfile
 from drum_sampler.library import SampleTake, merge_libraries
 from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
+    def test_flagship_cymbal_preparation_selects_best_round_robin(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            for name in ("first.wav", "best.wav", "hard.wav"):
+                wavfile.write(raw / name, 44100, np.tile(np.linspace(0, 0.5, 4410, dtype=np.float32)[:, None], (1, 2)))
+            def take(name: str, velocity: int, repetition: int, peak: float) -> SampleTake:
+                return SampleTake("crash", "bow", 49, 10, velocity, repetition, name,
+                                  source="local render", license_statement="personal", status="captured", peak_dbfs=peak)
+            library = SampleLibrary("crash-library", ("left", "right"), (
+                take("first.wav", 56, 1, -6.0), take("best.wav", 56, 2, -3.0),
+                take("hard.wav", 127, 1, -1.0),
+            ))
+            template = root / "template.cfg"
+            template.write_text(
+                "-Begin-Layers-\nold\n-End-Layers-\n-Begin-Variations-\nVL1 old\n-End-Variations-\n"
+                "-Begin-Sample-Files-\nold\n-End-Sample-Files-\n-Begin-Sample-Name-\nold\n-End-Sample-Name-\n"
+                "-Begin-Sound-File-Out-\nold.mid\n-End-Sound-File-Out-\n", encoding="utf-8")
+            build = materialize_flagship_cymbal(
+                library, raw_directory=raw, output_directory=root / "build", sound_id="CYMB_777",
+                instrument="crash", template=template,
+                profile=QualityProfile(trim_threshold_db=-80, force_mono=True, max_duration_seconds=0.05),
+                velocities=(56, 127),
+            )
+            self.assertEqual(build.layers[0].raw_file, "best.wav")
+            self.assertEqual(build.layers[0].channels, 1)
+            self.assertTrue(build.config.is_file())
+            self.assertTrue((root / "build" / "CYMB_777_s02.wav").is_file())
+
     def test_render_comparison_measures_onset_level_tail_and_tone(self) -> None:
         import numpy as np
         from scipy.io import wavfile
