@@ -1,0 +1,41 @@
+{
+  "audio_input": "2",
+  "channels": ["left", "right"],
+  "cooldown_ms": 300,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 100,
+  "requests": [
+    {
+      "articulation": "head_center",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_main",
+      "note": 38,
+      "repetitions": 4,
+      "velocities": [16, 28, 40, 52, 64, 76, 88, 100, 110, 119, 127]
+    },
+    {
+      "articulation": "rimshot",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_main",
+      "note": 40,
+      "repetitions": 3,
+      "velocities": [28, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "cross_stick",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_main",
+      "note": 37,
+      "repetitions": 3,
+      "velocities": [48, 76, 100, 127]
+    }
+  ],
+  "sample_rate": 44100,
+  "schema_version": 1,
+  "tail_ms": 2000
+}

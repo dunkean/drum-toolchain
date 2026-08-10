@@ -75,15 +75,22 @@ def select_snare(library: SampleLibrary, instrument: str = "snare_main", head_la
     """Apply the B1 priority: head dynamics, rim dynamics, then a strong accent."""
     if not 1 <= head_layers <= 7 or not 1 <= rim_layers <= 2:
         raise ValueError("snare selection supports 1..7 head and 1..2 rim layers")
-    head = select_velocity_layers(library, instrument, "head", head_layers)
     warnings: list[str] = []
+    try:
+        head = select_velocity_layers(library, instrument, "head", head_layers)
+    except ValueError:
+        head = select_velocity_layers(library, instrument, "head_center", head_layers)
+        warnings.append("using captured head_center layers as the DDrum4 head candidate")
     try:
         rim = select_velocity_layers(library, instrument, "rim", rim_layers)
     except ValueError:
         rim = select_velocity_layers(library, instrument, "rimshot", rim_layers)
         warnings.append("using captured rimshot layers as the DDrum4 rim candidate")
     try:
-        accent = select_velocity_layers(library, instrument, "cross_stick", 1)[0]
+        # ``select_velocity_layers(..., 1)`` intentionally preserves the
+        # softest representative. An accent needs the opposite: the strongest
+        # captured cross-stick (or its highest available layer).
+        accent = select_velocity_layers(library, instrument, "cross_stick", 10)[-1]
     except ValueError:
         accent = head[-1]
         warnings.append("no captured cross_stick; strongest selected head is used as the accent candidate")

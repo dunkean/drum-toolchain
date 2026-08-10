@@ -456,6 +456,16 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         self.assertEqual(selected.accent.velocity, 128)
         self.assertEqual(selected.to_document()["sample_slots"], 10)
         self.assertTrue(selected.warnings)
+        centre_library = SampleLibrary("centre-snare", ("left", "right"), tuple(
+            [take("head_center", velocity) for velocity in range(16, 128, 16)]
+            + [take("rimshot", velocity) for velocity in (40, 120)]
+            + [take("cross_stick", velocity) for velocity in (48, 100)]
+        ))
+        centre_selected = select_snare(centre_library)
+        self.assertEqual([layer.velocity for layer in centre_selected.head], [16, 32, 48, 64, 80, 96, 112])
+        self.assertEqual(centre_selected.accent.velocity, 100)
+        self.assertIn("head_center", centre_selected.warnings[0])
+        self.assertIn("rimshot", centre_selected.warnings[1])
         unlicensed = SampleLibrary("bad", ("left",), (SampleTake("snare_main", "head", 38, 10, 64, 1, "bad.wav", status="captured"),))
         with self.assertRaisesRegex(ValueError, "provenance"):
             select_velocity_layers(unlicensed, "snare_main", "head", 1)
