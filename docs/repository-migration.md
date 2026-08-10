@@ -266,8 +266,8 @@ Expected result: `converter tests passed`.
 ## B3 priority candidates — 2026-08-10
 
 - `KICK_997` was generated from seven original SD3 kick velocity captures with
-  the same crossfade layout and encoded at 124 blocks. It remains offline
-  until the live free-memory value is refreshed.
+  the same crossfade layout, encoded at 124 blocks, and transferred
+  successfully through the UMC route.
 - `HHAT_996` was generated from nine original SD3 CC4 opening positions
   (0, 16, …, 127), encoded at 43 blocks, and transferred successfully through
   the UMC MIDI route. Its layer parameters are a one-time transcribed
@@ -276,3 +276,8 @@ Expected result: `converter tests passed`.
 - The bank planner now uses the measured 1,270-block starting budget rather
   than an unverified nominal 8,192-block figure. Every future transfer batch
   must re-read `SHIFT+MEM.LEFT` before being declared to fit.
+- Two original SD3 crash sounds were encoded as real Cymbal group files and
+  transferred successfully: `CYMB_995` at 350 blocks and `CYMB_994` at 308
+  blocks. Along with `SNRE_998`, `HHAT_996` and `KICK_997`, this creates a
+  five-sound core for the first listening pass. The live remaining-memory
+  value and each module audition are still required before packing toms/ride.
