@@ -34,7 +34,8 @@ def _write_xml(path: Path, element: ET.Element) -> None:
     ET.parse(path)  # Validate the file we wrote before reporting success.
 
 
-def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directory: Path, title: str | None = None, copy_audio: bool = True) -> DrumGizmoExport:
+def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directory: Path, title: str | None = None,
+                     copy_audio: bool = True, midi_notes: dict[tuple[str, str], int] | None = None) -> DrumGizmoExport:
     """Write a self-contained DrumGizmo 2.0 kit from captured WAV takes.
 
     No audio is altered. In copy mode files are copied to the generated kit,
@@ -51,12 +52,18 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
     groups: dict[tuple[str, str], list[SampleTake]] = {}
     for take in captured:
         groups.setdefault((take.instrument, take.articulation), []).append(take)
+    midi_notes = midi_notes or {}
+    unknown_overrides = set(midi_notes) - set(groups)
+    if unknown_overrides:
+        raise ValueError(f"MIDI-note overrides reference unknown articulations: {sorted(unknown_overrides)}")
     note_groups: dict[int, tuple[str, str]] = {}
     for key, takes in groups.items():
         notes = {take.note for take in takes}
         if len(notes) != 1:
             raise ValueError(f"{key}: one articulation cannot have multiple MIDI notes")
-        note = next(iter(notes))
+        note = midi_notes.get(key, next(iter(notes)))
+        if not 0 <= note <= 127:
+            raise ValueError(f"{key}: target MIDI note must be 0..127")
         if note in note_groups:
             raise ValueError(f"MIDI note {note} maps to both {note_groups[note]} and {key}; resolve this in a target profile")
         note_groups[note] = key

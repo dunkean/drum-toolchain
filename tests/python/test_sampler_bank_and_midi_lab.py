@@ -143,6 +143,29 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertIn('samplerate="44100"', export.drumkit.read_text(encoding="utf-8"))
             self.assertIn('note="38"', export.midimap.read_text(encoding="utf-8"))
 
+    def test_drumgizmo_export_allows_target_note_overrides_for_merged_sources(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wavfile.write(root / "closed.wav", 44100, np.zeros((8, 2), dtype=np.int16))
+            wavfile.write(root / "open.wav", 44100, np.zeros((8, 2), dtype=np.int16))
+            common = dict(channel=10, velocity=90, repetition=1, sample_rate=44100,
+                          channels=("left", "right"), frames=8, status="captured")
+            library = SampleLibrary("hat-fixture", ("left", "right"), (
+                SampleTake("hi_hat", "closed", 42, raw_file="closed.wav", **common),
+                SampleTake("hi_hat", "open", 42, raw_file="open.wav", **common),
+            ))
+            with self.assertRaisesRegex(ValueError, "MIDI note 42 maps"):
+                export_drumgizmo(library, audio_root=root, output_directory=root / "conflict")
+            export = export_drumgizmo(
+                library, audio_root=root, output_directory=root / "kit",
+                midi_notes={("hi_hat", "closed"): 42, ("hi_hat", "open"): 46},
+            )
+            map_text = export.midimap.read_text(encoding="utf-8")
+            self.assertIn('note="42" instr="hi_hat__closed"', map_text)
+            self.assertIn('note="46" instr="hi_hat__open"', map_text)
+
     def test_safe_cli_entry_points_create_and_inspect_metadata(self) -> None:
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:
