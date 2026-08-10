@@ -11,8 +11,14 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 
 from .transport import send_midi_file
+
+
+# The group code is usually four letters (SNRE, CYMB, KICK, TOM_) but RIM is
+# a valid three-letter DDrum4 group as well.
+_SOUND_ID = re.compile(r"^[A-Z0-9]{3,4}_[0-9]{3}$")
 
 
 @dataclass(frozen=True)
@@ -20,6 +26,7 @@ class SoundTransferReceipt:
     """Facts recorded only after a successful, explicitly confirmed transfer."""
 
     sound_path: str
+    sound_id: str
     sound_sha256: str
     midi_output: str
     messages_sent: int
@@ -42,6 +49,7 @@ def transfer_one_sound(
     midi_output: str,
     *,
     confirmed: bool,
+    sound_id: str,
     sysex_pause_seconds: float = 0.4,
     sysex_chunk_bytes: int | None = None,
 ) -> SoundTransferReceipt:
@@ -59,6 +67,8 @@ def transfer_one_sound(
         raise ValueError("sysex_pause_seconds must not be negative")
     if sysex_chunk_bytes is not None and sysex_chunk_bytes < 3:
         raise ValueError("sysex_chunk_bytes must be at least 3")
+    if not _SOUND_ID.fullmatch(sound_id):
+        raise ValueError(f"invalid inspected DDrum4 Sound ID: {sound_id!r}")
     message_count = send_midi_file(
         sound, midi_output, sysex_pause_seconds,
         sysex_chunk_bytes=sysex_chunk_bytes,
@@ -66,7 +76,7 @@ def transfer_one_sound(
     if message_count < 1:
         raise RuntimeError("MIDI sender reported no transferred messages")
     return SoundTransferReceipt(
-        str(sound), sha256(sound.read_bytes()).hexdigest(), midi_output,
+        str(sound), sound_id, sha256(sound.read_bytes()).hexdigest(), midi_output,
         message_count, sysex_pause_seconds, sysex_chunk_bytes,
         datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
     )

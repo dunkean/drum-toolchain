@@ -132,10 +132,11 @@ def main(argv: list[str] | None = None) -> int:
             raise FileExistsError(f"refusing to overwrite transfer receipt: {args.receipt}")
         receipt = transfer_one_sound(
             args.sound, args.output, confirmed=args.confirm_hardware_write,
+            sound_id=_backend(args.ddrum4edit).sound_id(args.sound),
             sysex_pause_seconds=args.sysex_pause, sysex_chunk_bytes=args.sysex_chunk_bytes,
         )
         receipt.write(args.receipt)
-        print(f"sent {receipt.messages_sent} messages to {receipt.midi_output}; wrote {args.receipt}")
+        print(f"sent {receipt.sound_id} ({receipt.messages_sent} messages) to {receipt.midi_output}; wrote {args.receipt}")
         return 0
     if args.command == "compare-render":
         if args.output.exists():

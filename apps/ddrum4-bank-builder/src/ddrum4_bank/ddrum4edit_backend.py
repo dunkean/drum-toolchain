@@ -27,6 +27,13 @@ class Ddrum4EditBackend:
             raise RuntimeError(f"ddrum4edit did not report encoded blocks for {sound}")
         return count
 
+    def sound_id(self, sound: Path) -> str:
+        """Return the internal group-and-number ID reported by ddrum4edit."""
+        match = re.search(r"Sound Name\s*:.*?\(([A-Z0-9]{3,4}_[0-9]{3})\)", self.inspect(sound))
+        if match is None:
+            raise RuntimeError(f"ddrum4edit did not report a DDrum4 Sound ID for {sound}")
+        return match.group(1)
+
     def build(self, config: Path, output: Path, *, syx: bool = False, markers: bool = False) -> None:
         """Build a sound using the output path declared in a ddrum4edit cfg.
 

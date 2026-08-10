@@ -49,10 +49,11 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             sound = Path(temporary) / "fixture.mid"
             sound.write_bytes(b"MThd")
             with self.assertRaisesRegex(ValueError, "hardware write refused"):
-                transfer_one_sound(sound, "fixture-out", confirmed=False)
+                transfer_one_sound(sound, "fixture-out", confirmed=False, sound_id="RIM_999")
             with patch("ddrum4_bank.hardware.send_midi_file", return_value=11) as sender:
-                receipt = transfer_one_sound(sound, "fixture-out", confirmed=True, sysex_chunk_bytes=255)
+                receipt = transfer_one_sound(sound, "fixture-out", confirmed=True, sound_id="RIM_999", sysex_chunk_bytes=255)
             self.assertEqual(receipt.messages_sent, 11)
+            self.assertEqual(receipt.sound_id, "RIM_999")
             self.assertEqual(receipt.sysex_chunk_bytes, 255)
             self.assertEqual(sender.call_args.args[:3], (sound, "fixture-out", 0.4))
             receipt_path = Path(temporary) / "receipt.json"
@@ -260,6 +261,11 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
 
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)
+
+    def test_backend_reads_internal_group_and_number_sound_id(self) -> None:
+        backend = Ddrum4EditBackend(Path("fixture-ddrum4edit.exe"))
+        with patch.object(Ddrum4EditBackend, "inspect", return_value="Sound Name : 52 49 (RIM_999) Total Blocks Count"):
+            self.assertEqual(backend.sound_id(Path("ignored.mid")), "RIM_999")
 
     def test_backend_reads_declared_build_destination(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
