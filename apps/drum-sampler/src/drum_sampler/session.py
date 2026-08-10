@@ -14,6 +14,7 @@ class CaptureRequest:
     velocities: tuple[int, ...]
     repetitions: int
     channel: int = 10
+    controllers: tuple[tuple[int, int], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.instrument or not self.articulation:
@@ -26,6 +27,10 @@ class CaptureRequest:
             raise ValueError("velocities must be unique and ascending")
         if self.repetitions < 1:
             raise ValueError("repetitions must be positive")
+        if any(not 0 <= control <= 127 or not 0 <= value <= 127 for control, value in self.controllers):
+            raise ValueError("controller numbers and values must be in 0..127")
+        if len({control for control, _ in self.controllers}) != len(self.controllers):
+            raise ValueError("a capture request cannot set one controller more than once")
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,7 @@ class CaptureSessionPlan:
                 "articulation": request.articulation,
                 "note": request.note,
                 "channel": request.channel,
+                "controllers": [list(pair) for pair in request.controllers],
                 "velocities": list(request.velocities),
                 "repetitions": request.repetitions,
             } for request in self.requests],
@@ -108,6 +114,7 @@ class CaptureSessionPlan:
             parsed_requests = tuple(CaptureRequest(
                 instrument=item["instrument"], articulation=item["articulation"], note=item["note"],
                 channel=item.get("channel", 10), velocities=tuple(item["velocities"]), repetitions=item["repetitions"],
+                controllers=tuple(tuple(pair) for pair in item.get("controllers", [])),
             ) for item in requests)
             return cls(
                 midi_output=document["midi_output"], audio_input=document["audio_input"],

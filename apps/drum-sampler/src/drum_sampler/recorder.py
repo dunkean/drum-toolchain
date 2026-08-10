@@ -24,6 +24,7 @@ def capture_pending(session: CaptureSessionPlan, raw_directory: Path, *, capture
             note=take.request.note,
             velocity=take.velocity,
             channel=take.request.channel,
+            controllers=take.request.controllers,
             output=output,
             duration=(session.gate_ms + session.tail_ms) / 1000,
             gate=session.gate_ms / 1000,

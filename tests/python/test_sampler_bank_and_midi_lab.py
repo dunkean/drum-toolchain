@@ -58,12 +58,13 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertEqual(len(plan.incomplete_takes(raw)), 5)
 
     def test_capture_session_round_trip_and_cli_write_protection(self) -> None:
-        request = CaptureRequest("snare_main", "head", 38, (32, 127), 2)
+        request = CaptureRequest("snare_main", "head", 38, (32, 127), 2, controllers=((16, 64),))
         plan = CaptureSessionPlan("out_APC", "loopback", ("left", "right"), (request,))
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "session.json"
             plan.write(path)
             self.assertEqual(CaptureSessionPlan.read(path), plan)
+            self.assertEqual(CaptureSessionPlan.read(path).requests[0].controllers, ((16, 64),))
             validate_document(plan.to_document(), Path(__file__).resolve().parents[2] / "contracts/schemas/capture-session.schema.json")
             result = subprocess.run(
                 [sys.executable, "-m", "drum_sampler.cli", "capture", "--session", str(path), "--raw-directory", temporary, "--library-output", str(Path(temporary) / "library.json"), "--id", "fixture", "--source", "test", "--license", "test"],
@@ -104,6 +105,7 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             output = kwargs["output"]
             assert isinstance(output, Path)
             calls.append(output)
+            self.assertEqual(kwargs["controllers"], ())
             wavfile.write(output, 44100, np.zeros((8, 4), dtype=np.int16))
             return output
         with tempfile.TemporaryDirectory() as temporary:

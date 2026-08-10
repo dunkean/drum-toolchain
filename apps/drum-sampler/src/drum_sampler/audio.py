@@ -58,6 +58,7 @@ def resolve_device(query: str) -> int | str:
 
 def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, output: Path,
                  channel: int = 1,
+                 controllers: tuple[tuple[int, int], ...] = (),
                  duration: float = 3.0, gate: float = 0.1, preroll: float = 0.1,
                  sample_rate: int = 44100, channels: int = 1) -> Path:
     """Record a VST/audio loopback while issuing exactly one MIDI note.
@@ -69,6 +70,8 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
         raise ValueError("note must be 0..127, velocity 1..127 and channel 1..16")
     if duration <= 0 or gate < 0 or preroll < 0 or not 1 <= channels <= 4:
         raise ValueError("invalid capture duration, gate, preroll or channel count")
+    if any(not 0 <= control <= 127 or not 0 <= value <= 127 for control, value in controllers):
+        raise ValueError("controller numbers and values must be in 0..127")
     if output.exists():
         raise FileExistsError(f"raw capture already exists and will not be overwritten: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +80,10 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
                        device=resolve_device(audio_input))
     time.sleep(preroll)
     with mido.open_output(midi_port) as port:
+        for control, value in controllers:
+            port.send(mido.Message("control_change", channel=channel - 1, control=control, value=value))
+        if controllers:
+            time.sleep(0.01)
         port.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
         time.sleep(min(gate, duration))
         port.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
