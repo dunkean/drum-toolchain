@@ -369,6 +369,17 @@ Expected result: `converter tests passed`.
   approvals. The compact CYMB_995 candidate is audibly unsuitable as a main
   crash (late/soft attack and too-short tail) and will be replaced.
 
+## Post-POC direction — 2026-08-10
+
+- `docs/midi-operating-modes.md` separates `standalone-nested` (`L.OF`,
+  Arduino and merger) from `pc-sd3-raw` (`L.ON`, DDrum4 OUT directly into UMC
+  MIDI IN). This avoids sacrificing native DDrum4 expressive data in SD3 mode
+  and records why a Uno mode button alone cannot solve the one-output physical
+  routing constraint.
+- `docs/metalcore-bank-v1-design.md` is now the complete-bank quality and
+  memory target. The first sound-bank task is a long-tail crash rebuild; the
+  POC sound is explicitly rejected as a production crash.
+
 ## DrumGizmo actual export — 2026-08-10
 
 - The dense original SD3 kick/tom capture library was exported as a

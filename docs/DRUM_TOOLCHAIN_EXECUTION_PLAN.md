@@ -1036,7 +1036,10 @@ Acceptance criteria:
 
 ## 15. Modernizer Roadmap
 
-Start only after the main ddrum4 bank is playable.
+Start only after the main ddrum4 bank is playable. In PC mode, DDrum4 MIDI OUT
+must feed UMC MIDI IN directly with `L.ON`; do not put the current selective
+Arduino bridge in the raw DDrum4-to-modernizer path. See
+`docs/midi-operating-modes.md`.
 
 Validation order:
 
