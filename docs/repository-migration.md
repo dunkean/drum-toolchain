@@ -371,11 +371,15 @@ Expected result: `converter tests passed`.
 
 ## Post-POC direction — 2026-08-10
 
-- `docs/midi-operating-modes.md` separates `standalone-nested` (`L.OF`,
-  Arduino and merger) from `pc-sd3-raw` (`L.ON`, DDrum4 OUT directly into UMC
-  MIDI IN). This avoids sacrificing native DDrum4 expressive data in SD3 mode
-  and records why a Uno mode button alone cannot solve the one-output physical
-  routing constraint.
+- The installed Arduino MIDI breakout shield's hardware THRU was proven by a
+  passive UMC monitor: DDrum4 C12/note-17 and its poly-aftertouch arrived at
+  UMC MIDI IN through `DDrum4 OUT -> shield IN -> shield THRU -> UMC IN`, with
+  no Arduino MIDI OUT connection. The permanent layout can therefore expose
+  raw input to the PC and a separately transformed Arduino OUT to DDrum4.
+- `docs/ddrum4-midi-loop-modes.md` defines `PC_CLEAN`, `STANDALONE`, `DUAL`,
+  and future `PC_BYPASS` modes. The DDrum4's Local-OFF return echo is a real
+  contract: safe standalone operation relies on the Arduino guard; a future
+  parallel DDrum4+SD3 mode requires a contract-driven modernizer return filter.
 - `docs/metalcore-bank-v1-design.md` is now the complete-bank quality and
   memory target. The first sound-bank task is a long-tail crash rebuild; the
   POC sound is explicitly rejected as a production crash.

@@ -2,6 +2,15 @@
 
 DdrumBridge::DdrumBridge(const BridgeConfig& config) : config_(config) {}
 
+void DdrumBridge::setMode(BridgeMode mode) {
+  // A mode change must never leave stale expectations that could consume the
+  // first genuine strike in the new mode.  It emits no MIDI and never creates
+  // an artificial note-off.
+  mode_ = mode;
+  expectedEchoCount_ = 0;
+  hasLastHihatCc_ = false;
+}
+
 void DdrumBridge::discardStaleEchoes(uint32_t nowMs) {
   if (!nowMs) return;
   constexpr uint32_t kEchoWindowMs = 20;
@@ -92,6 +101,14 @@ uint8_t DdrumBridge::mapHihatCc(uint8_t value) const {
 size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t capacity, uint32_t nowMs) {
   if (!capacity) return 0;
   if (consumeExpectedEcho(input, nowMs)) return 0;
+
+  if (mode_ == BridgeMode::Silent) return 0;
+
+  if (mode_ == BridgeMode::Bypass) {
+    *output = input;
+    rememberExpectedEcho(*output, nowMs);
+    return 1;
+  }
 
   // The direct CC4 engine is deliberately handled before note routing. CC4 is
   // recognised by ddrum4; quantisation is an explicit future fallback only.

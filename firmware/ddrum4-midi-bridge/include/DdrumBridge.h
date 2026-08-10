@@ -19,6 +19,18 @@ struct MidiEvent {
   uint8_t data2;
 };
 
+// The DIN output role is deliberately explicit.  Hardware THRU always carries
+// the original input stream independently of this mode.
+enum class BridgeMode : uint8_t {
+  // Apply the generated nested routing contract for DDrum4 Local-OFF play.
+  Nested,
+  // Return the original event to the module. Used with Local-OFF when a
+  // transparent return path is wanted; the return-echo guard stays active.
+  Bypass,
+  // Never emit from Arduino DIN OUT. Used for PC_CLEAN with DDrum4 Local-ON.
+  Silent,
+};
+
 struct NoteRoute {
   uint8_t inputChannel;
   uint8_t inputNote;
@@ -62,12 +74,15 @@ class DdrumBridge {
  public:
   explicit DdrumBridge(const BridgeConfig& config);
   size_t process(const MidiEvent& input, MidiEvent* output, size_t capacity, uint32_t nowMs = 0);
+  void setMode(BridgeMode mode);
+  BridgeMode mode() const { return mode_; }
   uint32_t ignoredMessages() const { return ignoredMessages_; }
   uint32_t duplicateCcMessages() const { return duplicateCcMessages_; }
   uint32_t suppressedEchoMessages() const { return suppressedEchoMessages_; }
 
  private:
   BridgeConfig config_;
+  BridgeMode mode_ = BridgeMode::Nested;
   bool hasLastHihatCc_ = false;
   uint8_t lastHihatCc_ = 0;
   uint32_t ignoredMessages_ = 0;

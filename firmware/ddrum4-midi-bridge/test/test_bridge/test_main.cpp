@@ -74,6 +74,37 @@ void test_local_off_ddrum4_midi_echo_is_not_reprocessed() {
   TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
 }
 
+void test_pc_clean_silent_mode_never_emits() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  bridge.setMode(BridgeMode::Silent);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &output, 1));
+  TEST_ASSERT_EQUAL(BridgeMode::Silent, bridge.mode());
+}
+
+void test_bypass_returns_raw_event_and_consumes_its_echo() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  const MidiEvent hit = {MidiEventType::PolyAftertouch, 12, 17, 47};
+  bridge.setMode(BridgeMode::Bypass);
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
+  TEST_ASSERT_EQUAL(MidiEventType::PolyAftertouch, output.type);
+  TEST_ASSERT_EQUAL_UINT8(12, output.channel);
+  TEST_ASSERT_EQUAL_UINT8(17, output.data1);
+  TEST_ASSERT_EQUAL_UINT8(47, output.data2);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(output, &output, 1));
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
+}
+
+void test_mode_change_clears_pending_echoes() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &output, 1));
+  bridge.setMode(BridgeMode::Silent);
+  bridge.setMode(BridgeMode::Nested);
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(output, &output, 1));
+}
+
 void test_out_of_order_local_off_echo_is_still_suppressed() {
   DdrumBridge bridge(config);
   MidiEvent first;
@@ -100,6 +131,9 @@ int main(int, char**) {
   RUN_TEST(test_pad_can_select_a_velocity_window_inside_one_sound);
   RUN_TEST(test_declared_third_source_can_change_kit);
   RUN_TEST(test_local_off_ddrum4_midi_echo_is_not_reprocessed);
+  RUN_TEST(test_pc_clean_silent_mode_never_emits);
+  RUN_TEST(test_bypass_returns_raw_event_and_consumes_its_echo);
+  RUN_TEST(test_mode_change_clears_pending_echoes);
   RUN_TEST(test_out_of_order_local_off_echo_is_still_suppressed);
   RUN_TEST(test_stale_local_off_echo_does_not_consume_later_note_off);
   return UNITY_END();

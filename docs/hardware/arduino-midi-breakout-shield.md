@@ -14,6 +14,7 @@ remain the source of truth. Related vendor-family documentation is retained as
 context, not as proof for this exact clone:
 
 - [LinkSprite MIDI Shield for Arduino](https://www.linksprite.com/wiki/index.php?title=MIDI_Shield_for_Arduino)
+- [SparkFun BOB-09598 source schematic](https://raw.githubusercontent.com/sparkfun/MIDI_Breakout/master/Hardware/MIDI_Breakout.sch)
 - [Seller product page](https://fr.aliexpress.com/item/1005003953829918.html)
 
 ## Observed connections and operating rule
@@ -22,7 +23,7 @@ context, not as proof for this exact clone:
 | --- | --- | --- |
 | DIN `MIDI IN` | Receives MIDI for the Uno UART through an optocoupler. | High |
 | DIN `MIDI OUT` | Transmits the Uno UART output to an external MIDI input. | High |
-| DIN `MIDI THRU` | Claimed by clone-family descriptions to be tied to the incoming MIDI path. Whether it is an electrically buffered copy, a firmware-dependent output, or merely a labelled tap is **unverified**. | Unverified |
+| DIN `MIDI THRU` | Hardware copy of the optocoupler's received MIDI signal, through its own MIDI current-loop output circuit. It bypasses Arduino TX and firmware. | Proven on the installed shield |
 | RUN / PGM switch | `PGM` allows reliable USB/CH340 programming; `RUN` connects the UART to the MIDI hardware. | High, observed |
 | Uno UART pins | MIDI uses the Uno hardware UART (D0/RX and D1/TX) at 31,250 baud. USB serial and MIDI cannot be used as independent data paths while the switch connects the MIDI circuit. | High |
 
@@ -41,7 +42,7 @@ them; they are not part of the present routing contract.
 Do not leave it in `PGM` when testing performance MIDI: the DIN MIDI connection
 is not in its intended run configuration.
 
-## THRU validation test — required before fixed parallel wiring
+## THRU validation test — passed
 
 This test neither sends MIDI to the DDrum4 nor changes its sound memory.
 
@@ -58,38 +59,39 @@ Set the shield to `RUN`. On the DDrum4 set `L.OF` for the test so a struck pad
 is certainly emitted as MIDI. Strike the currently known CYMB2/snare test pad
 and inspect the UMC MIDI input on the PC.
 
-### Pass condition
+### Observed result — 2026-08-10
 
-The UMC receives exactly the raw DDrum4 event (currently channel 12, note 17,
-with the struck velocity) without relying on Arduino firmware forwarding.
-The Arduino may be powered, but changing its diagnostic sketch must not be
-necessary for the event to appear.
+With `DDrum4 OUT -> shield IN` and `shield THRU -> UMC IN`, the passive PC
+monitor received DDrum4 channel 12, note 17 events and its poly-aftertouch
+stream. No Arduino MIDI OUT was connected for this test. This proves that THRU
+is an independent raw hardware output on the installed board.
 
 ### Interpretation
 
 | Result | Meaning | Next action |
 | --- | --- | --- |
-| Raw event arrives | THRU is a usable hardware duplicate. | Install the fixed wiring below. |
-| No event arrives | THRU is not a usable raw duplicate, is not fitted, or needs a different implementation. | Do not rely on it; use a powered 1-in/2-out MIDI-Thru distributor. |
-| Event changes, duplicates, or depends on firmware | It is not suitable for raw SD3 input. | Use the distributor fallback. |
+| Raw event arrives | THRU is a usable hardware duplicate. | **Observed: use the fixed wiring below.** |
+| No event arrives | THRU may be unpowered, connected to the wrong DIN socket, or not fitted. | Check board/cables before assuming a clone difference. |
+| Event changes or depends on firmware | It is not suitable for raw SD3 input. | Use an independent MIDI-Thru distributor. |
 
-## Fixed parallel wiring if THRU passes
+## Fixed parallel wiring — no additional hardware
 
 ```text
-                          +-> shield MIDI THRU -> UMC MIDI IN -> PC / modernizer
 DDrum4 MIDI OUT -> shield MIDI IN
-                          +-> Arduino firmware
+                    +-> shield MIDI THRU -> UMC MIDI IN -> PC / modernizer
+                    +-> Arduino firmware
 
 Arduino MIDI OUT ------------------------------------------> DDrum4 MIDI IN
 ```
 
 This is intentionally one permanent wiring arrangement.
 
-- **PC / SD3 mode:** DDrum4 `L.ON`; Arduino is `PC_SILENT` and emits no MIDI.
-  The UMC obtains the untouched DDrum4 events via THRU. DDTi and eDRUMin stay
+- **PC / SD3 raw mode:** DDrum4 `L.ON`; Arduino is `PC_SILENT` and emits no
+  MIDI. The UMC obtains untouched DDrum4 events via hardware THRU. DDTi and
+  eDRUMin stay
   directly connected by USB to the PC.
 - **Standalone nested mode:** DDrum4 `L.OF`; Arduino maps incoming events to
-  DDrum4 nested notes and emits them on its DIN OUT. THRU may simultaneously
+  DDrum4 nested notes and emits them on its DIN OUT. Hardware THRU may simultaneously
   feed the PC for monitoring, but the PC must not return those events to the
   DDrum4.
 
@@ -102,8 +104,7 @@ configuration command has been researched and verified.
 
 When the external MIDI merger is added, it must combine DDrum4 OUT, DDTi DIN
 OUT and eDRUMin DIN OUT *before* Arduino MIDI IN for standalone nested play.
-The shield THRU then mirrors that merged stream for monitoring only. It is not
-a merger and it cannot combine multiple MIDI outputs.
+Hardware THRU is not a merger and it cannot combine multiple MIDI outputs.
 
 Never connect two MIDI OUT sockets directly to one MIDI IN socket. Never feed
 the UMC/PC monitor output back to DDrum4 MIDI IN in standalone mode; that would
