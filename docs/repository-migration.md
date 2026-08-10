@@ -312,3 +312,14 @@ Expected result: `converter tests passed`.
   by the exporter. This is intentionally independent of the compact DDrum4
   selections. A complete all-articulation kit still needs the target MIDI map
   that resolves note collisions such as hi-hat articulations.
+- That target map is now implemented and a complete consolidated stereo kit
+  was generated at
+  `D:\Studio\drumgizmo\sd3-modern-metal-djentle-beast-stereo-v1`.
+  It contains 469 original captured WAVs across 28 instrument XML files:
+  kick(s), toms, main snare, three snare-position captures, rimshot,
+  cross-stick, six hi-hat states, both main crashes, ride bow/bell/edge,
+  china, splash and auxiliary cymbal. The export uses explicit target notes
+  for the otherwise ambiguous snare-position and CC4 hi-hat articulations
+  (22–24 and 81–83); ordinary GM-like notes remain unchanged. The generated
+  `drumkit.xml` and `midimap.xml` were parsed by the exporter, and the WAVs
+  are copied rather than modified.
