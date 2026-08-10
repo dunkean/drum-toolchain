@@ -27,3 +27,6 @@ velocities. Confirm that:
 
 The sampler always requires `--confirm-capture`, writes only missing raw take
 names, and records the source/licensing declaration in its neutral library.
+It also enforces the session's explicit `cooldown_ms` between newly captured
+takes, so dense VST or module sessions do not depend on an undocumented
+one-off delay. Already-complete takes remain skipped and do not add a delay.

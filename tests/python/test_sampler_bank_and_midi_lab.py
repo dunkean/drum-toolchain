@@ -131,7 +131,9 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             return output
         with tempfile.TemporaryDirectory() as temporary:
             raw = Path(temporary)
-            self.assertEqual(len(capture_pending(session, raw, capture=fake_capture)), 2)
+            with patch("drum_sampler.recorder.time.sleep") as cooldown:
+                self.assertEqual(len(capture_pending(session, raw, capture=fake_capture)), 2)
+            cooldown.assert_called_once_with(session.cooldown_ms / 1000)
             self.assertEqual(len(calls), 2)
             self.assertEqual(capture_pending(session, raw, capture=fake_capture), ())
             library = library_from_captures("fixture", session, raw, source="test VST", license_statement="user-owned render")

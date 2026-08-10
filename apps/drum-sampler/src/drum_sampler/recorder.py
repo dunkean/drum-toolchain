@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import time
 from typing import Callable
 
 from .audio import analyze_wav, capture_note
@@ -16,7 +17,8 @@ def capture_pending(session: CaptureSessionPlan, raw_directory: Path, *, capture
     """Capture only missing raw takes. Existing raw WAVs are never replaced."""
     raw_directory.mkdir(parents=True, exist_ok=True)
     captured: list[Path] = []
-    for take in session.incomplete_takes(raw_directory):
+    pending = session.incomplete_takes(raw_directory)
+    for index, take in enumerate(pending):
         output = raw_directory / take.raw_filename()
         path = capture(
             midi_port=session.midi_output,
@@ -35,6 +37,11 @@ def capture_pending(session: CaptureSessionPlan, raw_directory: Path, *, capture
         if path != output or not output.is_file():
             raise RuntimeError(f"capture function did not create expected raw take: {output}")
         captured.append(output)
+        # Let a VST/module finish its own voice bookkeeping before the next
+        # note.  This is part of the saved capture-session contract, rather
+        # than an undocumented timing assumption in a one-off script.
+        if index + 1 < len(pending) and session.cooldown_ms:
+            time.sleep(session.cooldown_ms / 1000)
     return tuple(captured)
 
 
