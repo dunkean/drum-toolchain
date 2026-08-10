@@ -15,36 +15,31 @@ poly-aftertouch. It does not use Arduino firmware or its TX output.
 ## Why modes are necessary
 
 In `L.OF`, DDrum4 needs the Arduino to return a note through MIDI IN before it
-plays. The tested DDrum4 then also retransmits that returned MIDI event on its
-MIDI OUT. The Arduino's immediate-echo guard prevents an infinite feedback
-loop, but the PC connected to THRU can see both:
-
-1. the original physical-pad event; and
-2. the DDrum4 retransmission of the Arduino-generated event.
-
-This is intentional and safe only when the active engine is aware of the
-mode. It must not be treated as an unexplained duplicate.
+plays. The original physical-pad event is always visible on the shield's
+hardware THRU. DDrum4 performance soft-through of an Arduino-returned event
+has **not** been directly proven; the earlier duplicate flood came from a PC /
+loopMIDI relay. Consequently the flashed bridge contains no event queue or
+time-based echo guard: such a guard could swallow a genuine subsequent hit.
 
 | Mode | DDrum4 Local | Arduino DIN OUT | PC input policy | Use |
 | --- | --- | --- | --- | --- |
 | `PC_CLEAN` | `L.ON` | Silent | Accept raw THRU stream. | SD3/DrumGizmo with maximum native DDrum4 expressivity and no duplicate return. |
 | `STANDALONE` | `L.OF` | Nested-map events to DDrum4. | Monitor only; do not feed that stream to SD3. | Computer-free DDrum4 bank. |
-| `DUAL` | `L.OF` | Nested-map events to DDrum4. | Modernizer accepts raw events and suppresses known returned nested events. | DDrum4 bank and SD3 together. |
-| `PC_BYPASS` (future) | `L.OF` | Return original events unchanged. | Modernizer suppresses exact returned duplicates. | Same fixed cabling without changing Local Control. |
+| `DUAL` | `L.OF` | Nested-map events to DDrum4. | Not offered until a direct DIN trace proves the DDrum4 return behavior. | Future DDrum4 bank and SD3 together. |
+| `PC_BYPASS` (future) | `L.OF` | Return original events unchanged. | Not offered until a direct DIN trace proves the DDrum4 return behavior. | Same fixed cabling without changing Local Control. |
 
 `PC_CLEAN` and `STANDALONE` are immediately safe with the existing bridge.
-`DUAL` and `PC_BYPASS` require the modernizer's return-echo filter before they
-are offered as performance modes.
+`DUAL` and `PC_BYPASS` first require a direct-DIN trace; only if it proves a
+byte-identical return may the modernizer gain a causal, bounded return filter.
 
 ## Return-echo filter contract (future modernizer)
 
-The filter is not a generic time-based MIDI de-duplicator. It receives the
-generated routing contract from the bank builder and can predict the DDrum4
-event returned for each raw event. It keeps a very short bounded expectation
-queue for corresponding note-on, note-off, pressure and relevant controller
-events. Only an event matching an expected Arduino-generated return is
-dropped. All physical-pad events stay available to SD3, including positional
-poly-aftertouch.
+The filter is not a generic time-based MIDI de-duplicator. It may only be
+implemented after the direct-DIN trace proves a return event. It receives the
+generated routing contract from the bank builder and can predict the exact
+DDrum4 event returned for each raw event. Only a byte-identical event within
+the measured physical return interval may be dropped. All physical-pad events
+stay available to SD3, including positional poly-aftertouch.
 
 The filter runs only in `DUAL` or `PC_BYPASS`; it is off in `PC_CLEAN`.
 Metrics must display matched returns, expired expectations and unmatched

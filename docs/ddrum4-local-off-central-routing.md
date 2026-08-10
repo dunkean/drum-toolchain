@@ -28,12 +28,12 @@ The Arduino has one MIDI output only: DDrum4 MIDI IN. It does not send the
 selected output back to the merger. Each input source must use a distinct MIDI
 channel, so the bridge can distinguish otherwise-identical note numbers.
 
-Some tested DDrum4 Local-OFF paths retransmit a received MIDI-IN event through
-MIDI OUT. The Arduino firmware consequently has a bounded immediate-echo
-guard: it remembers its own outgoing messages and consumes a matching return
-before route lookup. This is an in-memory comparison, not a delay or a MIDI
-timer; it adds no audible latency. The guard must remain enabled for every
-standalone Local-OFF profile.
+The temporary PC-assisted Local-OFF relay produced a feedback path, but that
+test did not isolate the DDrum4 from loopMIDI/PC routing. The SE manual only
+documents MIDI Thru for Program Change (`P.TH`), not for Note or Aftertouch.
+General DDrum4 MIDI-IN re-emission is therefore unproven. The production
+profile must enable causal echo cancellation only if the direct-DIN test in
+`ddrum4-midi-roundtrip-fix-roadmap.md` records a returned performance event.
 
 Suggested channel reservation, pending a trace from each device:
 
@@ -47,10 +47,7 @@ Suggested channel reservation, pending a trace from each device:
 The DDrum4 uses one MIDI channel for both transmission and reception, so its
 source and the Arduino's return channel are deliberately both 12. In `Local
 OFF`, locally generated pad hits are transmitted and incoming notes play the
-module. The measured module also re-emits received Note events, so the
-firmware's immediate echo guard is required and PC monitoring must follow the
-mode contract in `ddrum4-midi-loop-modes.md`. The numbers are reservations,
-not verified settings. The production profile is
+module. The numbers are reservations, not verified settings. The production profile is
 only generated after recording a MIDI trace of every source; the Arduino must
 not be flashed with guessed notes.
 
@@ -107,7 +104,9 @@ Generic note routes were already source-channel based. This makes a declared
   this is expected from the unsuitable temporary pad/input pairing and is not
   yet a final trigger calibration.
 - A first PC-assisted relay without echo protection produced approximately
-  8,883 messages in 45 seconds, proving the DDrum4 return echo exists.
+  8,883 messages in 45 seconds. This proves that the complete temporary relay
+  topology fed back; it does not identify the DDrum4 as the device performing
+  MIDI soft-through.
 - With the bounded firmware echo guard, the same test remained bounded
   (133 UMC-to-Arduino messages and 102 Arduino-to-UMC messages over 15
   seconds). The remaining traffic was pressure-rich source data, not an
@@ -122,9 +121,29 @@ Generic note routes were already source-channel based. This makes a declared
   including source velocities 44 and 127. This proves the complete pad →
   Arduino branch-selection → DDrum4 audio path. The diagnostic mapping was
   subsequently changed to preserve input velocity for dynamic-layer audition.
-- `CYMB_995` is deliberately a compact transport candidate, not an approved
+- `CYMB_995` is a transport/sound candidate, not an approved
   crash. Its late attack/short tail and silence below its current low velocity
   range were heard during this proof. The diagnostic therefore projects to
   velocity 110. Replacing it with a long, correctly trimmed crash and a
   position-distinct nested sound is a required sound-bank task, not a routing
   failure.
+- A later trace with a genuine DDrum cymbal in `CYb` mode isolated the audio
+  failure: each strike emitted C12/note 18/velocity 127, followed 23.7-25.5 ms
+  later by C12/note 18/velocity 0. The adapter correctly interpreted the
+  velocity-zero Note On as an internal Note Off and historically emitted MIDI
+  status `0x80`. The SE MIDI implementation chart says Note Off is not
+  recognized, so that output was unsupported rather than a proven cause of
+  sample gating. The panel CYMB2 button only proves the local sound assignment;
+  it does not exercise this MIDI return path.
+- The DDrum4 Nested profile therefore preserves Note On velocity and
+  polyphonic aftertouch but suppresses Note Off. This is a target-level
+  one-shot policy, not pad conditioning: no threshold, curve, debounce, or
+  pressure filter was added. Bypass mode still forwards Note Off unchanged for
+  PC/VST use.
+- The temporary exact-event queue was removed from the production bridge. It
+  could retain an expectation when no return arrived, then mistake a later real
+  hit with the same quantised velocity for a return. Since the DDrum4’s own
+  performance soft-through is still unproven, no generic or timed
+  de-duplication belongs in the live path. The direct-DIN trace gate in
+  `ddrum4-midi-roundtrip-fix-roadmap.md` is required before any causal guard
+  is reconsidered. `P.OF` disables Program Change and is not an echo policy.

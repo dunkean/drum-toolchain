@@ -47,7 +47,7 @@ void MidiDinAdapter::dispatch(uint8_t status, uint8_t data1, uint8_t data2) {
   input.data2 = data2;
   switch (status >> 4) {
     case 0x8: input.type = MidiEventType::NoteOff; break;
-    case 0x9: input.type = data2 ? MidiEventType::NoteOn : MidiEventType::NoteOff; break;
+    case 0x9: input.type = MidiEventType::NoteOn; break;
     case 0xA: input.type = MidiEventType::PolyAftertouch; break;
     case 0xB: input.type = MidiEventType::ControlChange; break;
     case 0xC: input.type = MidiEventType::ProgramChange; break;

@@ -33,6 +33,27 @@ def snare_velocity_layers(sample_count: int) -> tuple[str, ...]:
     return _SNARE_LAYER_ROWS[:sample_count]
 
 
+def cymbal_velocity_layers(sample_count: int) -> tuple[str, ...]:
+    """Return an audited cymbal layout, refusing invented partial curves.
+
+    The stored seven-row curve was transcribed from one reference *snare*
+    structure.  Taking its first 2..6 rows for a cymbal leaves the upper
+    velocity range undocumented, which is exactly how the old CYMB_995 build
+    could sound abrupt or behave as if its response was flat.  A one-layer
+    cymbal is unambiguous; a seven-layer layout uses the complete audited
+    reference curve.  Intermediate cymbal layouts must first be verified in
+    ddrum4ui with the module's panel-button velocity sweep.
+    """
+    if sample_count == 1:
+        return _SNARE_LAYER_ROWS[:1]
+    if sample_count == len(_SNARE_LAYER_ROWS):
+        return _SNARE_LAYER_ROWS
+    raise ValueError(
+        "no audited DDrum4 cymbal velocity layout for 2..6 samples; "
+        "use one or seven layers, or add a panel-verified cymbal layout"
+    )
+
+
 def materialize_sound_config(
     template: Path,
     output_config: Path,

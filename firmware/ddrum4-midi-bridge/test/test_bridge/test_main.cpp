@@ -14,7 +14,7 @@ static const uint8_t programChannels[] = {10, 11, 12};
 static const BridgeConfig config = {
     10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
     {11, 4, 4, 0, 127, 0, 127, false},
-    routes, sizeof(routes) / sizeof(routes[0]), true, true,
+    routes, sizeof(routes) / sizeof(routes[0]), true,
 };
 
 void test_zeitgeist_bow_maps_to_hihat_position_2() {
@@ -25,17 +25,15 @@ void test_zeitgeist_bow_maps_to_hihat_position_2() {
   TEST_ASSERT_EQUAL_UINT8(10, output.channel);
   TEST_ASSERT_EQUAL_UINT8(91, output.data1);
   TEST_ASSERT_EQUAL_UINT8(99, output.data2);
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOff, 11, 42, 0}, &output, 1));
-  TEST_ASSERT_EQUAL_UINT8(91, output.data1);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOff, 11, 42, 0}, &output, 1));
 }
 
-void test_hihat_direct_cc4_is_scaled_and_duplicate_is_dropped() {
+void test_hihat_direct_cc4_is_scaled_without_arduino_filtering() {
   DdrumBridge bridge(config);
   MidiEvent output;
   TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ControlChange, 11, 4, 0}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(0, output.data2);
-  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 11, 4, 0}, &output, 1));
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.duplicateCcMessages());
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ControlChange, 11, 4, 0}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ControlChange, 11, 4, 127}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(127, output.data2);
 }
@@ -53,8 +51,7 @@ void test_pad_can_select_a_velocity_window_inside_one_sound() {
   TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 10, 36, 64}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(60, output.data1);
   TEST_ASSERT_EQUAL_UINT8(19, output.data2); // midpoint of 13..24
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOff, 10, 36, 0}, &output, 1));
-  TEST_ASSERT_EQUAL_UINT8(0, output.data2);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOff, 10, 36, 0}, &output, 1));
 }
 
 void test_declared_third_source_can_change_kit() {
@@ -65,15 +62,6 @@ void test_declared_third_source_can_change_kit() {
   TEST_ASSERT_EQUAL_UINT8(7, output.data1);
 }
 
-void test_local_off_ddrum4_midi_echo_is_not_reprocessed() {
-  DdrumBridge bridge(config);
-  MidiEvent output;
-  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
-  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(output, &output, 1));
-  TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
-}
-
 void test_pc_clean_silent_mode_never_emits() {
   DdrumBridge bridge(config);
   MidiEvent output;
@@ -82,7 +70,7 @@ void test_pc_clean_silent_mode_never_emits() {
   TEST_ASSERT_EQUAL(BridgeMode::Silent, bridge.mode());
 }
 
-void test_bypass_returns_raw_event_and_consumes_its_echo() {
+void test_bypass_returns_raw_event() {
   DdrumBridge bridge(config);
   MidiEvent output;
   const MidiEvent hit = {MidiEventType::PolyAftertouch, 12, 17, 47};
@@ -92,61 +80,42 @@ void test_bypass_returns_raw_event_and_consumes_its_echo() {
   TEST_ASSERT_EQUAL_UINT8(12, output.channel);
   TEST_ASSERT_EQUAL_UINT8(17, output.data1);
   TEST_ASSERT_EQUAL_UINT8(47, output.data2);
-  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(output, &output, 1));
-  TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
 }
 
-void test_mode_change_clears_pending_echoes() {
+void test_ddrum_one_shot_policy_drops_note_off_but_keeps_aftertouch() {
   DdrumBridge bridge(config);
   MidiEvent output;
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &output, 1));
-  bridge.setMode(BridgeMode::Silent);
-  bridge.setMode(BridgeMode::Nested);
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(output, &output, 1));
+
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 127}, &output, 1));
+  TEST_ASSERT_EQUAL(MidiEventType::NoteOn, output.type);
+  TEST_ASSERT_EQUAL_UINT8(17, output.data1);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOff, 12, 17, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::PolyAftertouch, 12, 17, 47}, &output, 1));
+  TEST_ASSERT_EQUAL(MidiEventType::PolyAftertouch, output.type);
+  TEST_ASSERT_EQUAL_UINT8(47, output.data2);
 }
 
-void test_out_of_order_local_off_echo_is_still_suppressed() {
+void test_bypass_preserves_release_wire_semantics() {
   DdrumBridge bridge(config);
-  MidiEvent first;
-  MidiEvent second;
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 70}, &first, 1));
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 100}, &second, 1));
-  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(second, &second, 1));
-  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(first, &first, 1));
-}
-
-void test_exact_echo_is_consumed_without_a_time_window() {
-  DdrumBridge bridge(config);
-  MidiEvent echo;
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &echo, 1, 1));
-  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(echo, &echo, 1, 1000));
-  TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
-}
-
-void test_direct_transport_does_not_suppress_identical_source_hits() {
-  BridgeConfig direct = config;
-  direct.suppressReturnEcho = false;
-  DdrumBridge bridge(direct);
   MidiEvent output;
-  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process(hit, &output, 1));
-  TEST_ASSERT_EQUAL_UINT32(0, bridge.suppressedEchoMessages());
+  bridge.setMode(BridgeMode::Bypass);
+
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 0}, &output, 1));
+  TEST_ASSERT_EQUAL(MidiEventType::NoteOn, output.type);
+  TEST_ASSERT_EQUAL_UINT8(12, output.channel);
+  TEST_ASSERT_EQUAL_UINT8(17, output.data1);
 }
 
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zeitgeist_bow_maps_to_hihat_position_2);
-  RUN_TEST(test_hihat_direct_cc4_is_scaled_and_duplicate_is_dropped);
+  RUN_TEST(test_hihat_direct_cc4_is_scaled_without_arduino_filtering);
   RUN_TEST(test_unmapped_events_are_not_blindly_forwarded);
   RUN_TEST(test_pad_can_select_a_velocity_window_inside_one_sound);
   RUN_TEST(test_declared_third_source_can_change_kit);
-  RUN_TEST(test_local_off_ddrum4_midi_echo_is_not_reprocessed);
   RUN_TEST(test_pc_clean_silent_mode_never_emits);
-  RUN_TEST(test_bypass_returns_raw_event_and_consumes_its_echo);
-  RUN_TEST(test_mode_change_clears_pending_echoes);
-  RUN_TEST(test_out_of_order_local_off_echo_is_still_suppressed);
-  RUN_TEST(test_exact_echo_is_consumed_without_a_time_window);
-  RUN_TEST(test_direct_transport_does_not_suppress_identical_source_hits);
+  RUN_TEST(test_bypass_returns_raw_event);
+  RUN_TEST(test_ddrum_one_shot_policy_drops_note_off_but_keeps_aftertouch);
+  RUN_TEST(test_bypass_preserves_release_wire_semantics);
   return UNITY_END();
 }

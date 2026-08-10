@@ -21,16 +21,18 @@ const uint8_t programChannels[] = {10, 11, 12};
 const BridgeConfig config = {
     10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
     {11, 4, 4, 0, 127, 0, 127, false},
-    routes, sizeof(routes) / sizeof(routes[0]), true, true,
+    routes, sizeof(routes) / sizeof(routes[0]), true,
 };
 
-void test_note_and_note_off() {
+void test_note_and_release_policy() {
   DdrumBridge bridge(config);
   MidiEvent output{};
   require(bridge.process({MidiEventType::NoteOn, 11, 42, 99}, &output, 1) == 1, "mapped NoteOn missing");
   require(output.channel == 10 && output.data1 == 91 && output.data2 == 99, "mapped NoteOn differs");
-  require(bridge.process({MidiEventType::NoteOff, 11, 42, 0}, &output, 1) == 1, "mapped NoteOff missing");
-  require(output.data1 == 91 && output.data2 == 0, "mapped NoteOff differs");
+  require(bridge.process({MidiEventType::NoteOff, 11, 42, 0}, &output, 1) == 0,
+          "DDrum4 must not receive an unsupported NoteOff");
+  require(bridge.process({MidiEventType::NoteOn, 11, 42, 0}, &output, 1) == 0,
+          "DDrum4 release marker must not be relayed");
 }
 
 void test_cc_and_unknown_message_policy() {
@@ -38,8 +40,8 @@ void test_cc_and_unknown_message_policy() {
   MidiEvent output{};
   require(bridge.process({MidiEventType::ControlChange, 11, 4, 64}, &output, 1) == 1, "CC4 missing");
   require(output.type == MidiEventType::ControlChange && output.data1 == 4, "CC4 mapping differs");
-  require(bridge.process({MidiEventType::ControlChange, 11, 4, 64}, &output, 1) == 0, "duplicate CC4 not filtered");
-  require(bridge.duplicateCcMessages() == 1, "duplicate CC count differs");
+  require(bridge.process({MidiEventType::ControlChange, 11, 4, 64}, &output, 1) == 1,
+          "CC4 must be passed without an Arduino-side filter");
   require(bridge.process({MidiEventType::NoteOn, 10, 38, 127}, &output, 1) == 0, "unknown NoteOn forwarded");
 }
 
@@ -58,56 +60,35 @@ void test_third_source_program_change_is_relayed() {
   require(output.channel == 10 && output.data1 == 7, "third source ProgramChange differs");
 }
 
-void test_immediate_ddrum4_echo_is_suppressed() {
+void test_ddrum_one_shot_policy() {
   DdrumBridge bridge(config);
   MidiEvent output{};
-  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
-  require(bridge.process(hit, &output, 1) == 1, "DDrum4 source note missing");
-  require(bridge.process(output, &output, 1) == 0, "DDrum4 echo was not suppressed");
-  require(bridge.suppressedEchoMessages() == 1, "suppressed echo count differs");
-}
 
-void test_out_of_order_echo_does_not_block_later_echo() {
-  DdrumBridge bridge(config);
-  MidiEvent first{};
-  MidiEvent second{};
-  require(bridge.process({MidiEventType::NoteOn, 12, 17, 70}, &first, 1) == 1, "first source note missing");
-  require(bridge.process({MidiEventType::NoteOn, 12, 17, 100}, &second, 1) == 1, "second source note missing");
-  require(bridge.process(second, &second, 1) == 0, "out-of-order later echo was not suppressed");
-  require(bridge.process(first, &first, 1) == 0, "out-of-order first echo was not suppressed");
-}
+  require(bridge.process({MidiEventType::NoteOn, 12, 17, 127}, &output, 1) == 1,
+          "one-shot NoteOn missing");
+  require(bridge.process({MidiEventType::NoteOff, 12, 17, 0}, &output, 1) == 0,
+          "one-shot NoteOff was forwarded");
+  require(bridge.process({MidiEventType::PolyAftertouch, 12, 17, 47}, &output, 1) == 1,
+          "one-shot aftertouch was filtered");
+  require(output.type == MidiEventType::PolyAftertouch && output.data2 == 47,
+          "one-shot aftertouch differs");
 
-void test_exact_echo_is_consumed_without_a_time_window() {
-  DdrumBridge bridge(config);
-  MidiEvent echo{};
-  require(bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &echo, 1, 1) == 1, "source note missing");
-  require(bridge.process(echo, &echo, 1, 1000) == 0, "delayed exact echo was not suppressed");
-  require(bridge.suppressedEchoMessages() == 1, "exact echo count differs");
-}
-
-void test_direct_transport_does_not_suppress_identical_source_hits() {
-  BridgeConfig direct = config;
-  direct.suppressReturnEcho = false;
-  DdrumBridge bridge(direct);
-  MidiEvent output{};
-  const MidiEvent hit = {MidiEventType::NoteOn, 12, 17, 93};
-  require(bridge.process(hit, &output, 1) == 1, "first direct source hit missing");
-  require(bridge.process(hit, &output, 1) == 1, "second direct source hit was suppressed");
-  require(bridge.suppressedEchoMessages() == 0, "direct transport cannot suppress echoes");
+  bridge.setMode(BridgeMode::Bypass);
+  require(bridge.process({MidiEventType::NoteOn, 12, 17, 0}, &output, 1) == 1,
+          "bypass release marker was filtered");
+  require(output.type == MidiEventType::NoteOn && output.channel == 12 && output.data1 == 17 && output.data2 == 0,
+          "bypass release marker differs");
 }
 
 }  // namespace
 
 int main() {
   try {
-    test_note_and_note_off();
+    test_note_and_release_policy();
     test_cc_and_unknown_message_policy();
     test_velocity_window();
     test_third_source_program_change_is_relayed();
-    test_immediate_ddrum4_echo_is_suppressed();
-    test_out_of_order_echo_does_not_block_later_echo();
-    test_exact_echo_is_consumed_without_a_time_window();
-    test_direct_transport_does_not_suppress_identical_source_hits();
+    test_ddrum_one_shot_policy();
     std::cout << "firmware bridge core tests passed\n";
     return 0;
   } catch (const std::exception& error) {

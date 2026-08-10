@@ -11,7 +11,7 @@ import mido
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend, _declared_output
-from ddrum4_bank.sound_config import materialize_sound_config, snare_velocity_layers
+from ddrum4_bank.sound_config import cymbal_velocity_layers, materialize_sound_config, snare_velocity_layers
 from ddrum4_bank.actual_bank import report_actual_bank
 from ddrum4_bank.backup import inspect_settings_backup, validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
@@ -57,12 +57,18 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
                 library, raw_directory=raw, output_directory=root / "build", sound_id="CYMB_777",
                 instrument="crash", template=template,
                 profile=QualityProfile(trim_threshold_db=-80, force_mono=True, max_duration_seconds=0.05),
-                velocities=(56, 127),
+                velocities=(56,),
             )
             self.assertEqual(build.layers[0].raw_file, "best.wav")
             self.assertEqual(build.layers[0].channels, 1)
             self.assertTrue(build.config.is_file())
-            self.assertTrue((root / "build" / "CYMB_777_s02.wav").is_file())
+            self.assertTrue((root / "build" / "CYMB_777_s01.wav").is_file())
+
+    def test_cymbal_builder_refuses_unreviewed_partial_velocity_layout(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no audited DDrum4 cymbal velocity layout"):
+            cymbal_velocity_layers(4)
+        self.assertEqual(len(cymbal_velocity_layers(1)), 1)
+        self.assertEqual(len(cymbal_velocity_layers(7)), 7)
 
     def test_render_comparison_measures_onset_level_tail_and_tone(self) -> None:
         import numpy as np

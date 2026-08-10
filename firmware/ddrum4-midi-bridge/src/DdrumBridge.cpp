@@ -3,40 +3,7 @@
 DdrumBridge::DdrumBridge(const BridgeConfig& config) : config_(config) {}
 
 void DdrumBridge::setMode(BridgeMode mode) {
-  // A mode change must never leave stale expectations that could consume the
-  // first genuine strike in the new mode.  It emits no MIDI and never creates
-  // an artificial note-off.
   mode_ = mode;
-  expectedEchoCount_ = 0;
-  hasLastHihatCc_ = false;
-}
-
-bool DdrumBridge::consumeExpectedEcho(const MidiEvent& input) {
-  if (!expectedEchoCount_) return false;
-  for (size_t i = 0; i < expectedEchoCount_; ++i) {
-    const MidiEvent& expected = expectedEchoes_[i];
-    if (input.type != expected.type || input.channel != expected.channel ||
-        input.data1 != expected.data1 || input.data2 != expected.data2) {
-      continue;
-    }
-    for (size_t remaining = i + 1; remaining < expectedEchoCount_; ++remaining) {
-      expectedEchoes_[remaining - 1] = expectedEchoes_[remaining];
-    }
-    --expectedEchoCount_;
-    ++suppressedEchoMessages_;
-    return true;
-  }
-  return false;
-}
-
-void DdrumBridge::rememberExpectedEcho(const MidiEvent& output) {
-  if (expectedEchoCount_ == kEchoGuardCapacity) {
-    for (size_t i = 1; i < expectedEchoCount_; ++i) {
-      expectedEchoes_[i - 1] = expectedEchoes_[i];
-    }
-    --expectedEchoCount_;
-  }
-  expectedEchoes_[expectedEchoCount_++] = output;
 }
 
 const NoteRoute* DdrumBridge::findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const {
@@ -84,13 +51,11 @@ uint8_t DdrumBridge::mapHihatCc(uint8_t value) const {
 
 size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t capacity, uint32_t) {
   if (!capacity) return 0;
-  if (config_.suppressReturnEcho && consumeExpectedEcho(input)) return 0;
 
   if (mode_ == BridgeMode::Silent) return 0;
 
   if (mode_ == BridgeMode::Bypass) {
     *output = input;
-    if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
     return 1;
   }
 
@@ -100,14 +65,7 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   if (input.type == MidiEventType::ControlChange && input.channel == h.sourceChannel &&
       input.data1 == h.inputCc) {
     uint8_t mapped = mapHihatCc(input.data2);
-    if (hasLastHihatCc_ && mapped == lastHihatCc_) {
-      ++duplicateCcMessages_;
-      return 0;
-    }
-    hasLastHihatCc_ = true;
-    lastHihatCc_ = mapped;
     *output = {MidiEventType::ControlChange, config_.outputChannel, h.outputCc, mapped};
-    if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
     return 1;
   }
 
@@ -115,29 +73,34 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     for (size_t i = 0; i < config_.relayProgramChannelCount; ++i) {
       if (input.channel == config_.relayProgramChannels[i]) {
         *output = {MidiEventType::ProgramChange, config_.outputChannel, input.data1, 0};
-        if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
         return 1;
       }
     }
   }
 
-  if (input.type != MidiEventType::NoteOn && input.type != MidiEventType::NoteOff &&
-      input.type != MidiEventType::PolyAftertouch) {
+  // DDrum4 sends release as 0x90 with velocity zero and does not recognise
+  // MIDI Note Off. Its one-shot renderer therefore receives no release event.
+  if ((input.type == MidiEventType::NoteOn && input.data2 == 0) ||
+      input.type == MidiEventType::NoteOff) {
+    ++ignoredMessages_;
+    return 0;
+  }
+
+  if (input.type != MidiEventType::NoteOn && input.type != MidiEventType::PolyAftertouch) {
     ++ignoredMessages_;
     return 0;
   }
 
   const NoteRoute* route = findNoteRoute(input.channel, input.data1);
-  // Static manifest routes make Note On and Note Off deterministically resolve
-  // to the same output note without a 16 x 128 active-note RAM table. Dynamic
-  // routing modes will add a deliberately bounded active-note cache later.
+  // Static manifest routes make Note On and polyphonic aftertouch
+  // deterministically resolve to the same output note without an active-note
+  // RAM table. Dynamic routing modes will add one only when needed.
   if (!route) {
     ++ignoredMessages_;
     return 0;
   }
   uint8_t value = input.data2;
-  if (input.type == MidiEventType::NoteOn && input.data2 != 0) value = mapVelocity(*route, input.data2);
+  if (input.type == MidiEventType::NoteOn) value = mapVelocity(*route, input.data2);
   *output = {input.type, config_.outputChannel, route->outputNote, value};
-  if (config_.suppressReturnEcho) rememberExpectedEcho(*output);
   return 1;
 }

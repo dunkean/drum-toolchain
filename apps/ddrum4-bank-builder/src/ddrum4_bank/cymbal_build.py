@@ -10,7 +10,7 @@ from typing import Sequence
 from drum_sampler.audio import QualityProfile, process_wav
 from drum_sampler.library import SampleLibrary, SampleTake
 
-from .sound_config import materialize_sound_config, snare_velocity_layers
+from .sound_config import cymbal_velocity_layers, materialize_sound_config
 
 
 _SOUND_ID = re.compile(r"^[A-Z0-9]{3,4}_[0-9]{3}$")
@@ -79,6 +79,9 @@ def materialize_flagship_cymbal(
         raise ValueError("sound_id must be an uppercase DDrum4 group and three-digit number")
     if not 1 <= len(velocities) <= 7 or len(set(velocities)) != len(velocities):
         raise ValueError("flagship cymbal needs 1..7 unique velocity layers")
+    # Validate before processing any WAV so an unreviewed partial curve never
+    # leaves a half-built directory on disk.
+    layer_rows = cymbal_velocity_layers(len(velocities))
     if output_directory.exists():
         raise FileExistsError(f"refusing to reuse output directory: {output_directory}")
     if not raw_directory.is_dir():
@@ -117,6 +120,6 @@ def materialize_flagship_cymbal(
     config = materialize_sound_config(
         template, output_directory / f"{sound_id}.cfg", sound_name=sound_id,
         output_sound=sound, sample_files=sample_files,
-        layer_rows=snare_velocity_layers(len(sample_files)),
+        layer_rows=layer_rows,
     )
     return FlagshipCymbalBuild(sound_id, instrument, config, sound, profile, tuple(layers))

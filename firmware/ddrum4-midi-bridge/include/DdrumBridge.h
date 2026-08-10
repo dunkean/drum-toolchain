@@ -24,8 +24,7 @@ struct MidiEvent {
 enum class BridgeMode : uint8_t {
   // Apply the generated nested routing contract for DDrum4 Local-OFF play.
   Nested,
-  // Return the original event to the module. Used with Local-OFF when a
-  // transparent return path is wanted; the return-echo guard stays active.
+  // Return the original event without nested mapping.
   Bypass,
   // Never emit from Arduino DIN OUT. Used for PC_CLEAN with DDrum4 Local-ON.
   Silent,
@@ -66,9 +65,6 @@ struct BridgeConfig {
   const NoteRoute* noteRoutes;
   size_t noteRouteCount;
   bool relayProgramChange;
-  // Enable only after a trace proves that this particular module/cabling sends
-  // a returned copy of Arduino DIN OUT through its MIDI OUT.
-  bool suppressReturnEcho;
 };
 
 // Pure, allocation-free routing core. It has no Arduino dependency so tests can
@@ -80,29 +76,13 @@ class DdrumBridge {
   void setMode(BridgeMode mode);
   BridgeMode mode() const { return mode_; }
   uint32_t ignoredMessages() const { return ignoredMessages_; }
-  uint32_t duplicateCcMessages() const { return duplicateCcMessages_; }
-  uint32_t suppressedEchoMessages() const { return suppressedEchoMessages_; }
 
  private:
   BridgeConfig config_;
   BridgeMode mode_ = BridgeMode::Nested;
-  bool hasLastHihatCc_ = false;
-  uint8_t lastHihatCc_ = 0;
   uint32_t ignoredMessages_ = 0;
-  uint32_t duplicateCcMessages_ = 0;
-  // Some DDrum4 configurations retransmit a MIDI-IN event through MIDI OUT.
-  // The bridge is normally in that return path, so each emitted event is
-  // recorded once and exactly one byte-identical return is consumed.  This is
-  // intentionally an exact-event list, not a timer, trigger filter or MIDI
-  // interpretation layer.
-  static constexpr size_t kEchoGuardCapacity = 64;
-  MidiEvent expectedEchoes_[kEchoGuardCapacity]{};
-  size_t expectedEchoCount_ = 0;
-  uint32_t suppressedEchoMessages_ = 0;
 
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   uint8_t mapVelocity(const NoteRoute& route, uint8_t velocity) const;
   uint8_t mapHihatCc(uint8_t value) const;
-  bool consumeExpectedEcho(const MidiEvent& input);
-  void rememberExpectedEcho(const MidiEvent& output);
 };
