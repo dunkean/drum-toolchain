@@ -694,18 +694,24 @@ Produce `build/reports/merge-baseline.md` containing versions, commands, results
 
 Soundbank implementation may start only when all conditions below are true:
 
-- [ ] The new `drum-toolchain` Git repository exists.
-- [ ] The old source directories remain intact.
-- [ ] Build products and reference assets are excluded from Git.
-- [ ] Shared domain models and composable profiles exist.
-- [ ] Existing Python behavior has migrated and tests pass.
-- [ ] Firmware native tests pass from the new location.
-- [ ] The modernizer builds cleanly and its core tests pass.
-- [ ] The sampler can create a neutral sample-library fixture.
-- [ ] The bank builder can discover and inspect `ddrum4edit`.
-- [ ] MIDI-lab can list, match, record, and replay ports/traces.
-- [ ] One root command runs the complete non-hardware test suite.
-- [ ] `build/reports/merge-baseline.md` exists and contains no unexplained regression.
+- [x] The new `drum-toolchain` Git repository exists.
+- [x] The old source directories remain intact.
+- [x] Build products and reference assets are excluded from Git.
+- [x] Shared domain models and composable profiles exist.
+- [x] Existing Python behavior has migrated and tests pass.
+- [x] Firmware native tests pass from the new location.
+- [x] The modernizer builds cleanly and its core tests pass.
+- [x] The sampler can create a neutral sample-library fixture.
+- [x] The bank builder can discover and inspect `ddrum4edit`.
+- [x] MIDI-lab can list, match, record, and replay ports/traces.
+- [x] One root command runs the complete non-hardware test suite.
+- [x] `build/reports/merge-baseline.md` exists and contains no unexplained regression.
+
+**Gate passed — 2026-08-10.** Evidence is retained in
+`build/reports/merge-baseline.md`, `docs/repository-migration.md`, and the
+root `scripts/test-all.ps1` suite. The current suite has subsequently grown
+beyond the original baseline; soundbank work is therefore permitted and must
+continue to preserve the safety rules below.
 
 If any item fails, fix the merge first. Do not compensate by adding soundbank-specific work to the wrong project.
 
@@ -1173,4 +1179,3 @@ The next agent should execute these tasks in order:
 18. Validate ddrum4 -> modernizer -> SD3.
 19. Generate and validate the Arduino bridge.
 20. Complete the DrumGizmo stereo and four-output exporters.
-
