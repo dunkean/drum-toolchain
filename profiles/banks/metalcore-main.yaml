@@ -1,9 +1,11 @@
 bank:
   id: metalcore-main
-  status: planning
-  memory_blocks: 8192
-  # Estimates only. Actual fit is based on ddrum4edit encoded block counts.
-  planning_memory_blocks: 7000
+  status: measured-baseline
+  # Measured with SHIFT+MEM.LEFT before B0/B1 test sounds. It is a live
+  # module budget, not the nominal 8 MB hardware capacity. Re-read it before
+  # every transfer batch because KICK_999/SNRE_998 already consume memory.
+  memory_blocks: 1270
+  planning_memory_blocks: 1000
   quality_priority:
     - snare_main
     - hihat_main
@@ -22,6 +24,8 @@ bank:
     positions: [1, 2, 4, 8]
 notes:
   - This is a planning manifest. It does not describe verified ddrum4 assignments yet.
+  - Actual B1 `SNRE_998` encoded at 94 blocks for seven prepared head layers.
+  - Actual B3 candidate `KICK_997` encoded at 124 blocks for seven prepared layers.
   - Planned sound groups are logical containers, not measured DDrum4 Sound IDs.
 
 # Each option is selected from a dense neutral sample library after capture.
@@ -31,8 +35,8 @@ logical_components:
     priority: 100
     planned_sound_group: snare-main
     options:
-      - {id: snare-head-flagship, quality: 10, sample_slots: 7, layers: 7, estimated_blocks: 1050, source_take_ids: [snare_main.head.dense]}
-      - {id: snare-head-compact, quality: 6, sample_slots: 4, layers: 4, estimated_blocks: 560, source_take_ids: [snare_main.head.dense]}
+      - {id: snare-head-flagship, quality: 10, sample_slots: 7, layers: 7, estimated_blocks: 94, source_take_ids: [snare_main.head.dense]}
+      - {id: snare-head-compact, quality: 6, sample_slots: 4, layers: 4, estimated_blocks: 58, source_take_ids: [snare_main.head.dense]}
   - id: snare_main.rim
     priority: 96
     planned_sound_group: snare-main
@@ -67,5 +71,5 @@ logical_components:
     priority: 85
     planned_sound_group: kick-main
     options:
-      - {id: kick-main, quality: 8, sample_slots: 4, layers: 4, estimated_blocks: 540, source_take_ids: [kick_main.head.dense]}
-      - {id: kick-compact, quality: 4, sample_slots: 2, layers: 2, estimated_blocks: 260, source_take_ids: [kick_main.head.dense]}
+      - {id: kick-main, quality: 8, sample_slots: 7, layers: 7, estimated_blocks: 124, source_take_ids: [kick_main.head.dense]}
+      - {id: kick-compact, quality: 4, sample_slots: 2, layers: 2, estimated_blocks: 48, source_take_ids: [kick_main.head.dense]}

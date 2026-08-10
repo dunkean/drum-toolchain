@@ -262,3 +262,17 @@ Expected result: `converter tests passed`.
   curves, prepared mono source WAVs and 94 actual encoded blocks as
   `SNRE_998`; transfer completed without a PC or module error. The remaining
   B1 gate is a module output velocity/position sweep with recordings.
+
+## B3 priority candidates — 2026-08-10
+
+- `KICK_997` was generated from seven original SD3 kick velocity captures with
+  the same crossfade layout and encoded at 124 blocks. It remains offline
+  until the live free-memory value is refreshed.
+- `HHAT_996` was generated from nine original SD3 CC4 opening positions
+  (0, 16, …, 127), encoded at 43 blocks, and transferred successfully through
+  the UMC MIDI route. Its layer parameters are a one-time transcribed
+  continuous-hi-hat *structure*; no factory sample files are included in the
+  generated sound or repository.
+- The bank planner now uses the measured 1,270-block starting budget rather
+  than an unverified nominal 8,192-block figure. Every future transfer batch
+  must re-read `SHIFT+MEM.LEFT` before being declared to fit.

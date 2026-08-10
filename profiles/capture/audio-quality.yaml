@@ -36,3 +36,23 @@ profiles:
     lowpass_hz: 16500
     max_duration_seconds: 1.35
     force_mono: true
+  ddrum4_drum:
+    target_sample_rate: 44100
+    trim_threshold_db: -50
+    normalize_dbfs: -1.5
+    fade_in_ms: 2.0
+    fade_out_ms: 8.0
+    highpass_hz: 30
+    lowpass_hz: 16000
+    max_duration_seconds: 1.0
+    force_mono: true
+  ddrum4_cymbal:
+    target_sample_rate: 44100
+    trim_threshold_db: -52
+    normalize_dbfs: -2.0
+    fade_in_ms: 2.0
+    fade_out_ms: 15.0
+    highpass_hz: 30
+    lowpass_hz: 15500
+    max_duration_seconds: 1.75
+    force_mono: true
