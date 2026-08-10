@@ -21,6 +21,7 @@ from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
 from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
 from ddrum4_bank.transport import resolve_port, send_midi_file
 from ddrum4_bank.b0 import B0Fixture, verify_b0_build, write_fixture_manifest
+from ddrum4_bank.hardware import transfer_one_sound
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
 from drum_sampler.library import SampleTake, merge_libraries
@@ -28,6 +29,23 @@ from drum_domain import validate_document
 
 
 class SamplerBankAndMidiLabTests(unittest.TestCase):
+    def test_hardware_transfer_requires_confirmation_and_receipt_follows_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sound = Path(temporary) / "fixture.mid"
+            sound.write_bytes(b"MThd")
+            with self.assertRaisesRegex(ValueError, "hardware write refused"):
+                transfer_one_sound(sound, "fixture-out", confirmed=False)
+            with patch("ddrum4_bank.hardware.send_midi_file", return_value=11) as sender:
+                receipt = transfer_one_sound(sound, "fixture-out", confirmed=True, sysex_chunk_bytes=255)
+            self.assertEqual(receipt.messages_sent, 11)
+            self.assertEqual(receipt.sysex_chunk_bytes, 255)
+            self.assertEqual(sender.call_args.args[:3], (sound, "fixture-out", 0.4))
+            receipt_path = Path(temporary) / "receipt.json"
+            receipt.write(receipt_path)
+            self.assertIn('"messages_sent": 11', receipt_path.read_text(encoding="utf-8"))
+            with self.assertRaises(FileExistsError):
+                receipt.write(receipt_path)
+
     def test_midi_sound_transfer_routes_an_all_sysex_file_to_native_sender(self) -> None:
         class SoundFile:
             tracks: list[object] = []

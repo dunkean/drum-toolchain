@@ -90,6 +90,24 @@ transfers use the same native API rather than the general Python MIDI backend.
 The latter can carry the bytes through a virtual port but was rejected by the
 physical DDrum4 even with identical framing and timing.
 
+## Single-sound hardware write receipt
+
+`transfer-sound` is the only bank-builder CLI command that writes a sound to
+hardware. It deliberately accepts exactly one file, requires
+`--confirm-hardware-write`, and creates its JSON receipt only after the native
+sender has reported a non-zero message count. It is not a batch uploader: read
+`SHIFT + MEM.LEFT`, confirm the intended Sound ID, and run it separately for
+each candidate. For the UMC route, do not request fragmentation; reserve
+`--sysex-chunk-bytes 255` for diagnosing the Midiface limitation.
+
+```powershell
+$env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
+python -m ddrum4_bank.cli transfer-sound D:\Studio\ddrum4-b3\rim-999\RIM_999.mid `
+  --output 'UMC404HD 192k MIDI Out 9' `
+  --receipt D:\Studio\ddrum4-b3\rim-999\transfer-receipt.json `
+  --confirm-hardware-write
+```
+
 ## Capturing a native DDrum4UI transfer on Windows
 
 The command below records a manually initiated DDrum4UI SysEx send without

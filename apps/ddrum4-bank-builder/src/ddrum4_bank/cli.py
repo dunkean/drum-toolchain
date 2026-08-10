@@ -15,6 +15,7 @@ from .plan import compare_plan, render_comparison
 from .b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from .compiler import compile_nested_file, write_compilation
 from .actual_bank import report_actual_bank
+from .hardware import transfer_one_sound
 
 
 def _backend(value: str | None) -> Ddrum4EditBackend:
@@ -70,6 +71,13 @@ def build_parser() -> argparse.ArgumentParser:
     actual.add_argument("--capacity-blocks", required=True, type=int, help="live free-memory value read from the module before this batch")
     actual.add_argument("--output", required=True, type=Path, help="non-overwriting JSON report path")
     actual.add_argument("sounds", nargs="+", type=Path)
+    transfer = subparsers.add_parser("transfer-sound", help="send exactly one built sound to hardware after an explicit confirmation")
+    transfer.add_argument("sound", type=Path)
+    transfer.add_argument("--output", required=True, help="unique MIDI output name or unambiguous substring")
+    transfer.add_argument("--receipt", required=True, type=Path, help="non-overwriting JSON receipt written only after success")
+    transfer.add_argument("--sysex-pause", type=float, default=0.4)
+    transfer.add_argument("--sysex-chunk-bytes", type=int, help="Windows diagnostic fragmentation, e.g. 255 for Midiface")
+    transfer.add_argument("--confirm-hardware-write", action="store_true", help="required after verifying backup, Sound ID and live memory")
     return parser
 
 
@@ -113,6 +121,16 @@ def main(argv: list[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report.to_document(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"wrote {args.output}; {report.used_blocks}/{report.capacity_blocks} blocks")
+        return 0
+    if args.command == "transfer-sound":
+        if args.receipt.exists():
+            raise FileExistsError(f"refusing to overwrite transfer receipt: {args.receipt}")
+        receipt = transfer_one_sound(
+            args.sound, args.output, confirmed=args.confirm_hardware_write,
+            sysex_pause_seconds=args.sysex_pause, sysex_chunk_bytes=args.sysex_chunk_bytes,
+        )
+        receipt.write(args.receipt)
+        print(f"sent {receipt.messages_sent} messages to {receipt.midi_output}; wrote {args.receipt}")
         return 0
     if args.command == "inspect-settings-backup":
         print(json.dumps(inspect_settings_backup(args.backup).to_document(), indent=2, sort_keys=True))
