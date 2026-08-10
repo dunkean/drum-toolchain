@@ -302,6 +302,25 @@ Expected result: `converter tests passed`.
   proof is explicitly deleted on the module. Deleting its measured 137 blocks
   should restore approximately 152 free blocks while retaining `RIM_999` and
   the seven-layer `SNRE_998`.
+
+## Empty-module baseline and core reload — 2026-08-10
+
+- The owner explicitly cleared every DDrum4 sound group through the supported
+  front-panel group-mark/delete operation. `SHIFT+MEM.LEFT` then reported
+  **8.12**, establishing the real empty sound-memory capacity as 8,120 blocks.
+  This supersedes the earlier 1,270-block *free-space* baseline; that smaller
+  number was not the total module capacity.
+- The previous compact candidates were intentionally retained as an auditable
+  first core, not mistaken for the final quality allocation. Their freshly
+  generated actual report is outside Git at
+  `D:\Studio\ddrum4-b3\empty-module-core-bank-report-20260810.json`:
+  13 sounds, 1,240 encoded blocks, and 6,880 planned blocks remaining.
+- All 13 files were sent one at a time through `UMC404HD 192k MIDI Out 9`,
+  with a non-overwriting receipt beside each source sound. The list is
+  `RIM_999`, `SNRE_998`, `HHAT_996`, `CYMB_995`, `CYMB_994`, `KICK_997`, four
+  toms, and the three compact ride-zone candidates. The next authoritative
+  step is the module's post-transfer `SHIFT+MEM.LEFT` reading and audition;
+  no mapping or kit assignment has been assumed or written yet.
 - A compact three-file ride candidate is built but intentionally not yet
   transferred: bow 20 blocks, bell 20 blocks, edge 89 blocks. The revised
   offline complete-kit report is 1,240 / 1,270 blocks (30 nominal free); use

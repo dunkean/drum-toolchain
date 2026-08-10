@@ -1,11 +1,11 @@
 bank:
   id: metalcore-main
-  status: measured-baseline
-  # Measured with SHIFT+MEM.LEFT before B0/B1 test sounds. It is a live
-  # module budget, not the nominal 8 MB hardware capacity. Re-read it before
-  # every transfer batch because KICK_999/SNRE_998 already consume memory.
-  memory_blocks: 1270
-  planning_memory_blocks: 1000
+  status: measured-empty-module
+  # Measured after deliberately deleting every complete sound group. The
+  # display value 8.12 means 8,120 actual DDrum4 blocks, not an estimate.
+  # Keep an explicit reserve for later alternatives and module-side overhead.
+  memory_blocks: 8120
+  planning_memory_blocks: 7000
   quality_priority:
     - snare_main
     - hihat_main
@@ -24,6 +24,7 @@ bank:
     positions: [1, 2, 4, 8]
 notes:
   - This is a planning manifest. It does not describe verified ddrum4 assignments yet.
+  - The empty-module capacity was measured as 8,120 blocks on 2026-08-10.
   - Actual B1 `SNRE_998` encoded at 94 blocks for seven prepared head layers.
   - Actual B3 candidate `KICK_997` encoded at 124 blocks for seven prepared layers.
   - Planned sound groups are logical containers, not measured DDrum4 Sound IDs.

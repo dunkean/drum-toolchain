@@ -95,6 +95,15 @@ the 137-block `SNRE_999` proof. The user must delete a sound through the
 module's `SHIFT+SOUND`, `SHIFT+MARK`, then twice `SHIFT+DELETE` workflow. A
 bank transfer tool must never infer replacement from the numeric suffix alone.
 
+### Empty-memory baseline — measured 2026-08-10
+
+After the owner deliberately deleted every full sound group, the module showed
+`MEM.LEFT = 8.12`: **8,120 blocks** is the capacity for planning a newly empty
+bank. The previous `1.27` figure was merely the free space in a populated
+factory/user bank. A 13-sound, 1,240-block compact core was then transferred
+one sound at a time through the UMC route; its expected post-transfer free
+space is 6,880 blocks. Re-read `SHIFT+MEM.LEFT` before any later batch.
+
 On Windows, DDrum4UI uses the WinMM `midiOutLongMsg` API. All-SysEx sound
 transfers use the same native API rather than the general Python MIDI backend.
 The latter can carry the bytes through a virtual port but was rejected by the
