@@ -14,6 +14,7 @@ from .transport import receive_midi_dump
 from .plan import compare_plan, render_comparison
 from .b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from .compiler import compile_nested_file, write_compilation
+from .actual_bank import report_actual_bank
 
 
 def _backend(value: str | None) -> Ddrum4EditBackend:
@@ -65,6 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
     allocation.add_argument("--output", type=Path, help="optional Markdown report path")
+    actual = subparsers.add_parser("report-encoded-bank", help="inspect encoded sounds and report their real cumulative block cost")
+    actual.add_argument("--capacity-blocks", required=True, type=int, help="live free-memory value read from the module before this batch")
+    actual.add_argument("--output", required=True, type=Path, help="non-overwriting JSON report path")
+    actual.add_argument("sounds", nargs="+", type=Path)
     return parser
 
 
@@ -99,6 +104,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {args.output}")
         else:
             print(report)
+        return 0
+    if args.command == "report-encoded-bank":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite actual bank report: {args.output}")
+        backend = _backend(args.ddrum4edit)
+        report = report_actual_bank(args.capacity_blocks, ((sound, backend.encoded_blocks(sound)) for sound in args.sounds))
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report.to_document(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"wrote {args.output}; {report.used_blocks}/{report.capacity_blocks} blocks")
         return 0
     if args.command == "inspect-settings-backup":
         print(json.dumps(inspect_settings_backup(args.backup).to_document(), indent=2, sort_keys=True))

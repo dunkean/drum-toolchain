@@ -11,6 +11,7 @@ from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, anal
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend, _declared_output
 from ddrum4_bank.sound_config import materialize_sound_config, snare_velocity_layers
+from ddrum4_bank.actual_bank import report_actual_bank
 from ddrum4_bank.backup import inspect_settings_backup, validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.plan import compare_plan, render_comparison
@@ -252,6 +253,21 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertIn("VL1 01 01 00", text)
             self.assertIn("S02 SNRE_999_s02.wav", text)
             self.assertNotIn("sample-library", text)
+
+    def test_actual_bank_report_uses_encoded_counts_and_rejects_duplicate_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "SNRE_998.mid"
+            second = root / "KICK_997.mid"
+            first.write_bytes(b"snare")
+            second.write_bytes(b"kick")
+            report = report_actual_bank(1270, ((first, 94), (second, 124)))
+            self.assertTrue(report.fits)
+            self.assertEqual(report.used_blocks, 218)
+            self.assertEqual(report.remaining_blocks, 1052)
+            self.assertEqual(report.to_document()["sounds"][0]["bytes"], 5)
+            with self.assertRaisesRegex(ValueError, "duplicate"):
+                report_actual_bank(100, ((first, 1), (first, 1)))
 
     def test_settings_backup_validator_requires_real_midi_content(self) -> None:
         import mido
