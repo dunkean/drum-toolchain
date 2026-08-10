@@ -36,11 +36,17 @@ def main() -> int:
         midi = document["midi"]
         sources = midi["sources"]
         out_channel = integer(midi["ddrum_output_channel"], "midi.ddrum_output_channel", 1, 16)
-        edrum_channel = integer(sources["edrumin"]["channel"], "edrumin channel", 1, 16)
-        ddti_channel = integer(sources["ddti"]["channel"], "ddti channel", 1, 16)
+        if not isinstance(sources, dict) or not sources:
+            raise ValueError("midi.sources must contain at least one named source")
+        source_channels = {}
+        for source_name, source in sources.items():
+            source_channels[source_name] = integer(source["channel"], f"{source_name} channel", 1, 16)
         hihat = document["hihat"]
         if hihat["mode"] != "direct_cc4":
             raise ValueError("only hihat.mode=direct_cc4 is supported in this firmware version")
+        hihat_source = hihat.get("source", "edrumin")
+        if hihat_source not in source_channels:
+            raise ValueError(f"hihat source {hihat_source!r} is not declared in midi.sources")
         routes = []
         # Support the original hihat-specific schema as well as the project
         # manifest's resolved targets.  A target note is authoritative: it is
@@ -56,12 +62,14 @@ def main() -> int:
                 position = integer(articulation["position"], f"hihat {name} position", 1, 8)
                 if position not in POSITION_INDEX[note_p]:
                     raise ValueError(f"hihat {name}: position {position} is impossible with Note P={note_p}")
-                routes.append((edrum_channel, input_note, note_base + POSITION_INDEX[note_p][position], 1, 127, 1, 127, f"hihat_{name}"))
+                routes.append((source_channels[hihat_source], input_note, note_base + POSITION_INDEX[note_p][position], 1, 127, 1, 127, f"hihat_{name}"))
         for route in document.get("routes", []):
             # Generic routes deliberately use a fully resolved output note until
             # all ddrum channel layouts are added to the generator.
             source = route["source"]
-            channel = integer(sources[source]["channel"], f"{source} channel", 1, 16)
+            if source not in source_channels:
+                raise ValueError(f"route source {source!r} is not declared in midi.sources")
+            channel = source_channels[source]
             target = route.get("target", route)
             velocity = target.get("velocity", {})
             if not isinstance(velocity, dict):
@@ -88,8 +96,8 @@ def main() -> int:
             "#include \"DdrumBridge.h\"",
             "",
             f"constexpr uint8_t DDRUM_OUTPUT_CHANNEL = {out_channel};",
-            f"constexpr uint8_t DDTI_INPUT_CHANNEL = {ddti_channel};",
-            f"constexpr uint8_t EDRUMIN_INPUT_CHANNEL = {edrum_channel};",
+            "const uint8_t RELAY_PROGRAM_CHANNELS[] = {" + ", ".join(str(channel) for channel in sorted(set(source_channels.values()))) + "};",
+            "constexpr size_t RELAY_PROGRAM_CHANNEL_COUNT = sizeof(RELAY_PROGRAM_CHANNELS) / sizeof(RELAY_PROGRAM_CHANNELS[0]);",
             "",
             "const NoteRoute NOTE_ROUTES[] = {",
         ]
@@ -100,7 +108,7 @@ def main() -> int:
             "constexpr size_t NOTE_ROUTE_COUNT = sizeof(NOTE_ROUTES) / sizeof(NOTE_ROUTES[0]);",
             "",
             "constexpr HihatDirectCc4Config HIHAT_CC4 = {",
-            f"  {integer(sources[hihat.get('source', 'edrumin')]['channel'], 'hihat source channel', 1, 16)}, {integer(hihat['input_cc'], 'input_cc', 0, 127)}, {integer(hihat['output_cc'], 'output_cc', 0, 127)},",
+            f"  {source_channels[hihat_source]}, {integer(hihat['input_cc'], 'input_cc', 0, 127)}, {integer(hihat['output_cc'], 'output_cc', 0, 127)},",
             f"  {integer(hihat['input_closed'], 'input_closed', 0, 127)}, {integer(hihat['input_open'], 'input_open', 0, 127)},",
             f"  {integer(hihat['output_closed'], 'output_closed', 0, 127)}, {integer(hihat['output_open'], 'output_open', 0, 127)},",
             f"  {'true' if hihat.get('invert', False) else 'false'}",

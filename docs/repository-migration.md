@@ -325,6 +325,22 @@ Expected result: `converter tests passed`.
   transferred: bow 20 blocks, bell 20 blocks, edge 89 blocks. The revised
   offline complete-kit report is 1,240 / 1,270 blocks (30 nominal free); use
   the post-replacement `MEM.LEFT` display as the final go/no-go gate.
+- The owner subsequently confirmed `MEM.LEFT = 6.88` after the 13-file core
+  load. This matches 8,120 - 1,240 = 6,880 blocks exactly, so the transfer
+  receipts and the block accounting are now hardware-verified.
+
+## Central Local-OFF routing preparation — 2026-08-10
+
+- The chosen next architecture is documented in
+  `docs/ddrum4-local-off-central-routing.md`: DDrum4 pads become a third MIDI
+  source with `Local OFF`, and the Arduino is the sole route/branch owner
+  before DDrum4 MIDI IN. This removes the direct-pad limitation that would
+  otherwise make `CYMB 2` unavailable for nested routing.
+- Firmware routing now derives its Program-Change allow-list from all declared
+  `midi.sources`, rather than hard-coding only DDTi and eDRUMin. A test
+  exercises a third source on channel 12. No live channel or module setting
+  has been changed: a three-pad trace-and-echo proof remains the next hardware
+  gate.
 
 ## DrumGizmo actual export — 2026-08-10
 

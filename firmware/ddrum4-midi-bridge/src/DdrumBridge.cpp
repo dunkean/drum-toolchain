@@ -64,10 +64,13 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     return 1;
   }
 
-  if (input.type == MidiEventType::ProgramChange && config_.relayProgramChange &&
-      (input.channel == config_.ddtiChannel || input.channel == config_.edruminChannel)) {
-    *output = {MidiEventType::ProgramChange, config_.outputChannel, input.data1, 0};
-    return 1;
+  if (input.type == MidiEventType::ProgramChange && config_.relayProgramChange) {
+    for (size_t i = 0; i < config_.relayProgramChannelCount; ++i) {
+      if (input.channel == config_.relayProgramChannels[i]) {
+        *output = {MidiEventType::ProgramChange, config_.outputChannel, input.data1, 0};
+        return 1;
+      }
+    }
   }
 
   if (input.type != MidiEventType::NoteOn && input.type != MidiEventType::NoteOff &&

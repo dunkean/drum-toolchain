@@ -5,6 +5,9 @@ midi:
   sources:
     edrumin: {channel: 11}
     ddti: {channel: 10}
+    # Reserved for the DDrum4 physical pads after Local OFF is enabled.  The
+    # firmware must accept this third source even before its notes are mapped.
+    ddrum4: {channel: 12}
 hihat:
   mode: direct_cc4
   source: edrumin

@@ -8,9 +8,10 @@ static const NoteRoute routes[] = {
     {11, 21, 93, 1, 127, 1, 127}, // splash -> position 4
     {10, 36, 60, 1, 127, 13, 24}, // electronic pad B -> layer velocity window B
 };
+static const uint8_t programChannels[] = {10, 11, 12};
 
 static const BridgeConfig config = {
-    10, 10, 11,
+    10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
     {11, 4, 4, 0, 127, 0, 127, false},
     routes, sizeof(routes) / sizeof(routes[0]), true,
 };
@@ -55,11 +56,20 @@ void test_pad_can_select_a_velocity_window_inside_one_sound() {
   TEST_ASSERT_EQUAL_UINT8(0, output.data2);
 }
 
+void test_declared_third_source_can_change_kit() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ProgramChange, 12, 7, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(10, output.channel);
+  TEST_ASSERT_EQUAL_UINT8(7, output.data1);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zeitgeist_bow_maps_to_hihat_position_2);
   RUN_TEST(test_hihat_direct_cc4_is_scaled_and_duplicate_is_dropped);
   RUN_TEST(test_unmapped_events_are_not_blindly_forwarded);
   RUN_TEST(test_pad_can_select_a_velocity_window_inside_one_sound);
+  RUN_TEST(test_declared_third_source_can_change_kit);
   return UNITY_END();
 }

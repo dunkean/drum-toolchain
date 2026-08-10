@@ -45,8 +45,11 @@ struct HihatDirectCc4Config {
 
 struct BridgeConfig {
   uint8_t outputChannel;
-  uint8_t ddtiChannel;
-  uint8_t edruminChannel;
+  // Program changes are only relayed for declared source channels.  Keeping
+  // this as a list rather than naming modules here lets the same firmware
+  // bridge DDTi, eDRUMin and a Local-OFF ddrum4 without a special code path.
+  const uint8_t* relayProgramChannels;
+  size_t relayProgramChannelCount;
   HihatDirectCc4Config hihat;
   const NoteRoute* noteRoutes;
   size_t noteRouteCount;

@@ -15,9 +15,10 @@ const NoteRoute routes[] = {
     {11, 46, 94, 1, 127, 1, 127},
     {10, 36, 60, 1, 127, 13, 24},
 };
+const uint8_t programChannels[] = {10, 11, 12};
 
 const BridgeConfig config = {
-    10, 10, 11,
+    10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
     {11, 4, 4, 0, 127, 0, 127, false},
     routes, sizeof(routes) / sizeof(routes[0]), true,
 };
@@ -48,6 +49,14 @@ void test_velocity_window() {
   require(output.data1 == 60 && output.data2 == 19, "velocity window differs");
 }
 
+void test_third_source_program_change_is_relayed() {
+  DdrumBridge bridge(config);
+  MidiEvent output{};
+  require(bridge.process({MidiEventType::ProgramChange, 12, 7, 0}, &output, 1) == 1,
+          "declared third source ProgramChange missing");
+  require(output.channel == 10 && output.data1 == 7, "third source ProgramChange differs");
+}
+
 }  // namespace
 
 int main() {
@@ -55,6 +64,7 @@ int main() {
     test_note_and_note_off();
     test_cc_and_unknown_message_policy();
     test_velocity_window();
+    test_third_source_program_change_is_relayed();
     std::cout << "firmware bridge core tests passed\n";
     return 0;
   } catch (const std::exception& error) {
