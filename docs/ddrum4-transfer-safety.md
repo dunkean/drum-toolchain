@@ -85,6 +85,16 @@ capture-to-module path. A seven-layer velocity-crossfade candidate was then
 built as `SNRE_998` (94 blocks); its runtime velocity sweep remains the B1
 listening test.
 
+### Sound-ID namespace rule — measured 2026-08-10
+
+A DDrum4 location is `(instrument group, number)`, not its number alone.
+Consequently `SNRE_999` and `RIM_999` coexist and consume memory separately.
+The attempted replacement therefore changed the live free-memory display from
+45 to 15 blocks, exactly the 30-block cost of `RIM_999`; it did not reclaim
+the 137-block `SNRE_999` proof. The user must delete a sound through the
+module's `SHIFT+SOUND`, `SHIFT+MARK`, then twice `SHIFT+DELETE` workflow. A
+bank transfer tool must never infer replacement from the numeric suffix alone.
+
 On Windows, DDrum4UI uses the WinMM `midiOutLongMsg` API. All-SysEx sound
 transfers use the same native API rather than the general Python MIDI backend.
 The latter can carry the bytes through a virtual port but was rejected by the

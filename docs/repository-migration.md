@@ -293,11 +293,15 @@ Expected result: `converter tests passed`.
   offline 52-block remainder, consistent with module-side allocation. The
   first core is therefore memory-full for practical purposes. Future sounds
   require replacing an existing Sound ID or a smaller rebuilt candidate.
-- `SNRE_999`, the one-layer transfer proof, was subsequently replaced with
-  `RIM_999`: two rimshot dynamics plus cross-stick source, encoded at 30
-  blocks. This reclaims approximately 107 blocks while preserving the richer
-  seven-layer `SNRE_998` main snare. The next live memory reading must confirm
-  the reclaimed amount before adding the ride.
+- `RIM_999` was then transferred: two rimshot dynamics plus cross-stick
+  source, encoded at 30 blocks. This revealed an incorrect assumption:
+  DDrum4 Sound IDs are a pair of *instrument group* and number, so
+  `RIM_999` does **not** replace `SNRE_999`. The live `SHIFT+MEM.LEFT`
+  reading is therefore 15 blocks (45 - 30), exactly matching the new rim
+  sound cost. No further transfer may run until the one-layer `SNRE_999`
+  proof is explicitly deleted on the module. Deleting its measured 137 blocks
+  should restore approximately 152 free blocks while retaining `RIM_999` and
+  the seven-layer `SNRE_998`.
 - A compact three-file ride candidate is built but intentionally not yet
   transferred: bow 20 blocks, bell 20 blocks, edge 89 blocks. The revised
   offline complete-kit report is 1,240 / 1,270 blocks (30 nominal free); use
