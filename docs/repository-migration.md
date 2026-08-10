@@ -281,3 +281,9 @@ Expected result: `converter tests passed`.
   blocks. Along with `SNRE_998`, `HHAT_996` and `KICK_997`, this creates a
   five-sound core for the first listening pass. The live remaining-memory
   value and each module audition are still required before packing toms/ride.
+- Four compact original SD3 toms were then encoded and transferred: `TOM_993`
+  (21 blocks), `TOM_992` (52), `TOM_991` (37), and `TOM_990` (52). The actual
+  encoded ten-sound report totals 1,218 / 1,270 blocks, leaving a nominal 52
+  blocks. Do not transfer ride, percussion, or any further sound until the
+  module's live free-memory display is read and the listening pass approves
+  the quality trade-offs.
