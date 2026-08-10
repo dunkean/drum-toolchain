@@ -88,19 +88,18 @@ class DdrumBridge {
   uint32_t ignoredMessages_ = 0;
   uint32_t duplicateCcMessages_ = 0;
   // Some DDrum4 configurations retransmit a MIDI-IN event through MIDI OUT.
-  // The bridge is normally in that return path, so remember its own bounded
-  // outgoing events and consume their immediate identical echo.  This keeps
-  // Local-OFF routing safe without treating arbitrary input as a blind Thru.
+  // The bridge is normally in that return path, so each emitted event is
+  // recorded once and exactly one byte-identical return is consumed.  This is
+  // intentionally an exact-event list, not a timer, trigger filter or MIDI
+  // interpretation layer.
   static constexpr size_t kEchoGuardCapacity = 64;
   MidiEvent expectedEchoes_[kEchoGuardCapacity]{};
-  uint32_t expectedEchoTimes_[kEchoGuardCapacity]{};
   size_t expectedEchoCount_ = 0;
   uint32_t suppressedEchoMessages_ = 0;
 
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   uint8_t mapVelocity(const NoteRoute& route, uint8_t velocity) const;
   uint8_t mapHihatCc(uint8_t value) const;
-  bool consumeExpectedEcho(const MidiEvent& input, uint32_t nowMs);
-  void rememberExpectedEcho(const MidiEvent& output, uint32_t nowMs);
-  void discardStaleEchoes(uint32_t nowMs);
+  bool consumeExpectedEcho(const MidiEvent& input);
+  void rememberExpectedEcho(const MidiEvent& output);
 };

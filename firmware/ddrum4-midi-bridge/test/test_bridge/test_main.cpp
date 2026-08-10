@@ -115,12 +115,12 @@ void test_out_of_order_local_off_echo_is_still_suppressed() {
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process(first, &first, 1));
 }
 
-void test_stale_local_off_echo_does_not_consume_later_note_off() {
+void test_exact_echo_is_consumed_without_a_time_window() {
   DdrumBridge bridge(config);
-  MidiEvent output;
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &output, 1, 1));
-  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOff, 12, 17, 0}, &output, 1, 30));
-  TEST_ASSERT_EQUAL(MidiEventType::NoteOff, output.type);
+  MidiEvent echo;
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 12, 17, 93}, &echo, 1, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(echo, &echo, 1, 1000));
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.suppressedEchoMessages());
 }
 
 int main(int, char**) {
@@ -135,6 +135,6 @@ int main(int, char**) {
   RUN_TEST(test_bypass_returns_raw_event_and_consumes_its_echo);
   RUN_TEST(test_mode_change_clears_pending_echoes);
   RUN_TEST(test_out_of_order_local_off_echo_is_still_suppressed);
-  RUN_TEST(test_stale_local_off_echo_does_not_consume_later_note_off);
+  RUN_TEST(test_exact_echo_is_consumed_without_a_time_window);
   return UNITY_END();
 }
