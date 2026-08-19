@@ -53,6 +53,15 @@ harder velocities, but hardware acceptance is not yet a listening result.
 Until the owner confirms `SNRE_950` with `SHIFT + SOUND`, `SHIFT + LISTEN`, and
 a new `MEM.LEFT` reading, retain `SNRE_998` and treat 950 as a candidate only.
 
+The owner then reported that 950 cuts off too early. The cause was threshold
+tail trimming: its ten prepared WAVs lasted only 0.13..0.74 seconds. The
+preparation policy now supports trimming silence before onset without trimming
+the captured decay. `SNRE_949` contains the same five-velocity by two-position
+layout with every prepared sample fixed at 1.8 seconds. It encodes to 911
+blocks and all 911 messages were sent successfully; the receipt is
+`D:\Studio\ddrum4-transfers\snre-949-positional-long-20260819.json`. Hardware
+audition and the resulting `MEM.LEFT` value remain required before promotion.
+
 ## Hi-hat source correction
 
 `HHAT_996` is retained only as a protocol candidate. Its nine nominal CC4

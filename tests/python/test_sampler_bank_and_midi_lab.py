@@ -18,7 +18,8 @@ from ddrum4_bank.allocator import AllocationOption, compare_allocations
 from ddrum4_bank.plan import compare_plan, render_comparison
 from ddrum4_bank.nested import NestedRoute, NestedSound
 from ddrum4_bank.routing_contract import ContractRoute, RoutingContract
-from midi_lab import MidiTrace, TraceEvent, resolve_unique_port
+from midi_lab import MidiTrace, TraceEvent, decode_ddrum4_program, program_for_kit, program_for_palette, resolve_unique_port
+from midi_lab.cli import _message_from_trace, _trace_event
 from ddrum4_bank.transport import resolve_port, send_midi_file
 from ddrum4_bank.b0 import B0Fixture, verify_b0_build, write_fixture_manifest
 from ddrum4_bank.hardware import transfer_one_sound
@@ -590,7 +591,10 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertIn(sha256(input_path.read_bytes()).hexdigest(), generated)
 
     def test_trace_round_trip_and_unique_port_matching(self) -> None:
-        trace = MidiTrace("edrumin", (TraceEvent(0, "note_on", 11, 42, 100),))
+        trace = MidiTrace("edrumin", (
+            TraceEvent(0, "note_on", 11, 42, 100),
+            TraceEvent(4, "program_change", 11, 106, None),
+        ))
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "trace.jsonl"
             trace.write(path)
@@ -598,6 +602,35 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         self.assertEqual(resolve_unique_port(["MIDI4x4", "MIDIOUT2 (MIDI4x4)"], "MIDI4x4"), "MIDI4x4")
         with self.assertRaises(ValueError):
             resolve_unique_port(["MIDI4x4", "MIDIOUT2 (MIDI4x4)"], "midi")
+
+    def test_ddrum4_program_contract_covers_kits_and_all_palette_groups(self) -> None:
+        self.assertEqual(decode_ddrum4_program(0).label, "P.1")
+        self.assertEqual(decode_ddrum4_program(98).label, "F.99")
+        self.assertEqual(decode_ddrum4_program(99).label, "PAL")
+        self.assertEqual(decode_ddrum4_program(100).label, "kick palette 1")
+        self.assertEqual(decode_ddrum4_program(110).label, "snare palette 5")
+        self.assertEqual(decode_ddrum4_program(117).label, "toms palette off")
+        self.assertEqual(decode_ddrum4_program(122).label, "percussion palette 5")
+        self.assertEqual(program_for_kit(26), 25)
+        self.assertEqual(program_for_palette("snare", 3), 108)
+        self.assertEqual(program_for_palette("percussion", None), 123)
+        message = mido.Message("program_change", channel=11, program=108)
+        event = _trace_event(message, 17)
+        self.assertEqual(event, TraceEvent(17, "program_change", 12, 108, None))
+        self.assertEqual(_message_from_trace(mido, event), message)
+
+    def test_ddrum4_program_sender_requires_explicit_write_flag(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "midi_lab.cli", "send-ddrum4-program",
+                "--output", "UMC404HD", "--channel", "12", "--program", "108",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--send", result.stderr)
 
     def test_midi_replay_requires_explicit_hardware_write_flag(self) -> None:
         root = Path(__file__).resolve().parents[2]
