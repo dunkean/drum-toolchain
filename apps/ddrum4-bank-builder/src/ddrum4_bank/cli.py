@@ -79,6 +79,25 @@ def build_parser() -> argparse.ArgumentParser:
     cymbal.add_argument("--max-duration-seconds", type=float)
     cymbal.add_argument("--trim-threshold-db", type=float)
     cymbal.add_argument("--report", required=True, type=Path)
+    positional_snare = subparsers.add_parser(
+        "build-positional-snare",
+        help="prepare and locally build a five-velocity by two-position snare; never sends MIDI",
+    )
+    positional_snare.add_argument("--library", required=True, type=Path)
+    positional_snare.add_argument("--raw-directory", required=True, type=Path)
+    positional_snare.add_argument("--output-directory", required=True, type=Path)
+    positional_snare.add_argument("--sound-id", required=True)
+    positional_snare.add_argument("--instrument", default="snare_main")
+    positional_snare.add_argument(
+        "--positions", nargs=2, default=["head_position_000", "head_position_127"]
+    )
+    positional_snare.add_argument(
+        "--velocities", nargs=5, type=int, default=[24, 48, 72, 96, 120]
+    )
+    positional_snare.add_argument("--template", required=True, type=Path)
+    positional_snare.add_argument("--quality-profile", required=True, type=Path)
+    positional_snare.add_argument("--quality-name", default="ddrum4_snare_flagship")
+    positional_snare.add_argument("--report", required=True, type=Path)
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
     allocation.add_argument("--output", type=Path, help="optional Markdown report path")
@@ -219,6 +238,30 @@ def main(argv: list[str] | None = None) -> int:
         blocks = backend.encoded_blocks(build.sound)
         build.write_report(args.report, blocks)
         print(f"built {build.sound_id}: {blocks} blocks at {build.profile.max_duration_seconds}s; wrote {args.report}")
+        return 0
+    if args.command == "build-positional-snare":
+        from drum_sampler.audio import load_quality_profile
+        from drum_sampler.library import SampleLibrary
+        from .snare_build import materialize_positional_snare
+        if args.report.exists():
+            raise FileExistsError(f"refusing to overwrite build report: {args.report}")
+        profile = load_quality_profile(args.quality_profile, args.quality_name)
+        build = materialize_positional_snare(
+            SampleLibrary.read(args.library),
+            raw_directory=args.raw_directory,
+            output_directory=args.output_directory,
+            sound_id=args.sound_id,
+            instrument=args.instrument,
+            positions=args.positions,
+            velocities=args.velocities,
+            template=args.template,
+            profile=profile,
+        )
+        backend = _backend(args.ddrum4edit)
+        backend.build(build.config, build.sound)
+        blocks = backend.encoded_blocks(build.sound)
+        build.write_report(args.report, blocks)
+        print(f"built {build.sound_id}: {blocks} blocks, 5 velocities x 2 positions; wrote {args.report}")
         return 0
     backend = _backend(args.ddrum4edit)
     if args.command == "inspect":

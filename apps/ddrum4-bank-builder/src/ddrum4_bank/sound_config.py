@@ -44,6 +44,28 @@ def snare_velocity_layers(sample_count: int) -> tuple[str, ...]:
     return _SNARE_LAYER_ROWS[:sample_count]
 
 
+def positional_snare_layers() -> tuple[str, ...]:
+    """Return a complete five-velocity by two-position ten-layer layout.
+
+    DDrum4 exposes eight velocity gain points and eight center-to-edge gain
+    points per layer.  The five velocity samples cover all eight points as
+    2/2/1/2/1 bands.  Position samples 1..5 cover Note-P zones 1..4 and
+    samples 6..10 cover zones 5..8, matching the split demonstrated by the
+    ddrum4edit positional/dual-zone reference sounds.
+    """
+    velocity_zones = ((0, 1), (2, 3), (4,), (5, 6), (7,))
+    position_zones = ((0, 1, 2, 3), (4, 5, 6, 7))
+    rows: list[str] = []
+    for position_indexes in position_zones:
+        for velocity_indexes in velocity_zones:
+            values = _SNARE_LAYER_ROWS[0].split()
+            values[0] = f"{len(rows):02X}"
+            values[4:12] = ["FF" if index in velocity_indexes else "00" for index in range(8)]
+            values[12:20] = ["FF" if index in position_indexes else "00" for index in range(8)]
+            rows.append(" ".join(values))
+    return tuple(rows)
+
+
 def cymbal_velocity_layers(sample_count: int) -> tuple[str, ...]:
     """Return an audited cymbal layout, refusing invented partial curves.
 

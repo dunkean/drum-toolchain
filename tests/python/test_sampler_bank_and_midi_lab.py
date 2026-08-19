@@ -11,7 +11,7 @@ import mido
 from drum_sampler import CaptureRequest, CaptureSessionPlan, SampleLibrary, analyze_wav, capture_pending, export_drumgizmo, library_from_captures, library_from_plan
 from ddrum4_bank.ddrum4ui import encoded_block_count
 from ddrum4_bank.ddrum4edit_backend import Ddrum4EditBackend, _declared_output
-from ddrum4_bank.sound_config import cymbal_velocity_layers, materialize_sound_config, snare_velocity_layers
+from ddrum4_bank.sound_config import cymbal_velocity_layers, materialize_sound_config, positional_snare_layers, snare_velocity_layers
 from ddrum4_bank.actual_bank import report_actual_bank
 from ddrum4_bank.backup import inspect_settings_backup, validate_settings_backup
 from ddrum4_bank.allocator import AllocationOption, compare_allocations
@@ -26,6 +26,7 @@ from ddrum4_bank.render_compare import compare_renders
 from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_compilation
 from ddrum4_bank.selection import select_snare, select_velocity_layers
 from ddrum4_bank.cymbal_build import materialize_flagship_cymbal
+from ddrum4_bank.snare_build import materialize_positional_snare
 from drum_sampler.audio import QualityProfile
 from drum_sampler.library import SampleTake, merge_libraries
 from drum_domain import validate_document
@@ -72,6 +73,57 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
         # A one-layer cymbal must respond at the panel's hard velocity too.
         self.assertEqual(single[0].split()[4:12], ["FF"] * 8)
         self.assertEqual(len(cymbal_velocity_layers(7)), 7)
+
+    def test_positional_snare_layout_covers_every_velocity_and_position_zone_once(self) -> None:
+        rows = [row.split() for row in positional_snare_layers()]
+        self.assertEqual(len(rows), 10)
+        self.assertEqual([row[0] for row in rows], [f"{index:02X}" for index in range(10)])
+        for position_zone in range(8):
+            for velocity_zone in range(8):
+                active = [
+                    row for row in rows
+                    if row[4 + velocity_zone] == "FF" and row[12 + position_zone] == "FF"
+                ]
+                self.assertEqual(len(active), 1)
+
+    def test_positional_snare_builder_selects_two_positions_by_five_velocities(self) -> None:
+        import numpy as np
+        from scipy.io import wavfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            takes = []
+            for position in ("head_position_000", "head_position_127"):
+                for velocity in (24, 48, 72, 96, 120):
+                    name = f"{position}_{velocity}.wav"
+                    wavfile.write(raw / name, 44100, np.linspace(0, 0.4, 1000, dtype=np.float32))
+                    takes.append(SampleTake(
+                        "snare_main", position, 38, 10, velocity, 1, name,
+                        source="local render", license_statement="personal", status="captured", peak_dbfs=-3.0,
+                    ))
+            library = SampleLibrary("position-fixture", ("mono",), tuple(takes))
+            template = root / "template.cfg"
+            template.write_text(
+                "-Begin-Layers-\nold\n-End-Layers-\n-Begin-Variations-\nVL1 old\n-End-Variations-\n"
+                "-Begin-Sample-Files-\nold\n-End-Sample-Files-\n-Begin-Sample-Name-\nold\n-End-Sample-Name-\n"
+                "-Begin-Sound-File-Out-\nold.mid\n-End-Sound-File-Out-\n", encoding="utf-8"
+            )
+            build = materialize_positional_snare(
+                library,
+                raw_directory=raw,
+                output_directory=root / "build",
+                sound_id="SNRE_950",
+                instrument="snare_main",
+                positions=("head_position_000", "head_position_127"),
+                velocities=(24, 48, 72, 96, 120),
+                template=template,
+                profile=QualityProfile(force_mono=True, max_duration_seconds=0.05),
+            )
+            self.assertEqual(len(build.layers), 10)
+            self.assertEqual(build.layers[0].position, "head_position_000")
+            self.assertEqual(build.layers[-1].position, "head_position_127")
+            self.assertIn("VL1 01 01 01 01 01 01 01 01 01 01", build.config.read_text(encoding="utf-8"))
 
     def test_render_comparison_measures_onset_level_tail_and_tone(self) -> None:
         import numpy as np
