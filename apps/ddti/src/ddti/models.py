@@ -62,11 +62,33 @@ class DDTiKit:
 
 
 @dataclass(frozen=True)
+class DDTiGlobalTriggerRecord:
+    """One lossless Family-02 record; field semantics remain experimental."""
+
+    index: int
+    values: tuple[int, ...]
+    raw_offsets: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.values) != 6 or len(self.raw_offsets) != 6:
+            raise ValueError("observed global-trigger records contain exactly six bytes")
+
+    def to_document(self) -> dict[str, object]:
+        return {
+            "record": self.index,
+            "raw_values": list(self.values),
+            "raw_offsets": list(self.raw_offsets),
+            "semantic_decoding": "uninterpreted; Input 1 Tip Gain is confirmed at record 0 / byte 0 only",
+        }
+
+
+@dataclass(frozen=True)
 class DDTiConfiguration:
     """Lossless configuration view with validated note fields only."""
 
     dump: DDTiDump
     kits: tuple[DDTiKit, ...]
+    global_trigger_records: tuple[DDTiGlobalTriggerRecord, ...]
 
     @property
     def raw(self) -> bytes:
@@ -163,6 +185,7 @@ class DDTiConfiguration:
         return {
             "semantic_decoding": "MIDI notes confirmed; companion bytes remain raw/uninterpreted",
             "kits": [kit.to_document() for kit in self.kits],
+            "global_trigger_records": [record.to_document() for record in self.global_trigger_records],
         }
 
 
@@ -199,7 +222,17 @@ def decode_configuration(dump: DDTiDump) -> DDTiConfiguration:
                 ))
             inputs.append(DDTiInput(input_index + 1, zones[0], zones[1]))
         kits.append(DDTiKit(packet.record_index, tuple(inputs)))
-    return DDTiConfiguration(dump, tuple(kits))
+    global_records = []
+    for packet in sorted((packet for packet in dump.packets if packet.record_type == 0x02), key=lambda packet: packet.record_index):
+        if len(packet.body) != 6:
+            raise ValueError(f"global-trigger packet {packet.record_index} does not contain six raw bytes")
+        packet_start = offsets[id(packet)]
+        global_records.append(DDTiGlobalTriggerRecord(
+            packet.record_index,
+            tuple(packet.body),
+            tuple(packet_start + 11 + value_index for value_index in range(6)),
+        ))
+    return DDTiConfiguration(dump, tuple(kits), tuple(global_records))
 
 
 def encode_configuration(configuration: DDTiConfiguration) -> bytes:

@@ -222,6 +222,18 @@ class DDTiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repeats kit"):
             configuration.with_note_preset({"format": "ddti-note-preset/v1", "kits": [{"kit": 0, "inputs": []}, {"kit": 0, "inputs": []}]})
 
+    def test_complete_dump_exposes_lossless_global_trigger_records(self) -> None:
+        kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
+        kit = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
+        global_records = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, index, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
+        configuration = decode_configuration(decode_dump(kit + global_records))
+        self.assertEqual(len(configuration.global_trigger_records), 21)
+        self.assertEqual(configuration.global_trigger_records[0].values, (0, 6, 5, 1, 10, 0))
+        self.assertEqual(configuration.global_trigger_records[20].raw_offsets[0], len(kit) + 20 * 18 + 11)
+
     def test_preset_cli_exports_and_applies_to_a_new_staged_file(self) -> None:
         body = bytearray()
         for zone in range(20):
