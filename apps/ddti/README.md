@@ -84,6 +84,11 @@ still required when a fresh hardware read is actually needed. During the
 three-minute listening window, the same button becomes **Annuler l’écoute**;
 closing the application also cancels and joins the listener cleanly.
 
+The **Test MIDI en direct** tab is a receive-only pad tester. It shows the last
+hit’s channel, note name/number and velocity, keeps Note, Control Change and
+Program Change events in a 500-row table, and exports the retained trace as
+JSON Lines for later comparison.
+
 Offline editing and preset import cover more fields than the current hardware
 write allowlist. **Envoyer au DDTi** refuses any unvalidated changed offset
 before opening the MIDI output. Confirmed Note, Program Change and Input 1 Tip

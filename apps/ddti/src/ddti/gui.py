@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from threading import Event
 
@@ -9,6 +10,7 @@ from .capture import CaptureCancelled, capture_dump
 from .diff import diff_ddti_bytes, render_diff
 from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, VELOCITY_CURVE_LABELS, decode_configuration
 from .mappings import apply_role_template
+from .monitor import observe_messages
 from .presets import load_document, write_document
 from .protocol import decode_dump, decode_file
 from .state import DDTiStateStore
@@ -22,6 +24,7 @@ QLabel#title { font-size: 24px; font-weight: 700; color: #ffffff; }
 QLabel#subtitle { color: #9dacbf; }
 QLabel#statusGood { color: #56d6a3; font-weight: 600; }
 QLabel#statusChanged { color: #ffca6a; font-weight: 600; }
+QLabel#lastHit { font-size: 20px; font-weight: 700; color: #ffffff; padding: 12px; }
 QListWidget, QTableWidget, QTabWidget::pane, QGroupBox { background: #161c25; border: 1px solid #293546; border-radius: 8px; }
 QListWidget::item { padding: 9px 12px; border-radius: 5px; }
 QListWidget::item:selected { background: #2364d2; color: white; }
@@ -45,6 +48,13 @@ def _decode_complete_configuration(path: Path) -> DDTiConfiguration:
     if len(configuration.kits) != 21 or len(configuration.global_trigger_records) != 21:
         raise ValueError("un dump DDTi complet doit contenir 21 kits et 21 réglages globaux")
     return configuration
+
+
+def _midi_note_label(note: object) -> str:
+    if type(note) is not int or not 0 <= note <= 127:
+        return "—"
+    names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+    return f"{note} ({names[note % 12]}{note // 12 - 1})"
 
 
 def launch(dump_path: Path | None = None) -> int:
@@ -89,6 +99,31 @@ def launch(dump_path: Path | None = None) -> int:
             except Exception as error:  # pragma: no cover - hardware/runtime path
                 self.failed.emit(str(error))
 
+    class MidiMonitorWorker(QObject):
+        message = Signal(object)
+        stopped = Signal()
+        failed = Signal(str)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancel_event = Event()
+
+        def cancel(self) -> None:
+            self.cancel_event.set()
+
+        @Slot()
+        def run(self) -> None:
+            try:
+                observe_messages(
+                    "TriggerIO",
+                    self.message.emit,
+                    cancelled=self.cancel_event.is_set,
+                )
+            except Exception as error:  # pragma: no cover - hardware/runtime path
+                self.failed.emit(str(error))
+            else:
+                self.stopped.emit()
+
     class Editor(QMainWindow):
         def __init__(self, source: Path | None) -> None:
             super().__init__()
@@ -96,8 +131,12 @@ def launch(dump_path: Path | None = None) -> int:
             self._refreshing = False
             self.capture_thread = None
             self.capture_worker = None
+            self.monitor_thread = None
+            self.monitor_worker = None
+            self.monitor_records: list[dict[str, object]] = []
             self._close_confirmed = False
             self._close_after_capture = False
+            self._close_after_monitor = False
             self._startup_warning: str | None = None
             if source is None:
                 if not self.state_store.exists():
@@ -160,6 +199,7 @@ def launch(dump_path: Path | None = None) -> int:
             self.tabs = QTabWidget()
             self.tabs.addTab(self._build_kit_tab(), "Kit & routage MIDI")
             self.tabs.addTab(self._build_trigger_tab(), "Réponse des triggers")
+            self.tabs.addTab(self._build_monitor_tab(), "Test MIDI en direct")
             splitter.addWidget(self.tabs)
             splitter.setStretchFactor(1, 1)
             outer.addWidget(splitter, 1)
@@ -275,6 +315,45 @@ def launch(dump_path: Path | None = None) -> int:
             layout.addStretch()
             return tab
 
+        def _build_monitor_tab(self) -> QWidget:
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            controls = QHBoxLayout()
+            self.monitor_button = QPushButton("Démarrer l’écoute")
+            self.monitor_button.setObjectName("primary")
+            self.monitor_button.clicked.connect(self.toggle_midi_monitor)
+            controls.addWidget(self.monitor_button)
+            clear = QPushButton("Effacer")
+            clear.clicked.connect(self.clear_midi_monitor)
+            controls.addWidget(clear)
+            export = QPushButton("Exporter JSONL")
+            export.clicked.connect(self.export_midi_monitor)
+            controls.addWidget(export)
+            controls.addStretch()
+            self.monitor_count = QLabel("0 message")
+            controls.addWidget(self.monitor_count)
+            layout.addLayout(controls)
+            self.last_hit = QLabel("Frappe un pad pour vérifier sa note et sa vélocité")
+            self.last_hit.setObjectName("lastHit")
+            self.last_hit.setWordWrap(True)
+            layout.addWidget(self.last_hit)
+            self.monitor_table = QTableWidget(0, 6)
+            self.monitor_table.setHorizontalHeaderLabels(
+                ("Heure", "Message", "Canal", "Note", "Vélocité", "Contrôle / valeur")
+            )
+            self.monitor_table.verticalHeader().setVisible(False)
+            self.monitor_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            self.monitor_table.setEditTriggers(QTableWidget.NoEditTriggers)
+            layout.addWidget(self.monitor_table, 1)
+            help_text = QLabel(
+                "Lecture seule : ce test n’envoie rien au DDTi. Les Note On montrent immédiatement le canal, "
+                "la note musicale et la vélocité ; les messages de pédale et Program Change restent visibles dans le tableau."
+            )
+            help_text.setWordWrap(True)
+            help_text.setObjectName("subtitle")
+            layout.addWidget(help_text)
+            return tab
+
         def selected_kit(self) -> int:
             return max(0, self.kit_list.currentRow())
 
@@ -355,6 +434,120 @@ def launch(dump_path: Path | None = None) -> int:
         def _has_staged_changes(self) -> bool:
             return self.configuration.raw != self.source_raw
 
+        def _monitor_is_active(self) -> bool:
+            return self.monitor_thread is not None and self.monitor_thread.isRunning()
+
+        def toggle_midi_monitor(self) -> None:
+            if self._monitor_is_active():
+                self.monitor_worker.cancel()
+                self.monitor_button.setEnabled(False)
+                self.monitor_button.setText("Arrêt…")
+                return
+            if self.capture_thread is not None and self.capture_thread.isRunning():
+                self.statusBar().showMessage("Arrête d’abord la synchronisation DDTi.")
+                return
+            self.monitor_thread = QThread(self)
+            self.monitor_worker = MidiMonitorWorker()
+            self.monitor_worker.moveToThread(self.monitor_thread)
+            self.monitor_thread.started.connect(self.monitor_worker.run)
+            self.monitor_worker.message.connect(self._midi_message_received)
+            self.monitor_worker.stopped.connect(self.monitor_thread.quit)
+            self.monitor_worker.failed.connect(self._midi_monitor_failed)
+            self.monitor_worker.failed.connect(self.monitor_thread.quit)
+            self.monitor_thread.finished.connect(self.monitor_worker.deleteLater)
+            self.monitor_thread.finished.connect(self.monitor_thread.deleteLater)
+            self.monitor_thread.finished.connect(self._midi_monitor_finished)
+            self.monitor_button.setText("Arrêter l’écoute")
+            self.synchronize_button.setEnabled(False)
+            self.device_status.setText("● Test MIDI en écoute — lecture seule")
+            self.monitor_thread.start()
+
+        @Slot(object)
+        def _midi_message_received(self, record: dict[str, object]) -> None:
+            self.monitor_records.append(dict(record))
+            if len(self.monitor_records) > 500:
+                self.monitor_records.pop(0)
+            if self.monitor_table.rowCount() >= 500:
+                self.monitor_table.removeRow(0)
+            row = self.monitor_table.rowCount()
+            self.monitor_table.insertRow(row)
+            timestamp = str(record.get("timestamp_utc", ""))
+            control = ""
+            if "control" in record:
+                control = f"CC {record['control']} = {record.get('value', '—')}"
+            elif "program" in record:
+                control = f"Programme {record['program']}"
+            elif "pitch" in record:
+                control = f"Pitch {record['pitch']}"
+            values = (
+                timestamp[11:23] if len(timestamp) >= 23 else timestamp,
+                record.get("message_type", "—"),
+                record.get("channel", "—"),
+                _midi_note_label(record.get("note")),
+                record.get("velocity", "—"),
+                control or "—",
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignCenter)
+                self.monitor_table.setItem(row, column, item)
+            self.monitor_table.scrollToBottom()
+            count = int(self.monitor_count.property("messageCount") or 0) + 1
+            self.monitor_count.setProperty("messageCount", count)
+            self.monitor_count.setText(f"{count} message{'s' if count != 1 else ''}")
+            if record.get("message_type") == "note_on" and int(record.get("velocity", 0) or 0) > 0:
+                self.last_hit.setText(
+                    f"Canal {record.get('channel', '—')}  ·  Note {_midi_note_label(record.get('note'))}  ·  "
+                    f"Vélocité {record.get('velocity', '—')}"
+                )
+
+        def clear_midi_monitor(self) -> None:
+            self.monitor_records.clear()
+            self.monitor_table.setRowCount(0)
+            self.monitor_count.setProperty("messageCount", 0)
+            self.monitor_count.setText("0 message")
+            self.last_hit.setText("Frappe un pad pour vérifier sa note et sa vélocité")
+
+        def export_midi_monitor(self) -> None:
+            if not self.monitor_records:
+                QMessageBox.information(self, "Journal MIDI vide", "Aucun message MIDI n’a encore été reçu.")
+                return
+            path = self.choose_new_path(
+                "Exporter le test MIDI",
+                Path("ddti-midi-test.jsonl"),
+                "Journal JSON Lines (*.jsonl)",
+            )
+            if path is None:
+                return
+            try:
+                path.write_text(
+                    "".join(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n" for record in self.monitor_records),
+                    encoding="utf-8",
+                )
+            except OSError as error:
+                QMessageBox.warning(self, "Export impossible", str(error))
+                return
+            self.statusBar().showMessage(f"Journal MIDI exporté : {path}")
+
+        @Slot(str)
+        def _midi_monitor_failed(self, message: str) -> None:
+            self.device_status.setText("● Test MIDI indisponible")
+            if not self._close_after_monitor:
+                QMessageBox.warning(self, "Test MIDI impossible", message)
+
+        @Slot()
+        def _midi_monitor_finished(self) -> None:
+            self.monitor_thread = None
+            self.monitor_worker = None
+            self.monitor_button.setEnabled(True)
+            self.monitor_button.setText("Démarrer l’écoute")
+            self.synchronize_button.setEnabled(True)
+            if not self._close_after_monitor:
+                self.device_status.setText("● Test MIDI arrêté")
+            if self._close_after_monitor:
+                self._close_after_monitor = False
+                QTimer.singleShot(0, self.close)
+
         def _save_last_known(self, raw: bytes, *, source: str, reason: str) -> Path | None:
             try:
                 return self.state_store.save(raw, source=source, reason=reason)
@@ -432,6 +625,9 @@ def launch(dump_path: Path | None = None) -> int:
             self.statusBar().showMessage(f"Source : {filename}")
 
         def synchronize_from_ddti(self) -> None:
+            if self._monitor_is_active():
+                self.statusBar().showMessage("Arrête d’abord le test MIDI en direct.")
+                return
             if self.capture_thread is not None and self.capture_thread.isRunning():
                 self.capture_worker.cancel()
                 self.synchronize_button.setEnabled(False)
@@ -657,10 +853,13 @@ def launch(dump_path: Path | None = None) -> int:
 
         def closeEvent(self, event) -> None:
             capture_active = self.capture_thread is not None and self.capture_thread.isRunning()
-            if not self._close_confirmed and (capture_active or self._has_staged_changes()):
+            monitor_active = self._monitor_is_active()
+            if not self._close_confirmed and (capture_active or monitor_active or self._has_staged_changes()):
                 details = []
                 if capture_active:
                     details.append("l’écoute DDTi en cours sera annulée")
+                if monitor_active:
+                    details.append("le test MIDI en direct sera arrêté")
                 if self._has_staged_changes():
                     details.append("les changements non envoyés seront perdus")
                 answer = QMessageBox.question(
@@ -679,6 +878,13 @@ def launch(dump_path: Path | None = None) -> int:
                 self.capture_worker.cancel()
                 self.synchronize_button.setEnabled(False)
                 self.device_status.setText("● Annulation avant fermeture…")
+                event.ignore()
+                return
+            if monitor_active:
+                self._close_after_monitor = True
+                self.monitor_worker.cancel()
+                self.monitor_button.setEnabled(False)
+                self.device_status.setText("● Arrêt du test avant fermeture…")
                 event.ignore()
                 return
             event.accept()

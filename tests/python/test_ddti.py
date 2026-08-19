@@ -15,6 +15,7 @@ from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
 from ddti.models import VELOCITY_CURVE_LABELS, decode_configuration, encode_configuration
 from ddti.mappings import apply_role_template
+from ddti.monitor import observe_messages
 from ddti.presets import load_document
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
@@ -197,6 +198,29 @@ class DDTiTests(unittest.TestCase):
              patch("mido.open_input", return_value=_InputPort(messages)):
             received = _receive_mido_sysex("TriggerIO", seconds=1, idle_seconds=1)
         self.assertEqual([frame.raw for frame in received], [bytes.fromhex("F0 01 F7")])
+
+    def test_live_observer_streams_midi_records_and_stops_cleanly(self) -> None:
+        import mido
+        records = []
+        cancellations = iter((False, True))
+        messages = [
+            mido.Message("note_on", channel=9, note=38, velocity=112),
+            mido.Message("control_change", channel=9, control=4, value=63),
+        ]
+        with patch("ddti.monitor._resolve_input", return_value="TriggerIO 30"), \
+             patch("mido.open_input", return_value=_InputPort(messages)), \
+             patch("ddti.monitor.time.sleep"):
+            count = observe_messages(
+                "TriggerIO",
+                records.append,
+                cancelled=lambda: next(cancellations),
+            )
+        self.assertEqual(count, 2)
+        self.assertEqual(records[0]["channel"], 10)
+        self.assertEqual(records[0]["note"], 38)
+        self.assertEqual(records[0]["velocity"], 112)
+        self.assertEqual(records[1]["control"], 4)
+        self.assertEqual(records[1]["value"], 63)
 
     def test_public_device_facade_has_a_non_bypassable_write_boundary(self) -> None:
         info = object()

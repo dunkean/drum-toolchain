@@ -163,7 +163,8 @@ opens a MIDI output.
 Install `ddti[gui]`, then run `ddti gui captures/factory_dump_002_full.golden.syx`
 once. Later, `ddti gui` reopens the persistent last-known state. The PySide6
 editor provides the 21-kit selector, a 10-input Tip/Ring routing table, hi-hat
-kit settings, and a selector for all 21 global response records. It imports or
+kit settings, a selector for all 21 global response records, and a receive-only
+live MIDI test tab with note names, velocities, controllers and JSONL export. It imports or
 exports complete YAML/JSON configurations and staged SysEx, performs a complete
 panel-initiated synchronization in a background thread, and shows the exact
 byte diff before output. The synchronization button can cancel the listener,
