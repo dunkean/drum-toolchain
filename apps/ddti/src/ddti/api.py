@@ -90,4 +90,3 @@ def create_app(dump_path: Path):
         }
 
     return app
-

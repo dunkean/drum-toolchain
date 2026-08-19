@@ -79,4 +79,3 @@ def launch(dump_path: Path) -> int:
     editor.resize(800, 430)
     editor.show()
     return application.exec()
-
