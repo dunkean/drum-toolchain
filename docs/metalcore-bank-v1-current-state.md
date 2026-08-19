@@ -1,5 +1,19 @@
 # Metalcore standalone bank v1 — current hardware state
 
+## Clean reload on 2026-08-19
+
+The owner performed `F.AL`, erased the complete sound memory and confirmed the
+empty hardware baseline at `MEM.LEFT = 8.12`. The automated verified-core
+transfer then sent all 13 frozen sounds through the UMC route, with individual
+receipts under `D:\Studio\ddrum4-transfers\core-20260819-154801`. The final
+panel reading is `MEM.LEFT = 6.88`, exactly matching 1,240 installed blocks.
+
+This core is deliberately a playable safety net, not the target allocation.
+The approved direction is now one flagship metalcore kit using approximately
+6,500 blocks, with priority on the positional snare and six-state ZEITGEIST
+hi-hat. Flagship replacements will use unused IDs and be auditioned before any
+core sound is removed.
+
 Status: active soundbank work. This document distinguishes sounds merely
 stored in DDrum4 memory from a palette-assigned, playable kit.
 

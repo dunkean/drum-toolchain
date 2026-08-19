@@ -5,23 +5,51 @@ the audio-quality target; it does not approve any existing candidate by name.
 
 ## Objective
 
-Build one playable metalcore kit first, using the measured 8,120 DDrum4-block
-capacity. Keep 1,120 blocks unallocated for later Deftones/Sleep Token/DnB and
-small electronic options. The initial bank budget is therefore 7,000 blocks.
+Build one flagship metalcore kit first, using about 80% of the measured 8,120
+DDrum4-block capacity. The final target is 6,500 used blocks and 1,620 reserve
+blocks. The reserve is for later Deftones/Sleep Token/DnB replacements and
+small electronic options, not for multiple lower-quality acoustic kits.
 
 ## Quality allocation
 
 | Logical family | Target blocks | Required initial behavior |
 | --- | ---: | --- |
-| Main snare (head, rim, position) | 1,200 | flagship velocity response; position where it is audibly useful |
-| ZEITGEIST hi-hat | 1,150 | bow/edge, 4–5 openness states, chick, splash; CC4 plan documented |
-| Crash 1 + crash 2 | 1,300 | long clean tails, four useful dynamics each; choke uses control data, not duplicate audio |
-| Ride | 700 | bow, bell, edge; reduced dynamics acceptable |
-| Kick | 250 | seven velocity layers, tight metalcore attack |
-| Four tom identities | 600 | four short-to-medium velocity-layered toms; optional pitch variant before new audio |
-| Splash/china/stack/perc | 400 | one clean articulation each, shared nested CYMB2 branches where needed |
-| Electronics and alternate drums | 300 | short clap/click/impact; no duplicated acoustic cymbals |
-| Reserve | 1,100 | protected until the main kit passes listening tests |
+| Main snare head | 1,000 | ten samples: five velocity bands by two head positions |
+| Rim/cross-stick | 500 | ten samples: six rimshot dynamics and four cross-stick dynamics |
+| ZEITGEIST hi-hat | 1,400 | six bow openings, three edge openings and chick; foot splash is auxiliary |
+| Crash 1 + crash 2 | 1,400 | three dynamics each; low/medium tails may be shorter, hard tails remain natural |
+| Ride | 650 | bow, bell and edge; reduced dynamics acceptable |
+| Kick | 300 | seven velocity layers, tight metalcore attack |
+| Four tom identities | 700 | four velocity-layered toms; pitch variants do not duplicate audio |
+| Splash/china/stack/foot-splash | 350 | one clean articulation each, shared nested branches where needed |
+| Electronics | 200 | short clap, click, DnB snare/kick and one FX where space permits |
+| Reserve | 1,620 | protected for listening-driven replacements and later alternate scenes |
+
+## Flagship sample layouts
+
+The main snare uses all ten available DDrum4 layers as a `5 velocity x 2
+position` grid. This is preferable to eleven center-only velocity captures:
+five crossfaded dynamics retain musical velocity response while the two
+position families preserve the eDRUMin positional signal. The separate rim
+sound uses six rimshot layers and four cross-stick layers. Arduino routing may
+select the appropriate DDrum Note-P/variation branch, but must not synthesize
+or smooth trigger dynamics.
+
+The main hi-hat uses all ten layers as six bow openness states, three edge
+openness states and one pedal chick. The foot splash is stored in the small
+auxiliary/percussion family and selected by the nested routing contract. The
+existing source library only proves three bow openness states and pedal; a
+dedicated SD3 capture must add the intermediate bow states and identify the
+edge articulation before this sound is built.
+
+The two main crashes use three useful dynamics apiece. Their low and medium
+samples may use shorter captured tails, while the hard layer retains the full
+auditioned decay. This spends memory on audible dynamics without multiplying
+six identical 6.5-second noise floors.
+
+New flagship sounds use free IDs below the compact `987..999` range. The
+compact core remains installed until each replacement has been transferred,
+auditioned and assigned. Only then is its old counterpart deleted.
 
 ## Mandatory audio gates
 
