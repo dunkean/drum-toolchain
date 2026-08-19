@@ -206,10 +206,22 @@ The owner confirmed that the long crash sounds correct. `MEM.LEFT` is 1.87,
 although its isolated cost was not measured because the short 945 was deleted
 between readings.
 
-`CYMB_944` c2 has been built offline from the second crash with the identical
-seven-layer/6.5-second policy and also encodes to 2,283 blocks. It must not be
-transferred until obsolete `CYMB_994` and `CYMB_995` are deleted and the new
-free-memory reading confirms sufficient space.
+The owner deleted obsolete compact crashes 994 and 995, increasing `MEM.LEFT`
+from 1.87 to 2.52. `CYMB_944` c2 uses the identical seven-layer/6.5-second
+policy and also encodes to 2,283 blocks. All packets were transferred with
+receipt
+`D:\Studio\ddrum4-transfers\cymb-944-crash2-digital-long-c2-20260820.json`.
+The owner confirmed that it sounds correct. Final `MEM.LEFT` is 245 blocks.
+
+Both flagship crashes are therefore accepted, but the current audition
+palette exposes a slot conflict: CYMB1=944 and CYMB2=945 leave the accepted
+946 hi-hat-edge sound stored but unassigned. The final nested compile must
+repack each crash sound as seven velocity layers on its primary position plus
+three single-layer hi-hat-edge positions. Across both CYMB slots this retains
+six useful edge openness states while keeping both accepted crash families.
+After the two combined replacements pass listening, delete standalone 946;
+do not pretend the present palette provides crash 1, crash 2 and hi-hat edge
+simultaneously.
 
 ## Palette target after listening gates
 
@@ -226,9 +238,10 @@ the Arduino contract stable while palette assignments evolve.
 
 ## Next soundbank actions
 
-1. Delete obsolete compact crashes 994 and 995, record `MEM.LEFT`, then
-   transfer and audition the already-built long `CYMB_944`.
-2. Build the palette assignment after the two flagship crashes pass their
-   listening gates.
-3. Continue with ride and auxiliary nested cymbals under the remaining measured
-   budget; retain compact ride sounds 987..989 until their replacement passes.
+1. Compile two combined nested crash/hi-hat-edge sounds: seven full crash
+   velocity layers plus three edge positions per CYMB slot.
+2. Transfer and audition them under unused IDs, then delete 944, 945 and the
+   standalone 946 only after the combined pair passes.
+3. Finalize the palette and generated Arduino contract with the verified note
+   ranges; use the remaining 245-block class of budget only for very short
+   electronic sounds or metadata-safe reserve.
