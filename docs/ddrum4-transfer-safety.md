@@ -119,6 +119,15 @@ sender has reported a non-zero message count. It is not a batch uploader: read
 each candidate. For the UMC route, do not request fragmentation; reserve
 `--sysex-chunk-bytes 255` for diagnosing the Midiface limitation.
 
+After the owner has explicitly cleared the module and confirmed
+`SHIFT + MEM.LEFT = 8.12`, `scripts/transfer-ddrum4-core-bank.ps1` provides a
+single controlled orchestration of the 13 individually verified core sounds.
+It validates the frozen report, every SHA-256 hash, the 8,120/1,240 block
+baseline and unique IDs before sending anything. Each sound still passes
+through the one-sound hardware boundary and receives its own receipt. The
+script deliberately uses the proven unfragmented UMC route and refuses to run
+without `-ConfirmedEmptySoundMemory`.
+
 ```powershell
 $env:PYTHONPATH = 'apps/ddrum4-bank-builder/src'
 python -m ddrum4_bank.cli transfer-sound D:\Studio\ddrum4-b3\rim-999\RIM_999.mid `
