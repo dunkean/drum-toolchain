@@ -66,6 +66,11 @@ preset and creates a *new* staged `.syx` file; it refuses to overwrite files
 and never opens a MIDI output. There is deliberately no `set`, `restore`, or
 hardware `write` command yet.
 
+`ddti transfer-plan complete-dump.syx` validates that a file contains the full
+21-kit plus 21-global-record transfer and prints its hash, packet count and
+review state. It is deliberately output-free; it is the gate that a future
+explicitly confirmed hardware transfer will use.
+
 ## Local REST API
 
 Install `ddti[api]`, then run:
@@ -84,6 +89,7 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
 | GET | `/preset` | export the current `ddti-note-preset/v1` document |
 | PUT | `/preset` | stage a full or partial note-preset document in memory only |
+| GET | `/transfer/plan` | validate and review the complete staged transfer; sends nothing |
 
 The PATCH response explicitly states `hardware_write: disabled`. Restarting
 the service discards staged changes unless they have been exported through the

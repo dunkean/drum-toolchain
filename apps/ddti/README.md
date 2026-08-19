@@ -31,6 +31,7 @@ python -m ddti monitor --input TriggerIO --output captures/monitor.jsonl
 python -m ddti decode captures/factory_dump_001.syx
 python -m ddti export-preset captures/factory_dump_001.syx presets/factory-notes.json
 python -m ddti apply-preset captures/factory_dump_001.syx presets/factory-notes.json captures/factory-notes-staged.syx
+python -m ddti transfer-plan captures/factory_dump_002_full.golden.syx
 ```
 
 ## First safe capture
@@ -63,3 +64,7 @@ channel bytes, and can export/import portable `ddti-note-preset/v1` JSON
 presets. Channel and companion bytes remain read-only because their meaning is
 not proven. No hardware-write path exists until the remaining protocol fields
 are experimentally validated.
+
+`ddti transfer-plan` is the mandatory review gate for the eventual transfer
+path. It accepts only a complete 42-packet dump and displays its SHA-256; it
+does not open a MIDI output or send any bytes.

@@ -11,6 +11,7 @@ from .discovery import discover_devices
 from .monitor import monitor
 from .models import decode_configuration
 from .protocol import decode_file
+from .transfer import build_transfer_plan_from_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     apply_preset.add_argument("dump", type=Path)
     apply_preset.add_argument("preset", type=Path)
     apply_preset.add_argument("output", type=Path, help="new .syx file; existing files are refused")
+    transfer_plan = commands.add_parser("transfer-plan", help="validate and review a complete dump for a future hardware transfer; never sends MIDI")
+    transfer_plan.add_argument("dump", type=Path)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -132,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         configuration = decode_configuration(decode_file(args.dump)).with_note_preset(document)
         args.output.write_bytes(configuration.raw)
         print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled"}, indent=2))
+    elif args.command == "transfer-plan":
+        print(json.dumps(build_transfer_plan_from_file(args.dump).to_document(), indent=2, sort_keys=True))
     elif args.command == "serve":
         from .api import create_app
         try:

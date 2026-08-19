@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from .discovery import discover_devices
 from .models import DDTiConfiguration, decode_configuration
 from .protocol import decode_file
+from .transfer import build_transfer_plan
 
 
 def _configuration(path: Path) -> DDTiConfiguration:
@@ -58,6 +59,11 @@ def create_app(dump_path: Path):
     def preset() -> dict[str, object]:
         """Return all confirmed notes as a portable offline preset."""
         return current().to_note_preset()
+
+    @app.get("/transfer/plan")
+    def transfer_plan() -> dict[str, object]:
+        """Review the staged complete dump; no endpoint sends to hardware."""
+        return build_transfer_plan(current().raw).to_document()
 
     @app.get("/kits")
     def kits() -> list[dict[str, object]]:

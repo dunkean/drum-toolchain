@@ -17,6 +17,7 @@ from ddti.models import decode_configuration, encode_configuration
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
+from ddti.transfer import build_transfer_plan
 
 
 class _InputPort:
@@ -233,6 +234,21 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(len(configuration.global_trigger_records), 21)
         self.assertEqual(configuration.global_trigger_records[0].values, (0, 6, 5, 1, 10, 0))
         self.assertEqual(configuration.global_trigger_records[20].raw_offsets[0], len(kit) + 20 * 18 + 11)
+
+    def test_transfer_plan_accepts_only_a_complete_observed_dump(self) -> None:
+        kits = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + (bytes((9, 35, 3)) * 20) + bytes(6) + bytes((0xF7,))
+            for index in range(21)
+        )
+        globals_ = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
+        plan = build_transfer_plan(kits + globals_)
+        self.assertEqual(plan.to_document()["packet_count"], 42)
+        self.assertEqual(plan.to_document()["hardware_write"], "not implemented")
+        with self.assertRaisesRegex(ValueError, "requires all 21"):
+            build_transfer_plan(kits)
 
     def test_preset_cli_exports_and_applies_to_a_new_staged_file(self) -> None:
         body = bytearray()
