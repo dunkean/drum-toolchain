@@ -78,22 +78,37 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
         input_number = zone_record // 2 + 1
         zone = "Tip" if zone_record % 2 == 0 else "Ring"
         position = {
-            0: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} raw channel (PROBABLE)",
+            0: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} MIDI Channel (CONFIRMED; stored channel-1)",
             1: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} MIDI Note (CONFIRMED)",
             2: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} companion byte (UNKNOWN)",
         }[field]
+    elif difference.observed_packet_family == 0x01 and byte == 11 + 0x3C:
+        position = "Kit Hi-hat pedal MIDI Channel (CONFIRMED; stored channel-1)"
+    elif difference.observed_packet_family == 0x01 and byte == 11 + 0x3D:
+        position = "Kit Hi-hat pedal MIDI Note (CONFIRMED)"
+    elif difference.observed_packet_family == 0x01 and byte == 11 + 0x3E:
+        position = "Kit Hi-hat link/companion byte (UNKNOWN)"
+    elif difference.observed_packet_family == 0x01 and byte == 11 + 0x3F:
+        position = "Kit Input 3 closed Hi-hat MIDI Note (CONFIRMED)"
     elif difference.observed_packet_family == 0x01 and byte == 11 + 0x40:
         position = "Kit Program Change disabled flag (CONFIRMED; 1=---, 0=active)"
     elif difference.observed_packet_family == 0x01 and byte == 11 + 0x41:
         position = "Kit Program Change value (CONFIRMED; ignored while disabled)"
-    elif difference.observed_packet_family == 0x02 and difference.observed_packet_index == 0 and 11 <= byte <= 15:
+    elif difference.observed_packet_family == 0x02 and 0 <= difference.observed_packet_index <= 20 and 11 <= byte <= 15:
+        record = difference.observed_packet_index
+        target = "Hi-hat pedal" if record == 20 else f"Input {record // 2 + 1} {'Tip' if record % 2 == 0 else 'Ring'}"
+        evidence = "CONFIRMED" if record == 0 else "MAPPED; HARDWARE WRITE NOT YET VALIDATED"
         position = {
-            11: "Input 1 Tip Gain (CONFIRMED)",
-            12: "Input 1 Tip Velocity Curve (CONFIRMED; observed 6=Lin, 7=LG1)",
-            13: "Input 1 Tip Threshold (CONFIRMED)",
-            14: "Input 1 Tip X-Talk (CONFIRMED)",
-            15: "Input 1 Tip Retrigger (CONFIRMED)",
+            11: f"{target} Gain ({evidence})",
+            12: f"{target} Velocity Curve ({evidence}; observed 6=Lin, 7=LG1)",
+            13: f"{target} Threshold ({evidence})",
+            14: f"{target} {'Calibration' if record == 20 else 'X-Talk'} ({evidence})",
+            15: f"{target} Retrigger ({evidence})",
         }[byte]
+    elif difference.observed_packet_family == 0x02 and 0 <= difference.observed_packet_index <= 20 and byte == 16:
+        record = difference.observed_packet_index
+        target = "Hi-hat pedal" if record == 20 else f"Input {record // 2 + 1} {'Tip' if record % 2 == 0 else 'Ring'}"
+        position = f"{target} final raw byte (Trigger Type encoding unresolved)"
     else:
         position = labels.get(byte, f"opaque body byte +0x{byte - 11:02X}" if byte >= 11 else f"packet byte 0x{byte:02X}")
     return (
@@ -105,7 +120,7 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
 def render_diff(differences: tuple[ByteDifference, ...]) -> str:
     if not differences:
         return "No byte differences.\n"
-    lines = ["Protocol field interpretations are intentionally unavailable until validated."]
+    lines = ["Field labels distinguish mapped bytes from hardware-write-validated bytes."]
     for difference in differences:
         before = "--" if difference.before is None else f"0x{difference.before:02X}"
         after = "--" if difference.after is None else f"0x{difference.after:02X}"

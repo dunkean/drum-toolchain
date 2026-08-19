@@ -1,4 +1,4 @@
-"""Optional local FastAPI surface over the read-only DDTi library.
+"""Optional local FastAPI surface over the staged DDTi configuration model.
 
 This service stages configuration in memory. Hardware output is available only
 through the confirmed-fields validator, exact candidate hash review, and an
@@ -25,9 +25,11 @@ def _configuration(path: Path) -> DDTiConfiguration:
 
 
 class NotePatch(BaseModel):
-    """The only editable fields currently validated for offline staging."""
+    """Per-kit MIDI routing for one Tip/Ring input."""
 
+    tip_channel: int | None = None
     tip_note: int | None = None
+    ring_channel: int | None = None
     ring_note: int | None = None
 
 
@@ -39,6 +41,16 @@ class Input1TipPatch(BaseModel):
     threshold: int | None = None
     xtalk: int | None = None
     retrigger: int | None = None
+
+
+class GlobalTriggerPatch(Input1TipPatch):
+    trigger_type_raw: int | None = None
+
+
+class HiHatKitPatch(BaseModel):
+    pedal_channel: int | None = None
+    pedal_note: int | None = None
+    closed_note: int | None = None
 
 
 class ProgramChangePatch(BaseModel):
@@ -117,7 +129,7 @@ def create_app(dump_path: Path):
 
     @app.get("/configuration-preset")
     def configuration_preset() -> dict[str, object]:
-        """Return every proven editable setting as a portable preset document."""
+        """Return the complete modeled configuration as a portable preset."""
         try:
             return current().to_configuration_preset()
         except ValueError as error:
@@ -130,7 +142,10 @@ def create_app(dump_path: Path):
 
     @app.get("/write-plan")
     def write_plan() -> dict[str, object]:
-        plan = build_safe_write_plan(state["source_raw"], current().raw)
+        try:
+            plan = build_safe_write_plan(state["source_raw"], current().raw)
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(422, str(error)) from error
         document = plan.to_document()
         document["rendered_diff"] = render_diff(plan.differences)
         return document
@@ -195,16 +210,20 @@ def create_app(dump_path: Path):
 
     @app.patch("/kits/{kit}/inputs/{input_number}")
     def patch_input(kit: int, input_number: int, patch: NotePatch) -> dict[str, Any]:
-        if patch.tip_note is None and patch.ring_note is None:
-            raise HTTPException(422, "supply tip_note and/or ring_note")
+        if all(value is None for value in patch.model_dump().values()):
+            raise HTTPException(422, "supply at least one channel or note")
         with lock:
             config = state["configuration"]
             try:
                 updated = config
-                if patch.tip_note is not None:
-                    updated = updated.with_note(kit, input_number, "tip", patch.tip_note)
-                if patch.ring_note is not None:
-                    updated = updated.with_note(kit, input_number, "ring", patch.ring_note)
+                if patch.tip_channel is not None or patch.tip_note is not None:
+                    updated = updated.with_zone(
+                        kit, input_number, "tip", channel=patch.tip_channel, note=patch.tip_note
+                    )
+                if patch.ring_channel is not None or patch.ring_note is not None:
+                    updated = updated.with_zone(
+                        kit, input_number, "ring", channel=patch.ring_channel, note=patch.ring_note
+                    )
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
             state["configuration"] = updated
@@ -213,6 +232,33 @@ def create_app(dump_path: Path):
             "hardware_write": "disabled",
             "input": updated.kits[kit].inputs[input_number - 1].to_document(),
         }
+
+    @app.patch("/kits/{kit}/hi-hat")
+    def patch_hi_hat(kit: int, patch: HiHatKitPatch) -> dict[str, object]:
+        values = {name: value for name, value in patch.model_dump().items() if value is not None}
+        if not values:
+            raise HTTPException(422, "supply at least one hi-hat setting")
+        with lock:
+            try:
+                updated = state["configuration"].with_hi_hat_kit_settings(kit, **values)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            state["configuration"] = updated
+        return {"staged_only": True, "hardware_write": "disabled", "hi_hat": updated.kits[kit].hi_hat.to_document()}
+
+    @app.patch("/global-triggers/{record}")
+    def patch_global_trigger(record: int, patch: GlobalTriggerPatch) -> dict[str, object]:
+        values = {name: value for name, value in patch.model_dump().items() if value is not None}
+        if not values:
+            raise HTTPException(422, "supply at least one global trigger setting")
+        with lock:
+            try:
+                updated = state["configuration"].with_global_trigger_settings(record, values)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            state["configuration"] = updated
+        item = next(item for item in updated.global_trigger_records if item.index == record)
+        return {"staged_only": True, "hardware_write": "disabled", "global_trigger": item.to_document()}
 
     @app.patch("/global-trigger/input-1/tip")
     def patch_input_1_tip_gain(patch: Input1TipPatch) -> dict[str, object]:

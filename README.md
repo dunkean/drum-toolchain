@@ -23,7 +23,7 @@ before changing project structure or sending anything to the ddrum4.
 - `apps/ddrum4-modernizer`: ddrum4 MIDI output to SD3/DrumGizmo-compatible MIDI conversion.
 - `firmware/ddrum4-midi-bridge`: deterministic DDTi/eDRUMin-to-ddrum4 bridge for Arduino Uno.
 - `tools/midi-lab`: MIDI monitoring, learning, trace recording, replay, and hardware probes.
-- `apps/ddti`: safe legacy-DDTi USB/MIDI discovery, monitoring, raw SysEx capture, and offline diffing.  It has no writer until the protocol is validated from controlled dumps.
+- `apps/ddti`: desktop configuration editor for the legacy 2016 ddrum DDTi, with capture, reusable presets, exact diffs, persistent last-known state, and a confirmed-fields-only SysEx writer.
 
 ## Safety
 

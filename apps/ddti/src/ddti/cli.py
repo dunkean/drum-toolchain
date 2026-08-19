@@ -1,4 +1,4 @@
-"""Safe command line interface.  Every command is read-only or offline."""
+"""Safe command line interface with explicit gates around MIDI output."""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,7 @@ from .transfer import build_note_write_validation_plan, build_safe_write_plan, b
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ddti", description="Safe read-first tooling for the legacy ddrum DDTi")
+    parser = argparse.ArgumentParser(prog="ddti", description="Safe configuration tooling for the legacy ddrum DDTi")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("devices", help="list DDTi USB/MIDI candidates without opening a port")
     commands.add_parser("info", help="show the single DDTi candidate without opening a port")
@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_preset.add_argument("dump", type=Path)
     apply_preset.add_argument("preset", type=Path)
     apply_preset.add_argument("output", type=Path, help="new .syx file; existing files are refused")
-    export_configuration = commands.add_parser("export-config", help="export all proven editable values to a new YAML or JSON offline preset")
+    export_configuration = commands.add_parser("export-config", help="export the complete decoded configuration to a new YAML or JSON offline preset")
     export_configuration.add_argument("dump", type=Path)
     export_configuration.add_argument("output", type=Path, help="new .yaml, .yml, or .json file; existing files are refused")
     export_configuration.add_argument("--name", help="optional human-readable mapping name")
@@ -100,8 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
     api.add_argument("--port", type=int, default=8765)
-    gui = commands.add_parser("gui", help="run the optional offline PySide6 note editor")
-    gui.add_argument("dump", type=Path)
+    gui = commands.add_parser("gui", help="run the PySide6 editor; omit dump to reopen the last-known state")
+    gui.add_argument("dump", type=Path, nargs="?")
     return parser
 
 

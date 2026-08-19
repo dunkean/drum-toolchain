@@ -1,11 +1,11 @@
-# DDTi safe reverse-engineering toolchain
+# DDTi Editor
 
-`ddti` is the DDTi-specific, read-first application in the Drum Toolchain
-monorepo.  It supports USB/MIDI discovery, traffic monitoring, raw SysEx
-capture, integrity metadata, offline binary diffs, and a confirmed-fields-only
-configuration writer. Controlled transfers were returned byte-identically for
-MIDI Note, Program Change, and the five isolated Input 1 Tip fields. Unrestricted raw writes remain
-disabled.
+`ddti` is the desktop configuration application for the legacy 2016 ddrum
+DDTi. It edits the 21 kits, their Tip/Ring MIDI routing, Program Change,
+per-kit hi-hat routing, and the five decoded response settings for all 20
+zones plus the hi-hat pedal. It also captures panel dumps, keeps a persistent
+last-known state, imports/exports reusable YAML or JSON configurations, shows
+exact binary diffs, and sends only hardware-validated fields.
 
 Install it for the `ddti` command:
 
@@ -20,7 +20,9 @@ Optional local interfaces are deliberately separate from the core library:
 ```powershell
 python -m pip install -e 'apps/ddti[api,gui]'
 ddti serve captures/factory_dump_001.syx
-ddti gui captures/factory_dump_001.syx
+ddti gui captures/factory_dump_002_full.golden.syx
+ddti gui  # subsequent launches reopen the verified last-known state
+ddti-editor  # equivalent desktop shortcut
 ```
 
 Or run directly from a checkout:
@@ -63,24 +65,33 @@ Copy-Item captures/factory_dump_001.json captures/factory_dump_001.golden.json
 See [`docs/DDTI_CAPTURE.md`](../../docs/DDTI_CAPTURE.md) for the exact safe
 workflow and the hardware evidence currently known.
 
-The FastAPI service and PySide6 editor both edit only an offline, staged dump.
-They cover the 21 observed kits, expose confirmed MIDI notes, per-kit Program
-Change (`---` or `0..127`), Input 1 Tip Gain, Velocity Curve, Threshold,
-X-Talk and Retrigger, and observed raw channel bytes. They can export/import
-portable `ddti-note-preset/v1` JSON and complete
-`ddti-configuration-preset/v1` YAML/JSON presets. Channel, Trigger Type,
-other trigger records, and companion bytes remain read-only because their
-meaning or scope is not proven. The writer accepts only observed values in the
-confirmed editable subset.
+The FastAPI service and PySide6 editor stage changes before any output. The
+complete `ddti-configuration-preset/v1` document carries all 21 kits, all 20
+Tip/Ring channel and note pairs per kit, Program Change, hi-hat pedal routing
+and closed note, plus Gain, Velocity Curve, Threshold, X-Talk/Calibration and
+Retrigger for all 21 global targets. The unresolved final byte of each global
+record is preserved as raw data and remains read-only in the GUI.
+
+Click **Synchroniser** and perform the documented panel dump to replace the
+working state. A complete 42-frame capture is saved under `%LOCALAPPDATA%\DDTi
+Editor`; later launches can use `ddti gui` without another dump. The DDTi has
+no validated PC command that starts a dump, so the panel key combination is
+still required when a fresh hardware read is actually needed.
+
+Offline editing and preset import cover more fields than the current hardware
+write allowlist. **Envoyer au DDTi** refuses any unvalidated changed offset
+before opening the MIDI output. Confirmed Note, Program Change and Input 1 Tip
+values can already be sent; the remaining decoded fields will enter the same
+writer only after their controlled round-trip validation on this DDTi.
 
 The repository’s named `presets/gm.yaml` and `presets/sd3.yaml` are musical
 role templates, not assumptions about cable wiring. Copy and fill
 `presets/ddti-input-layout.example.yaml` with the exact physical Input/Tip/Ring
 assignments for your kit and the exact target kit numbers. `apply-role-preset`
 then creates a new staged dump. The GUI offers the same two-file flow through
-**Apply GM/SD3 role preset**. Neither flow opens a MIDI output.
+**Mapping GM/SD3**. Neither flow opens a MIDI output.
 
-Before exporting a staged file, the GUI’s **Review staged diff** button shows
+Before exporting a staged file, the GUI’s **Voir les changements** button shows
 the exact byte changes from the source dump. The local API exposes the same
 review at `GET /staged-diff` and permits an integration to download the staged
 file at `GET /staged-sysex`; those endpoints are output-free and explicitly

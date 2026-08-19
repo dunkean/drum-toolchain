@@ -19,6 +19,7 @@ from ddti.presets import load_document
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
+from ddti.state import DDTiStateStore
 from ddti.transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan, send_note_write_validation, send_reviewed_transfer, send_safe_configuration
 
 
@@ -82,7 +83,7 @@ class DDTiTests(unittest.TestCase):
             self.assertIn("family 0x01", render_diff((change,)))
             before.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 01 F7"))
             after.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 02 F7"))
-            self.assertIn("Input 2 Tip raw channel (PROBABLE)", render_diff(diff_files(before, after)))
+            self.assertIn("Input 2 Tip MIDI Channel (CONFIRMED; stored channel-1)", render_diff(diff_files(before, after)))
             self.assertEqual(diff_ddti_bytes(before.read_bytes(), after.read_bytes())[0].observed_packet_family, 1)
 
     def test_capture_writes_hashed_triad_without_overwriting(self) -> None:
@@ -259,6 +260,44 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(len(configuration.global_trigger_records), 21)
         self.assertEqual(configuration.global_trigger_records[0].values, (0, 6, 5, 1, 10, 0))
         self.assertEqual(configuration.global_trigger_records[20].raw_offsets[0], len(kit) + 20 * 18 + 11)
+
+    def test_complete_editor_model_stages_channels_hi_hat_and_all_global_targets(self) -> None:
+        kits = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index))
+            + (bytes((9, 35, 3)) * 20)
+            + bytes((9, 44, 3, 42, 1, 127, 0xF7))
+            for index in range(21)
+        )
+        globals_ = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
+        source = decode_configuration(decode_dump(kits + globals_))
+        staged = (
+            source.with_zone(0, 2, "tip", channel=12, note=39)
+            .with_hi_hat_kit_settings(0, pedal_channel=11, pedal_note=45, closed_note=43)
+            .with_global_trigger_settings(2, {
+                "gain": 17, "velocity_curve": 8, "threshold": 8, "xtalk": 5, "retrigger": 15,
+            })
+        )
+        self.assertEqual(staged.kits[0].inputs[1].tip.channel, 12)
+        self.assertEqual(staged.kits[0].inputs[1].tip.note, 39)
+        self.assertEqual(staged.kits[0].hi_hat.to_document(), {
+            "pedal_channel": 11, "pedal_note": 45, "closed_note": 43, "link_raw": 3,
+        })
+        self.assertEqual(staged.global_trigger_records[2].label, "Input 2 Tip")
+        self.assertEqual(staged.global_trigger_records[2].settings["retrigger"], 15)
+        preset = staged.to_configuration_preset()
+        round_tripped = source.with_configuration_preset(preset)
+        self.assertEqual(round_tripped.raw, staged.canonicalize_disabled_program_changes().raw)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            store = DDTiStateStore(Path(temporary))
+            saved = store.save(staged.raw, source="unit test", reason="verified write")
+            self.assertEqual(saved, store.syx_path)
+            self.assertEqual(store.load().raw, staged.raw)
+            metadata = json.loads(store.metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["sha256"], build_transfer_plan(staged.raw).sha256)
 
     def test_configuration_preset_stages_confirmed_notes_and_input_1_tip_settings(self) -> None:
         kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
@@ -454,7 +493,14 @@ class DDTiTests(unittest.TestCase):
         for zone in range(20):
             body.extend((9, 35 + zone, 3))
         body.extend(b"\x00" * 6)
-        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        raw = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + bytes(body) + bytes((0xF7,))
+            for index in range(21)
+        )
+        raw += b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source.syx"
@@ -485,7 +531,7 @@ class DDTiTests(unittest.TestCase):
             text = preset.read_text(encoding="utf-8")
             self.assertIn("format: ddti-configuration-preset/v1", text)
             document = __import__("yaml").safe_load(text)
-            document["confirmed_global_trigger"]["input_1_tip"]["gain"] = 16
+            document["global_triggers"][0]["gain"] = 16
             preset.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
             self.assertEqual(main(["apply-config", str(source), str(preset), str(staged)]), 0)
             self.assertEqual(decode_configuration(decode_dump(staged.read_bytes())).input_1_tip_gain, 16)
@@ -568,6 +614,24 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(len(output.messages), 42)
             self.assertEqual(client.get("/staged-diff").json()["changed_bytes"], 0)
 
+            generic_client = TestClient(create_app(source))
+            response = generic_client.patch("/kits/0/inputs/2", json={"tip_channel": 12, "tip_note": 39})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["input"]["tip"]["channel"], 12)
+            response = generic_client.patch(
+                "/kits/0/hi-hat",
+                json={"pedal_channel": 11, "pedal_note": 45, "closed_note": 43},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["hi_hat"]["closed_note"], 43)
+            response = generic_client.patch("/global-triggers/2", json={"gain": 17, "threshold": 8})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["global_trigger"]["target"], "Input 2 Tip")
+            self.assertEqual(response.json()["global_trigger"]["settings"]["threshold"], 8)
+            rejected_plan = generic_client.get("/write-plan")
+            self.assertEqual(rejected_plan.status_code, 422)
+            self.assertIn("candidate changes unvalidated DDTi byte(s)", rejected_plan.json()["detail"])
+
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:
             import os
@@ -581,10 +645,18 @@ class DDTiTests(unittest.TestCase):
         for zone in range(20):
             body.extend((9, 35 + zone, 3))
         body.extend(b"\x00" * 6)
-        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        raw = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + bytes(body) + bytes((0xF7,))
+            for index in range(21)
+        )
+        raw += b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "fixture.syx"
             source.write_bytes(raw)
             application = QApplication.instance() or QApplication([])
             QTimer.singleShot(20, application.quit)
-            self.assertEqual(launch(source), 0)
+            with patch.dict(os.environ, {"LOCALAPPDATA": temporary}):
+                self.assertEqual(launch(source), 0)

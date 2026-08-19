@@ -1,152 +1,340 @@
-"""Optional PySide6 DDTi editor with confirmed-fields-only hardware writes."""
+"""PySide6 desktop editor for the legacy 2016 ddrum DDTi."""
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
+from .capture import capture_dump
 from .diff import diff_ddti_bytes, render_diff
-from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, decode_configuration, encode_configuration
+from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, VELOCITY_CURVE_LABELS, decode_configuration
 from .mappings import apply_role_template
 from .presets import load_document, write_document
-from .protocol import decode_file
+from .protocol import decode_dump, decode_file
+from .state import DDTiStateStore
 from .transfer import build_safe_write_plan, send_safe_configuration
 
 
-def launch(dump_path: Path) -> int:
+_STYLE = """
+QMainWindow, QWidget { background: #11151c; color: #e8edf5; font-size: 13px; }
+QFrame#hero { background: #18202b; border: 1px solid #293546; border-radius: 12px; }
+QLabel#title { font-size: 24px; font-weight: 700; color: #ffffff; }
+QLabel#subtitle { color: #9dacbf; }
+QLabel#statusGood { color: #56d6a3; font-weight: 600; }
+QLabel#statusChanged { color: #ffca6a; font-weight: 600; }
+QListWidget, QTableWidget, QTabWidget::pane, QGroupBox { background: #161c25; border: 1px solid #293546; border-radius: 8px; }
+QListWidget::item { padding: 9px 12px; border-radius: 5px; }
+QListWidget::item:selected { background: #2364d2; color: white; }
+QHeaderView::section { background: #202a38; color: #cdd7e6; padding: 8px; border: 0; }
+QTabBar::tab { background: #18202b; padding: 10px 18px; margin-right: 3px; border-radius: 6px; }
+QTabBar::tab:selected { background: #2364d2; color: white; }
+QSpinBox, QComboBox { background: #202936; border: 1px solid #344359; border-radius: 6px; padding: 5px 8px; }
+QSpinBox:focus, QComboBox:focus { border: 1px solid #4d8dff; }
+QPushButton { background: #253246; border: 1px solid #34465f; border-radius: 7px; padding: 8px 13px; }
+QPushButton:hover { background: #30415a; }
+QPushButton#primary { background: #246bdb; border-color: #3880ee; font-weight: 600; }
+QPushButton#primary:hover { background: #2f7aea; }
+QGroupBox { margin-top: 10px; padding: 14px 10px 10px; font-weight: 600; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; color: #aebbd0; }
+QStatusBar { color: #8fa0b7; }
+"""
+
+
+def _decode_complete_configuration(path: Path) -> DDTiConfiguration:
+    configuration = decode_configuration(decode_file(path))
+    if len(configuration.kits) != 21 or len(configuration.global_trigger_records) != 21:
+        raise ValueError("un dump DDTi complet doit contenir 21 kits et 21 réglages globaux")
+    return configuration
+
+
+def launch(dump_path: Path | None = None) -> int:
     try:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
-    except ImportError as error:  # pragma: no cover - optional desktop dependency
+        from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+        from PySide6.QtWidgets import (
+            QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
+            QHeaderView, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
+            QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem,
+            QVBoxLayout, QWidget,
+        )
+    except ImportError as error:  # pragma: no cover
         raise RuntimeError("install the 'ddti[gui]' extra to run the PySide6 editor") from error
 
-    class Editor(QMainWindow):
-        def __init__(self, source: Path) -> None:
+    class CaptureWorker(QObject):
+        completed = Signal(object)
+        failed = Signal(str)
+
+        def __init__(self, stem: Path) -> None:
             super().__init__()
-            self.source = source
-            self.configuration: DDTiConfiguration = decode_configuration(decode_file(source))
+            self.stem = stem
+
+        @Slot()
+        def run(self) -> None:
+            try:
+                self.completed.emit(capture_dump("TriggerIO", self.stem, seconds=180, idle_seconds=5))
+            except Exception as error:  # pragma: no cover - hardware/runtime path
+                self.failed.emit(str(error))
+
+    class Editor(QMainWindow):
+        def __init__(self, source: Path | None) -> None:
+            super().__init__()
+            self.state_store = DDTiStateStore.default()
+            self._refreshing = False
+            self.capture_thread = None
+            self.capture_worker = None
+            if source is None:
+                if not self.state_store.exists():
+                    raise ValueError("no dump supplied and no last-known DDTi state exists")
+                self.configuration = self.state_store.load()
+                self.source_label = str(self.state_store.syx_path)
+            else:
+                self.configuration = _decode_complete_configuration(source)
+                self.source_label = str(source)
+                self.state_store.save(self.configuration.raw, source=str(source), reason="opened verified dump")
             self.source_raw = self.configuration.raw
-            self.setWindowTitle(f"DDTi offline editor — {source.name}")
+            self.setWindowTitle("DDTi Editor — configuration complète")
+            self.setMinimumSize(1100, 700)
+            self._build_ui()
+            self.refresh_all()
+
+        def _build_ui(self) -> None:
             root = QWidget(self)
-            layout = QVBoxLayout(root)
-            layout.addWidget(QLabel("Confirmed fields only — every hardware write is diffed, hash-reviewed and validated"))
-            kit_row = QHBoxLayout()
-            kit_row.addWidget(QLabel("Kit:"))
-            self.kit_selector = QComboBox()
+            outer = QVBoxLayout(root)
+            outer.setContentsMargins(18, 18, 18, 12)
+            outer.setSpacing(12)
+            hero = QFrame()
+            hero.setObjectName("hero")
+            hero_layout = QVBoxLayout(hero)
+            title = QLabel("DDTi Editor")
+            title.setObjectName("title")
+            hero_layout.addWidget(title)
+            subtitle = QLabel("21 kits • 20 zones • réglages globaux • envoi SysEx contrôlé")
+            subtitle.setObjectName("subtitle")
+            hero_layout.addWidget(subtitle)
+            status_row = QHBoxLayout()
+            self.device_status = QLabel("● TriggerIO — vérifié au moment de l’envoi")
+            self.device_status.setObjectName("statusGood")
+            status_row.addWidget(self.device_status)
+            status_row.addStretch()
+            self.change_status = QLabel()
+            status_row.addWidget(self.change_status)
+            hero_layout.addLayout(status_row)
+            outer.addWidget(hero)
+            splitter = QSplitter()
+            self.kit_list = QListWidget()
+            self.kit_list.setMaximumWidth(190)
             for kit in self.configuration.kits:
-                self.kit_selector.addItem(f"Kit {kit.number + 1}", kit.number)
-            self.kit_selector.currentIndexChanged.connect(self.refresh)
-            kit_row.addWidget(self.kit_selector)
-            kit_row.addWidget(QLabel("Program Change:"))
+                self.kit_list.addItem(f"Kit {kit.number + 1:02d}")
+            self.kit_list.currentRowChanged.connect(self.refresh_kit)
+            splitter.addWidget(self.kit_list)
+            self.tabs = QTabWidget()
+            self.tabs.addTab(self._build_kit_tab(), "Kit & routage MIDI")
+            self.tabs.addTab(self._build_trigger_tab(), "Réponse des triggers")
+            splitter.addWidget(self.tabs)
+            splitter.setStretchFactor(1, 1)
+            outer.addWidget(splitter, 1)
+            actions = QHBoxLayout()
+            for text, callback in (
+                ("Synchroniser", self.synchronize_from_ddti),
+                ("Ouvrir un dump", self.open_dump),
+                ("Importer une config", self.import_preset),
+                ("Mapping GM/SD3", self.apply_role_preset),
+                ("Exporter la config", self.export_configuration_preset),
+                ("Exporter SysEx", self.export_sysex),
+                ("Voir les changements", self.review_staged_diff),
+                ("Annuler", self.discard_changes),
+            ):
+                button = QPushButton(text)
+                button.clicked.connect(callback)
+                actions.addWidget(button)
+                if text == "Synchroniser":
+                    self.synchronize_button = button
+            actions.addStretch()
+            write = QPushButton("Envoyer au DDTi")
+            write.setObjectName("primary")
+            write.clicked.connect(self.write_to_ddti)
+            actions.addWidget(write)
+            outer.addLayout(actions)
+            self.setCentralWidget(root)
+            self.statusBar().showMessage(f"Source : {self.source_label}")
+            self.kit_list.setCurrentRow(0)
+
+        def _build_kit_tab(self) -> QWidget:
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            top = QHBoxLayout()
+            top.addWidget(QLabel("Program Change"))
             self.program_change = QSpinBox()
             self.program_change.setRange(-1, 127)
             self.program_change.setSpecialValueText("---")
             self.program_change.valueChanged.connect(self.set_program_change)
-            kit_row.addWidget(self.program_change)
-            kit_row.addStretch()
-            layout.addLayout(kit_row)
-            trigger_row = QHBoxLayout()
-            trigger_row.addWidget(QLabel("Input 1 Tip (global):"))
+            top.addWidget(self.program_change)
+            top.addStretch()
+            layout.addLayout(top)
+            self.mapping_table = QTableWidget(10, 5)
+            self.mapping_table.setHorizontalHeaderLabels(("Entrée", "Tip canal", "Tip note", "Ring canal", "Ring note"))
+            self.mapping_table.verticalHeader().setVisible(False)
+            self.mapping_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            layout.addWidget(self.mapping_table, 1)
+            hi_hat_group = QGroupBox("Hi-hat — valeurs propres au kit")
+            hi_hat_layout = QHBoxLayout(hi_hat_group)
+            self.hi_hat_spins: dict[str, QSpinBox] = {}
+            for field, label, minimum, maximum in (
+                ("pedal_channel", "Canal pédale", 1, 16),
+                ("pedal_note", "Note pédale", 0, 127),
+                ("closed_note", "Note fermée Input 3", 0, 127),
+            ):
+                hi_hat_layout.addWidget(QLabel(label))
+                spin = QSpinBox()
+                spin.setRange(minimum, maximum)
+                spin.valueChanged.connect(lambda value, name=field: self.set_hi_hat(name, value))
+                self.hi_hat_spins[field] = spin
+                hi_hat_layout.addWidget(spin)
+            hi_hat_layout.addStretch()
+            layout.addWidget(hi_hat_group)
+            return tab
+
+        def _build_trigger_tab(self) -> QWidget:
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Zone globale"))
+            self.trigger_selector = QComboBox()
+            for record in self.configuration.global_trigger_records:
+                self.trigger_selector.addItem(record.label, record.index)
+            self.trigger_selector.currentIndexChanged.connect(self.refresh_trigger)
+            row.addWidget(self.trigger_selector)
+            row.addStretch()
+            layout.addLayout(row)
+            group = QGroupBox("Réponse et filtrage")
+            form = QFormLayout(group)
             self.trigger_spins: dict[str, QSpinBox] = {}
             for field, label in (
                 ("gain", "Gain"),
-                ("velocity_curve", "Curve"),
                 ("threshold", "Threshold"),
-                ("xtalk", "X-Talk"),
-                ("retrigger", "Retrigger"),
+                ("xtalk", "X-Talk / calibration brute"),
+                ("retrigger", "Retrigger (ms)"),
             ):
-                trigger_row.addWidget(QLabel(label))
                 spin = QSpinBox()
                 spin.setRange(0, 127)
-                spin.setToolTip("The editor preserves uint7 values; hardware writing is restricted to values observed in controlled captures.")
+                spin.valueChanged.connect(lambda value, name=field: self.set_global_trigger(name, value))
                 self.trigger_spins[field] = spin
-                trigger_row.addWidget(spin)
-            self.curve_label = QLabel("")
-            trigger_row.addWidget(self.curve_label)
-            if self.configuration.global_trigger_records:
-                for field, spin in self.trigger_spins.items():
-                    spin.setValue(self.configuration.input_1_tip_settings[field])
-                    spin.valueChanged.connect(lambda value, name=field: self.set_input_1_tip_setting(name, value))
-            else:
-                for spin in self.trigger_spins.values():
-                    spin.setEnabled(False)
-                    spin.setToolTip("The opened dump has no global-trigger record 0.")
-            trigger_row.addStretch()
-            layout.addLayout(trigger_row)
-            self.table = QTableWidget(10, 5)
-            self.table.setHorizontalHeaderLabels(("Input", "Tip note", "Tip channel (raw+1)", "Ring note", "Ring channel (raw+1)"))
-            layout.addWidget(self.table)
-            buttons = QHBoxLayout()
-            save = QPushButton("Export staged SysEx")
-            save.clicked.connect(self.save_file)
-            buttons.addWidget(save)
-            export_preset = QPushButton("Export note preset")
-            export_preset.clicked.connect(self.export_preset)
-            buttons.addWidget(export_preset)
-            export_configuration = QPushButton("Export config preset")
-            export_configuration.clicked.connect(self.export_configuration_preset)
-            buttons.addWidget(export_configuration)
-            import_preset = QPushButton("Import config preset")
-            import_preset.clicked.connect(self.import_preset)
-            buttons.addWidget(import_preset)
-            apply_role = QPushButton("Apply GM/SD3 role preset")
-            apply_role.clicked.connect(self.apply_role_preset)
-            buttons.addWidget(apply_role)
-            review = QPushButton("Review staged diff")
-            review.clicked.connect(self.review_staged_diff)
-            buttons.addWidget(review)
-            write = QPushButton("Write confirmed fields to DDTi")
-            write.clicked.connect(self.write_to_ddti)
-            buttons.addWidget(write)
-            layout.addLayout(buttons)
-            self.setCentralWidget(root)
-            self.refresh()
+                form.addRow(label, spin)
+            self.curve = QComboBox()
+            for value in range(128):
+                label = VELOCITY_CURVE_LABELS.get(value)
+                self.curve.addItem(f"{label}  (code {value})" if label else f"Code {value}", value)
+            self.curve.currentIndexChanged.connect(self.set_velocity_curve)
+            form.insertRow(1, "Velocity Curve", self.curve)
+            self.trigger_type_raw = QSpinBox()
+            self.trigger_type_raw.setRange(0, 127)
+            self.trigger_type_raw.setReadOnly(True)
+            self.trigger_type_raw.setToolTip("Visible mais verrouillé jusqu’à la validation du dernier octet sur ce DDTi 2016.")
+            form.addRow("Dernier octet (brut, verrouillé)", self.trigger_type_raw)
+            layout.addWidget(group)
+            note = QLabel("Ces réglages sont globaux pour les 21 kits. Sur la pédale hi-hat, X-Talk contient la calibration.")
+            note.setWordWrap(True)
+            note.setObjectName("subtitle")
+            layout.addWidget(note)
+            layout.addStretch()
+            return tab
 
-        def selected_kit_number(self) -> int:
-            return int(self.kit_selector.currentData())
+        def selected_kit(self) -> int:
+            return max(0, self.kit_list.currentRow())
 
-        def refresh(self, _index: int | None = None) -> None:
-            self.table.blockSignals(True)
-            if self.configuration.global_trigger_records:
-                for field, spin in self.trigger_spins.items():
-                    spin.blockSignals(True)
-                    spin.setValue(self.configuration.input_1_tip_settings[field])
-                    spin.blockSignals(False)
-                label = self.configuration.input_1_tip_velocity_curve_label
-                self.curve_label.setText(f"({label})" if label else "(raw)")
-            kit = self.configuration.kits[self.selected_kit_number()]
+        def selected_record(self) -> int:
+            value = self.trigger_selector.currentData()
+            return 0 if value is None else int(value)
+
+        def _spin(self, minimum: int, maximum: int, value: int, callback) -> QSpinBox:
+            spin = QSpinBox()
+            spin.setRange(minimum, maximum)
+            spin.setValue(value)
+            spin.valueChanged.connect(callback)
+            return spin
+
+        def refresh_all(self) -> None:
+            self._refreshing = True
+            self.refresh_kit()
+            self.refresh_trigger()
+            self._refreshing = False
+            self.refresh_status()
+
+        def refresh_kit(self, _row: int | None = None) -> None:
+            if not hasattr(self, "mapping_table"):
+                return
+            self._refreshing = True
+            kit = self.configuration.kits[self.selected_kit()]
             self.program_change.blockSignals(True)
             self.program_change.setValue(-1 if kit.program_change is None else kit.program_change)
             self.program_change.blockSignals(False)
             for row, input_ in enumerate(kit.inputs):
                 number = QTableWidgetItem(str(input_.number))
+                number.setTextAlignment(Qt.AlignCenter)
                 number.setFlags(number.flags() & ~Qt.ItemIsEditable)
-                self.table.setItem(row, 0, number)
-                for column, zone in ((1, input_.tip), (3, input_.ring)):
-                    spin = QSpinBox()
-                    spin.setRange(0, 127)
-                    spin.setValue(zone.note)
-                    spin.valueChanged.connect(lambda value, input_number=input_.number, target="tip" if column == 1 else "ring": self.set_note(input_number, target, value))
-                    self.table.setCellWidget(row, column, spin)
-                for column, zone in ((2, input_.tip), (4, input_.ring)):
-                    channel = QTableWidgetItem(str(zone.channel_raw + 1))
-                    channel.setFlags(channel.flags() & ~Qt.ItemIsEditable)
-                    self.table.setItem(row, column, channel)
-            self.table.blockSignals(False)
+                self.mapping_table.setItem(row, 0, number)
+                self.mapping_table.setCellWidget(row, 1, self._spin(1, 16, input_.tip.channel, lambda value, n=input_.number: self.set_zone(n, "tip", "channel", value)))
+                self.mapping_table.setCellWidget(row, 2, self._spin(0, 127, input_.tip.note, lambda value, n=input_.number: self.set_zone(n, "tip", "note", value)))
+                self.mapping_table.setCellWidget(row, 3, self._spin(1, 16, input_.ring.channel, lambda value, n=input_.number: self.set_zone(n, "ring", "channel", value)))
+                self.mapping_table.setCellWidget(row, 4, self._spin(0, 127, input_.ring.note, lambda value, n=input_.number: self.set_zone(n, "ring", "note", value)))
+            for field, spin in self.hi_hat_spins.items():
+                spin.blockSignals(True)
+                spin.setValue(getattr(kit.hi_hat, field))
+                spin.blockSignals(False)
+            self._refreshing = False
+            self.refresh_status()
 
-        def set_note(self, input_number: int, zone: str, value: int) -> None:
-            self.configuration = self.configuration.with_note(self.selected_kit_number(), input_number, zone, value)
+        def refresh_trigger(self, _index: int | None = None) -> None:
+            if not hasattr(self, "trigger_selector") or not self.configuration.global_trigger_records:
+                return
+            self._refreshing = True
+            record = self.configuration.global_trigger_records[self.selected_record()]
+            for field, spin in self.trigger_spins.items():
+                spin.blockSignals(True)
+                spin.setValue(record.settings[field])
+                spin.blockSignals(False)
+            self.curve.blockSignals(True)
+            self.curve.setCurrentIndex(record.settings["velocity_curve"])
+            self.curve.blockSignals(False)
+            self.trigger_type_raw.setValue(record.trigger_type_raw)
+            self._refreshing = False
+            self.refresh_status()
 
-        def set_input_1_tip_setting(self, field: str, value: int) -> None:
-            if self.configuration.global_trigger_records:
-                self.configuration = self.configuration.with_input_1_tip_settings({field: value})
-                if field == "velocity_curve":
-                    label = self.configuration.input_1_tip_velocity_curve_label
-                    self.curve_label.setText(f"({label})" if label else "(raw)")
+        def refresh_status(self) -> None:
+            if not hasattr(self, "change_status"):
+                return
+            count = len(diff_ddti_bytes(self.source_raw, self.configuration.raw))
+            self.change_status.setText("Aucun changement" if count == 0 else f"{count} octet(s) modifié(s)")
+            self.change_status.setObjectName("statusGood" if count == 0 else "statusChanged")
+            self.change_status.style().unpolish(self.change_status)
+            self.change_status.style().polish(self.change_status)
+
+        def set_zone(self, input_number: int, zone: str, field: str, value: int) -> None:
+            if self._refreshing:
+                return
+            self.configuration = self.configuration.with_zone(self.selected_kit(), input_number, zone, **{field: value})
+            self.refresh_status()
+
+        def set_hi_hat(self, field: str, value: int) -> None:
+            if self._refreshing:
+                return
+            self.configuration = self.configuration.with_hi_hat_kit_settings(self.selected_kit(), **{field: value})
+            self.refresh_status()
 
         def set_program_change(self, value: int) -> None:
-            self.configuration = self.configuration.with_program_change(
-                self.selected_kit_number(),
-                None if value == -1 else value,
-            )
+            if self._refreshing:
+                return
+            self.configuration = self.configuration.with_program_change(self.selected_kit(), None if value == -1 else value)
+            self.refresh_status()
+
+        def set_global_trigger(self, field: str, value: int) -> None:
+            if self._refreshing:
+                return
+            self.configuration = self.configuration.with_global_trigger_settings(self.selected_record(), {field: value})
+            self.refresh_status()
+
+        def set_velocity_curve(self, index: int) -> None:
+            if self._refreshing or index < 0:
+                return
+            self.set_global_trigger("velocity_curve", int(self.curve.itemData(index)))
 
         def choose_new_path(self, title: str, suggestion: Path, file_filter: str) -> Path | None:
             destination, _ = QFileDialog.getSaveFileName(self, title, str(suggestion), file_filter)
@@ -154,56 +342,102 @@ def launch(dump_path: Path) -> int:
                 return None
             path = Path(destination)
             if path.exists():
-                QMessageBox.warning(self, "Refused", "Choose a new filename; existing files are never overwritten.")
+                QMessageBox.warning(self, "Fichier existant", "Choisis un nouveau nom : aucun fichier n’est écrasé.")
                 return None
             return path
 
-        def save_file(self) -> None:
-            path = self.choose_new_path("Export staged DDTi SysEx", self.source.with_stem(self.source.stem + "-staged"), "SysEx (*.syx)")
-            if path is None:
-                return
-            path.write_bytes(encode_configuration(self.configuration))
-            QMessageBox.information(self, "Saved", f"Staged file saved locally:\n{path}\n\nIt was not sent to the DDTi.")
-
-        def export_preset(self) -> None:
-            path = self.choose_new_path("Export DDTi note preset", self.source.with_stem(self.source.stem + "-notes"), "JSON (*.json)")
-            if path is None:
-                return
-            write_document(path, self.configuration.to_note_preset())
-            QMessageBox.information(self, "Saved", f"Portable note preset saved locally:\n{path}\n\nIt was not sent to the DDTi.")
-
-        def export_configuration_preset(self) -> None:
-            path = self.choose_new_path("Export DDTi configuration preset", self.source.with_stem(self.source.stem + "-config").with_suffix(".yaml"), "YAML (*.yaml *.yml);;JSON (*.json)")
-            if path is None:
+        def open_dump(self) -> None:
+            filename, _ = QFileDialog.getOpenFileName(self, "Ouvrir un dump DDTi", "", "SysEx (*.syx)")
+            if not filename:
                 return
             try:
-                write_document(path, self.configuration.to_configuration_preset(name=self.source.stem))
-            except ValueError as error:
-                QMessageBox.warning(self, "Preset not exported", str(error))
+                configuration = _decode_complete_configuration(Path(filename))
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Dump refusé", str(error))
                 return
-            QMessageBox.information(self, "Saved", f"Portable configuration preset saved locally:\n{path}\n\nIt was not sent to the DDTi.")
+            self.configuration = configuration
+            self.source_raw = configuration.raw
+            self.source_label = filename
+            self.state_store.save(configuration.raw, source=filename, reason="opened verified dump")
+            self.refresh_all()
+            self.statusBar().showMessage(f"Source : {filename}")
+
+        def synchronize_from_ddti(self) -> None:
+            if self.capture_thread is not None and self.capture_thread.isRunning():
+                self.statusBar().showMessage("Une synchronisation DDTi est déjà en cours.")
+                return
+            answer = QMessageBox.information(
+                self,
+                "Synchronisation DDTi",
+                "Après avoir fermé ce message, appuie sur FUNCTION ↑ + VALUE ↑ sur le DDTi.\n\n"
+                "L’application écoutera pendant trois minutes et remplacera l’état de travail uniquement après un dump complet de 42 trames.",
+                QMessageBox.Ok | QMessageBox.Cancel,
+                QMessageBox.Ok,
+            )
+            if answer != QMessageBox.Ok:
+                return
+            capture_directory = self.state_store.directory / "captures"
+            stem = capture_directory / f"sync-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            self.capture_thread = QThread(self)
+            self.capture_worker = CaptureWorker(stem)
+            self.capture_worker.moveToThread(self.capture_thread)
+            self.capture_thread.started.connect(self.capture_worker.run)
+            self.capture_worker.completed.connect(self._synchronization_complete)
+            self.capture_worker.failed.connect(self._synchronization_failed)
+            self.capture_worker.completed.connect(self.capture_thread.quit)
+            self.capture_worker.failed.connect(self.capture_thread.quit)
+            self.capture_thread.finished.connect(self.capture_worker.deleteLater)
+            self.capture_thread.finished.connect(self.capture_thread.deleteLater)
+            self.device_status.setText("● Écoute du dump DDTi…")
+            self.synchronize_button.setEnabled(False)
+            self.capture_thread.finished.connect(self._synchronization_finished)
+            self.capture_thread.start()
+
+        @Slot()
+        def _synchronization_finished(self) -> None:
+            self.synchronize_button.setEnabled(True)
+            self.capture_thread = None
+            self.capture_worker = None
+
+        @Slot(object)
+        def _synchronization_complete(self, result) -> None:
+            try:
+                configuration = _decode_complete_configuration(result.syx_path)
+            except (OSError, ValueError) as error:
+                self._synchronization_failed(str(error))
+                return
+            self.configuration = configuration
+            self.source_raw = configuration.raw
+            self.source_label = str(result.syx_path)
+            self.state_store.save(configuration.raw, source=self.source_label, reason="complete panel synchronization")
+            self.refresh_all()
+            self.device_status.setText("● Synchronisé — 42 trames reçues")
+            self.statusBar().showMessage(f"Source : {self.source_label}")
+
+        @Slot(str)
+        def _synchronization_failed(self, message: str) -> None:
+            self.device_status.setText("● Synchronisation échouée")
+            QMessageBox.warning(self, "Synchronisation échouée", message)
 
         def import_preset(self) -> None:
-            filename, _ = QFileDialog.getOpenFileName(self, "Import DDTi preset", "", "Preset (*.yaml *.yml *.json)")
+            filename, _ = QFileDialog.getOpenFileName(self, "Importer une configuration", "", "Configuration (*.yaml *.yml *.json)")
             if not filename:
                 return
             try:
                 document = load_document(Path(filename))
-                if document.get("format") == CONFIGURATION_PRESET_FORMAT:
-                    self.configuration = self.configuration.with_configuration_preset(document)
-                else:
-                    self.configuration = self.configuration.with_note_preset(document)
+                if document.get("format") != CONFIGURATION_PRESET_FORMAT:
+                    raise ValueError(f"format attendu : {CONFIGURATION_PRESET_FORMAT}")
+                self.configuration = self.configuration.with_configuration_preset(document)
             except (OSError, ValueError) as error:
-                QMessageBox.warning(self, "Preset not imported", str(error))
+                QMessageBox.warning(self, "Import refusé", str(error))
                 return
-            self.refresh()
-            QMessageBox.information(self, "Imported", "Settings staged in memory only. Export a new SysEx file to retain them.")
+            self.refresh_all()
 
         def apply_role_preset(self) -> None:
-            template_name, _ = QFileDialog.getOpenFileName(self, "Choose GM/SD3 role template", "", "Preset (*.yaml *.yml *.json)")
+            template_name, _ = QFileDialog.getOpenFileName(self, "Choisir le mapping GM/SD3", "", "Preset (*.yaml *.yml *.json)")
             if not template_name:
                 return
-            layout_name, _ = QFileDialog.getOpenFileName(self, "Choose explicit DDTi input layout", "", "Layout (*.yaml *.yml *.json)")
+            layout_name, _ = QFileDialog.getOpenFileName(self, "Choisir le câblage DDTi", "", "Câblage (*.yaml *.yml *.json)")
             if not layout_name:
                 return
             try:
@@ -213,61 +447,61 @@ def launch(dump_path: Path) -> int:
                     load_document(Path(layout_name)),
                 )
             except (OSError, ValueError) as error:
-                QMessageBox.warning(self, "Role preset not applied", str(error))
+                QMessageBox.warning(self, "Mapping refusé", str(error))
                 return
-            self.refresh()
-            QMessageBox.information(self, "Role preset staged", "The named role mapping was applied only to the explicit input/zone bindings. Export a new SysEx file to retain it; nothing was sent to the DDTi.")
+            self.refresh_all()
+
+        def export_configuration_preset(self) -> None:
+            path = self.choose_new_path("Exporter la configuration", Path("ddti-config.yaml"), "YAML (*.yaml *.yml);;JSON (*.json)")
+            if path is not None:
+                write_document(path, self.configuration.to_configuration_preset(name=path.stem))
+
+        def export_sysex(self) -> None:
+            path = self.choose_new_path("Exporter le SysEx", Path("ddti-staged.syx"), "SysEx (*.syx)")
+            if path is not None:
+                path.write_bytes(self.configuration.raw)
 
         def review_staged_diff(self) -> None:
-            differences = diff_ddti_bytes(self.source_raw, encode_configuration(self.configuration))
+            differences = diff_ddti_bytes(self.source_raw, self.configuration.raw)
             dialog = QMessageBox(self)
-            dialog.setWindowTitle("Staged DDTi diff")
-            dialog.setText(f"{len(differences)} changed byte(s) relative to {self.source.name}.\n\nNothing will be sent to the DDTi.")
+            dialog.setWindowTitle("Changements en attente")
+            dialog.setText(f"{len(differences)} octet(s) modifié(s). Rien n’a encore été envoyé.")
             dialog.setDetailedText(render_diff(differences))
             dialog.exec()
 
+        def discard_changes(self) -> None:
+            self.configuration = decode_configuration(decode_dump(self.source_raw))
+            self.refresh_all()
+
         def write_to_ddti(self) -> None:
             try:
-                plan = build_safe_write_plan(self.source_raw, encode_configuration(self.configuration))
+                plan = build_safe_write_plan(self.source_raw, self.configuration.raw)
             except (ValueError, RuntimeError) as error:
-                QMessageBox.warning(self, "Write refused", str(error))
+                QMessageBox.warning(self, "Envoi refusé", str(error))
                 return
             dialog = QMessageBox(self)
-            dialog.setWindowTitle("Confirm DDTi write")
+            dialog.setWindowTitle("Confirmer l’envoi DDTi")
             dialog.setIcon(QMessageBox.Warning)
-            dialog.setText(
-                f"Write {len(plan.differences)} validated byte change(s) to the DDTi?\n\n"
-                f"Candidate SHA-256:\n{plan.sha256}\n\n"
-                "Only confirmed MIDI notes, Program Change and validated Input 1 Tip values are allowed."
-            )
+            dialog.setText(f"Envoyer 42 trames et {len(plan.differences)} changement(s) validé(s) ?\n\nSHA-256 : {plan.sha256}\n\nLe dernier état connu sera sauvegardé automatiquement.")
             dialog.setDetailedText(render_diff(plan.differences))
             dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
             dialog.setDefaultButton(QMessageBox.No)
             if dialog.exec() != QMessageBox.Yes:
                 return
             try:
-                result = send_safe_configuration(
-                    self.source_raw,
-                    encode_configuration(self.configuration),
-                    "TriggerIO",
-                    expected_sha256=plan.sha256,
-                    confirmation="I_AUTHORIZE_DDTI_CONFIRMED_FIELDS",
-                    inter_message_ms=50,
-                )
+                result = send_safe_configuration(self.source_raw, self.configuration.raw, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_AUTHORIZE_DDTI_CONFIRMED_FIELDS", inter_message_ms=50)
             except (ValueError, RuntimeError) as error:
-                QMessageBox.warning(self, "Write failed", str(error))
+                QMessageBox.warning(self, "Échec de l’envoi", str(error))
                 return
             self.source_raw = plan.raw
             self.configuration = decode_configuration(plan.transfer.dump)
-            self.refresh()
-            QMessageBox.information(
-                self,
-                "Write completed",
-                f"Sent {result.packet_count} frames to {result.output_port}.\nSHA-256: {result.sha256}",
-            )
+            saved = self.state_store.save(plan.raw, source=self.source_label, reason="successful confirmed-fields write")
+            self.refresh_all()
+            QMessageBox.information(self, "Configuration envoyée", f"{result.packet_count} trames envoyées vers {result.output_port}.\nÉtat local : {saved}\nSHA-256 : {result.sha256}")
 
     application = QApplication.instance() or QApplication([])
+    application.setStyleSheet(_STYLE)
     editor = Editor(dump_path)
-    editor.resize(900, 470)
+    editor.resize(1240, 780)
     editor.show()
     return application.exec()

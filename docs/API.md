@@ -1,7 +1,7 @@
-# DDTi Python API
+# DDTi application and Python API
 
-The DDTi API remains read-first and operates on an explicit captured source
-dump. The REST API and desktop GUI stage changes before output, then call the
+The DDTi API operates on a verified captured source dump. The REST API and
+desktop GUI stage changes before output, then call the
 central confirmed-fields validator rather than duplicating protocol logic.
 
 ```python
@@ -39,11 +39,12 @@ assert b"".join(packet.raw for packet in dump.packets) == dump.raw
 print(dump.family_indexes())  # {1: (0, ..., 20), 2: (0, ..., 10)}
 ```
 
-The validated offline model exposes Kit/Input/Tip-or-Ring notes, per-kit
-Program Change, plus the controlled-evidence Input 1 Tip Gain field. `with_note`,
-`with_program_change`, `with_input_1_tip_gain`, and `encode_configuration` are
-used for staging. Hardware output additionally requires source-relative field
-validation, candidate-hash review and explicit confirmation.
+The lossless offline model exposes all 21 kits, Tip/Ring channel and note
+routing, per-kit Program Change and hi-hat routing, plus five response settings
+for each of the 20 zones and the hi-hat pedal. The sixth global byte is kept as
+raw data because Trigger Type is not yet safely decoded. Hardware output
+additionally requires source-relative field validation, candidate-hash review
+and explicit confirmation.
 
 ```python
 from ddti import decode_configuration, encode_configuration
@@ -51,6 +52,9 @@ from ddti import decode_configuration, encode_configuration
 config = decode_configuration(dump)
 assert config.kits[0].inputs[0].tip.note == 35
 preview = config.with_note(0, 1, "tip", 36)
+preview = preview.with_zone(0, 2, "tip", channel=12, note=39)
+preview = preview.with_hi_hat_kit_settings(0, pedal_channel=11, pedal_note=45, closed_note=43)
+preview = preview.with_global_trigger_settings(2, {"gain": 17, "threshold": 8})
 assert encode_configuration(preview) != encode_configuration(config)
 
 # The one gain byte whose location was verified by a panel 15 -> 16 change.
@@ -76,10 +80,10 @@ and never opens a MIDI output. Hardware writing uses the separate `write-plan`
 and `write-config` review flow described below.
 
 `export-config` creates a human-editable `ddti-configuration-preset/v1` YAML
-(or JSON) file containing every proven editable field: all kit notes, Program
-Change, and the five isolated Input 1 Tip settings. `apply-config` applies only these named fields to a new staged
-dump, preserving every unknown byte from its supplied source dump. It also
-never opens MIDI.
+(or JSON) file containing the complete modeled configuration: channels, notes,
+Program Change, hi-hat routing, and all 21 global response records.
+`apply-config` applies those named fields to a new staged dump while preserving
+every byte outside the model. It never opens MIDI.
 
 ## Named GM / SD3 mappings
 
@@ -131,12 +135,14 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | GET | `/staged-diff` | byte-level comparison between source dump and staging; sends nothing |
 | GET | `/staged-sysex` | download the staged `.syx` file for offline backup/integration only |
 | GET | `/kits/{kit}/inputs/{input}` | one decoded input |
-| PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
+| PATCH | `/kits/{kit}/inputs/{input}` | stage Tip/Ring channel and note in memory only |
+| PATCH | `/kits/{kit}/hi-hat` | stage pedal channel/note and Input 3 closed note |
 | PATCH | `/kits/{kit}` | stage `program_change` (`null` for panel `---`, otherwise `0..127`) |
 | PATCH | `/global-trigger/input-1/tip` | stage any subset of `gain`, `velocity_curve`, `threshold`, `xtalk`, `retrigger` in memory only |
+| PATCH | `/global-triggers/{record}` | stage a decoded response record (`0..20`) in memory only |
 | GET | `/preset` | export the current `ddti-note-preset/v1` document |
 | PUT | `/preset` | stage a full or partial note-preset document in memory only |
-| GET/PUT | `/configuration-preset` | export/stage all proven editable values in `ddti-configuration-preset/v1` form |
+| GET/PUT | `/configuration-preset` | export/stage the complete modeled `ddti-configuration-preset/v1` document |
 | POST | `/role-template` | stage a `ddti-note-role-template/v1` plus explicit `ddti-input-layout/v1` binding document |
 | GET | `/write-plan` | validate changed offsets and return candidate hash plus diff |
 | POST | `/write` | send only the validated candidate with exact hash and confirmation token |
@@ -150,11 +156,11 @@ opens a MIDI output.
 
 ## Desktop GUI
 
-Install `ddti[gui]`, then run `ddti gui captures/factory_dump_001.syx`.
-The PySide6 editor provides a Kit selector for every decoded kit, a compact
-10-input Tip/Ring note table, five Input 1 Tip controls, and
-non-overwriting export of either the staged SysEx, a note preset, or a YAML
-configuration preset. It can import either preset form into memory. Its
-**Review staged diff** shows the exact byte-level changes. **Write confirmed
-fields to DDTi** re-runs the allowlist validation, presents the hash and diff,
-and requires an explicit confirmation before sending 42 frames.
+Install `ddti[gui]`, then run `ddti gui captures/factory_dump_002_full.golden.syx`
+once. Later, `ddti gui` reopens the persistent last-known state. The PySide6
+editor provides the 21-kit selector, a 10-input Tip/Ring routing table, hi-hat
+kit settings, and a selector for all 21 global response records. It imports or
+exports complete YAML/JSON configurations and staged SysEx, performs a complete
+panel-initiated synchronization in a background thread, and shows the exact
+byte diff before output. **Envoyer au DDTi** re-runs the write allowlist,
+presents the hash and diff, and requires confirmation before sending 42 frames.
