@@ -1,0 +1,12 @@
+name: Superior Drummer 3 starter mapping
+status: template-not-device-validated
+kit:
+  kick:
+    note: 36
+  snare:
+    tip: 38
+    ring: 40
+  hihat:
+    closed: 42
+    pedal: 44
+    open: 46
