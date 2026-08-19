@@ -129,4 +129,3 @@ def decode_dump(raw: bytes) -> DDTiDump:
 
 def decode_file(path: Path) -> DDTiDump:
     return decode_dump(path.read_bytes())
-
