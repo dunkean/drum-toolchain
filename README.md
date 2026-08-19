@@ -39,9 +39,11 @@ documented in [`docs/workspace-organization.md`](docs/workspace-organization.md)
 - `docs/history/ddti-reverse-engineering-plan-original.fr.md`: preserved
   original DDTi execution brief; historical, not the current implementation
   state.
+- `docs/Drum_app_design.md`: current application-design draft, to be reviewed
+  and finalized after the repository organization work.
 
-`Drum_app_design.md` is intentionally deferred until the project organization
-and the active soundbank work have stabilized.
+The design document is versioned now, but its final review is intentionally
+deferred until the active soundbank work has stabilized.
 
 ## Safety
 
