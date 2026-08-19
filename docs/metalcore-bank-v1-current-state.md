@@ -60,7 +60,10 @@ the captured decay. `SNRE_949` contains the same five-velocity by two-position
 layout with every prepared sample fixed at 1.8 seconds. It encodes to 911
 blocks and all 911 messages were sent successfully; the receipt is
 `D:\Studio\ddrum4-transfers\snre-949-positional-long-20260819.json`. Hardware
-audition and the resulting `MEM.LEFT` value remain required before promotion.
+audition remains required before promotion. The owner deleted the obsolete
+`SNRE_950` candidate and then measured `MEM.LEFT = 5.97` with `SNRE_949` still
+installed. Relative to the verified-core baseline of 6.88, the module therefore
+accounts for about 910 blocks for 949, matching the 911-message build closely.
 
 ## Hi-hat source correction
 
@@ -138,7 +141,8 @@ the Arduino contract stable while palette assignments evolve.
 
 ## Next soundbank actions
 
-1. Confirm that `SNRE_950` is present and audible, and record `MEM.LEFT`.
+1. Audition `SNRE_949` and confirm that its 1.8-second preserved decay fixes the
+   audible cutoff. Keep `SNRE_998` until that listening gate passes.
 2. Restore SD3 Modern Metal / Djentle Beast, its `out_WORLDE` MIDI input, and
    the UMC output-3/4 to input-3/4 audio loop; then execute the direct-note
    flagship hi-hat capture grid.
