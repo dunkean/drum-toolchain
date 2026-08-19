@@ -119,6 +119,8 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | --- | --- | --- |
 | GET | `/device`, `/device/status` | OS/MIDI discovery only |
 | GET | `/configuration`, `/kits`, `/kits/{kit}` | decoded captured configuration |
+| GET | `/staged-diff` | byte-level comparison between source dump and staging; sends nothing |
+| GET | `/staged-sysex` | download the staged `.syx` file for offline backup/integration only |
 | GET | `/kits/{kit}/inputs/{input}` | one decoded input |
 | PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
 | PATCH | `/global-trigger/input-1/tip` | stage the confirmed `gain` field in memory only |
@@ -130,7 +132,9 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 
 The PATCH response explicitly states `hardware_write: disabled`. Restarting
 the service discards staged changes unless they have been exported through the
-offline GUI.
+offline GUI. `GET /staged-sysex` is intentionally a download only: it returns
+the currently staged bytes with `X-DDTi-Hardware-Write: disabled`, and never
+opens a MIDI output.
 
 ## Desktop GUI
 
@@ -139,4 +143,5 @@ The PySide6 editor provides a Kit selector for every decoded kit, a compact
 10-input Tip/Ring note table, the confirmed Input 1 Tip Gain control, and
 non-overwriting export of either the staged SysEx, a note preset, or a YAML
 configuration preset. It can import either preset form into memory. Its
-**Write to DDTi** control is disabled by design.
+**Review staged diff** control shows the exact byte-level changes before an
+export; **Write to DDTi** remains disabled by design.

@@ -17,7 +17,7 @@ from ddti.models import decode_configuration, encode_configuration
 from ddti.mappings import apply_role_template
 from ddti.presets import load_document
 from ddti.protocol import decode_dump
-from ddti.diff import diff_bytes, diff_files, render_diff
+from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
 from ddti.transfer import build_transfer_plan, send_reviewed_transfer
 
@@ -83,6 +83,7 @@ class DDTiTests(unittest.TestCase):
             before.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 01 F7"))
             after.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 02 F7"))
             self.assertIn("opaque body byte +0x06", render_diff(diff_files(before, after)))
+            self.assertEqual(diff_ddti_bytes(before.read_bytes(), after.read_bytes())[0].observed_packet_family, 1)
 
     def test_capture_writes_hashed_triad_without_overwriting(self) -> None:
         import mido
@@ -426,6 +427,15 @@ class DDTiTests(unittest.TestCase):
             })
             self.assertEqual(response.status_code, 200)
             self.assertEqual(client.get("/kits/0/inputs/1").json()["tip"]["note"], 36)
+            diff = client.get("/staged-diff")
+            self.assertEqual(diff.status_code, 200)
+            self.assertGreater(diff.json()["changed_bytes"], 0)
+            self.assertIn("hardware_write", diff.json())
+            staged_sysex = client.get("/staged-sysex")
+            self.assertEqual(staged_sysex.status_code, 200)
+            self.assertEqual(staged_sysex.headers["x-ddti-hardware-write"], "disabled")
+            self.assertNotEqual(staged_sysex.content, raw)
+            self.assertEqual(decode_configuration(decode_dump(staged_sysex.content)).kits[0].inputs[0].tip.note, 36)
 
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:

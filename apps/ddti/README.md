@@ -79,6 +79,12 @@ assignments for your kit and the exact target kit numbers. `apply-role-preset`
 then creates a new staged dump. The GUI offers the same two-file flow through
 **Apply GM/SD3 role preset**. Neither flow opens a MIDI output.
 
+Before exporting a staged file, the GUI’s **Review staged diff** button shows
+the exact byte changes from the source dump. The local API exposes the same
+review at `GET /staged-diff` and permits an integration to download the staged
+file at `GET /staged-sysex`; those endpoints are output-free and explicitly
+report `hardware_write: disabled`.
+
 `ddti transfer-plan` is an offline review gate for a possible future transfer
 path. It accepts only a complete 42-packet dump and displays its SHA-256; it
 does not open a MIDI output or send any bytes. There is deliberately no

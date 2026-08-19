@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .diff import diff_ddti_bytes, render_diff
 from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, decode_configuration, encode_configuration
 from .mappings import apply_role_template
 from .presets import load_document, write_document
@@ -25,6 +26,7 @@ def launch(dump_path: Path) -> int:
             super().__init__()
             self.source = source
             self.configuration: DDTiConfiguration = decode_configuration(decode_file(source))
+            self.source_raw = self.configuration.raw
             self.setWindowTitle(f"DDTi offline editor — {source.name}")
             root = QWidget(self)
             layout = QVBoxLayout(root)
@@ -71,6 +73,9 @@ def launch(dump_path: Path) -> int:
             apply_role = QPushButton("Apply GM/SD3 role preset")
             apply_role.clicked.connect(self.apply_role_preset)
             buttons.addWidget(apply_role)
+            review = QPushButton("Review staged diff")
+            review.clicked.connect(self.review_staged_diff)
+            buttons.addWidget(review)
             write = QPushButton("Write to DDTi (disabled)")
             write.setEnabled(False)
             buttons.addWidget(write)
@@ -180,6 +185,14 @@ def launch(dump_path: Path) -> int:
                 return
             self.refresh()
             QMessageBox.information(self, "Role preset staged", "The named role mapping was applied only to the explicit input/zone bindings. Export a new SysEx file to retain it; nothing was sent to the DDTi.")
+
+        def review_staged_diff(self) -> None:
+            differences = diff_ddti_bytes(self.source_raw, encode_configuration(self.configuration))
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Staged DDTi diff")
+            dialog.setText(f"{len(differences)} changed byte(s) relative to {self.source.name}.\n\nNothing will be sent to the DDTi.")
+            dialog.setDetailedText(render_diff(differences))
+            dialog.exec()
 
     application = QApplication.instance() or QApplication([])
     editor = Editor(dump_path)

@@ -33,8 +33,8 @@ def _packet_context(dump: DDTiDump, offset: int) -> tuple[int | None, int | None
     return None, None, None
 
 
-def diff_files(before_path: Path, after_path: Path) -> tuple[ByteDifference, ...]:
-    before, after = before_path.read_bytes(), after_path.read_bytes()
+def diff_ddti_bytes(before: bytes, after: bytes) -> tuple[ByteDifference, ...]:
+    """Diff two complete DDTi streams with their observed packet context."""
     # Keep standard SysEx validation first so failures remain clear for truncated files.
     parse_stream(before)
     parse_stream(after)
@@ -49,6 +49,10 @@ def diff_files(before_path: Path, after_path: Path) -> tuple[ByteDifference, ...
         )
         for difference in diff_bytes(before, after)
     )
+
+
+def diff_files(before_path: Path, after_path: Path) -> tuple[ByteDifference, ...]:
+    return diff_ddti_bytes(before_path.read_bytes(), after_path.read_bytes())
 
 
 def _observed_position_label(difference: ByteDifference) -> str | None:

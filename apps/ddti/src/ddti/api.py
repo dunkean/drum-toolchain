@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from .discovery import discover_devices
+from .diff import diff_ddti_bytes, render_diff
 from .models import DDTiConfiguration, decode_configuration
 from .mappings import apply_role_template
 from .protocol import decode_file
@@ -49,7 +50,8 @@ def create_app(dump_path: Path):
     except ImportError as error:  # pragma: no cover - optional dependency
         raise RuntimeError("install the 'ddti[api]' extra to run the local API") from error
 
-    state = {"configuration": _configuration(dump_path)}
+    initial = _configuration(dump_path)
+    state = {"configuration": initial, "source_raw": initial.raw}
     lock = RLock()
     app = FastAPI(title="DDTi local API", version="0.1.0")
 
@@ -68,6 +70,28 @@ def create_app(dump_path: Path):
     @app.get("/configuration")
     def configuration() -> dict[str, object]:
         return current().to_document()
+
+    @app.get("/staged-diff")
+    def staged_diff() -> dict[str, object]:
+        """Return the byte-level diff from the explicit source dump to staging."""
+        differences = diff_ddti_bytes(state["source_raw"], current().raw)
+        return {
+            "staged_only": True,
+            "hardware_write": "disabled",
+            "changed_bytes": len(differences),
+            "rendered": render_diff(differences),
+        }
+
+    @app.get("/staged-sysex")
+    def staged_sysex():
+        """Download the staged raw SysEx for offline backup or integration."""
+        from fastapi import Response
+
+        return Response(
+            content=current().raw,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": "attachment; filename=ddti-staged.syx", "X-DDTi-Hardware-Write": "disabled"},
+        )
 
     @app.get("/preset")
     def preset() -> dict[str, object]:
