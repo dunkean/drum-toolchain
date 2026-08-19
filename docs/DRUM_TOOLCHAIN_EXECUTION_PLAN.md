@@ -1,5 +1,10 @@
 # Drum Toolchain: Repository Merge and Execution Plan
 
+> Organization status (2026-08-20): the merge described by this document is
+> complete. Sections describing the original workspace are historical. Use
+> [`workspace-organization.md`](workspace-organization.md) for the current
+> repository and archive layout.
+
 ## 1. Purpose
 
 This document is the execution specification for reorganizing the existing drum-related projects into one maintainable monorepo and then building the ddrum4 soundbank workflow.

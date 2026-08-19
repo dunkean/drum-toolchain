@@ -1,5 +1,36 @@
 # Repository Migration Log
 
+## Organization closeout — 2026-08-20
+
+The pre-merge directories have been retired from the workspace root after the
+full automated suite passed (84 Python tests, firmware core tests, and
+modernizer core tests):
+
+```text
+D:\Workspace\Self\Studio\_archive\legacy\arduino_midi_router
+D:\Workspace\Self\Studio\_archive\legacy\ddrum4_converter
+D:\Workspace\Self\Studio\_archive\legacy\WORLDE_helpers
+```
+
+The active repositories are now:
+
+```text
+D:\Workspace\Self\Studio\drum-toolchain
+D:\Workspace\Self\Studio\worlde-control-surface
+```
+
+The converter's 15 maintained source/configuration files were verified
+byte-for-byte against `apps/ddrum4-modernizer`. The monorepo Arduino firmware
+is newer than its legacy snapshot and remains the authoritative version.
+
+The complete original `Infos.md`, the original DDTi reverse-engineering brief,
+the Arduino enclosure STL files, and `Drum_app_design.md` are now preserved in
+the monorepo. Downloaded Ableton frameworks, old build trees, compressed
+snapshots, and other non-source assets remain outside Git in `_archive`.
+
+See [`workspace-organization.md`](workspace-organization.md) for the current
+responsibility boundaries.
+
 ## M0 baseline — 2026-08-09
 
 Source directories were preserved in place:
