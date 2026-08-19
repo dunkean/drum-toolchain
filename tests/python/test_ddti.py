@@ -82,7 +82,7 @@ class DDTiTests(unittest.TestCase):
             self.assertIn("family 0x01", render_diff((change,)))
             before.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 01 F7"))
             after.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 02 F7"))
-            self.assertIn("opaque body byte +0x06", render_diff(diff_files(before, after)))
+            self.assertIn("Input 2 Tip raw channel (PROBABLE)", render_diff(diff_files(before, after)))
             self.assertEqual(diff_ddti_bytes(before.read_bytes(), after.read_bytes())[0].observed_packet_family, 1)
 
     def test_capture_writes_hashed_triad_without_overwriting(self) -> None:
@@ -218,6 +218,7 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(edited.kits[0].inputs[1].tip.note, 50)
         differences = diff_bytes(raw, encode_configuration(edited))
         self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(18, 37, 50)])
+        self.assertIn("Input 2 Tip MIDI Note (CONFIRMED)", render_diff(diff_ddti_bytes(raw, encode_configuration(edited))))
 
     def test_note_presets_are_portable_subset_edits_and_never_touch_companion_bytes(self) -> None:
         packets = []
@@ -269,6 +270,7 @@ class DDTiTests(unittest.TestCase):
         })
         differences = diff_bytes(configuration.raw, staged.raw)
         self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(12, 35, 36), (89, 15, 16)])
+        self.assertIn("Input 1 Tip Gain (CONFIRMED)", render_diff(diff_ddti_bytes(configuration.raw, staged.raw)))
         with self.assertRaisesRegex(ValueError, "Gain"):
             configuration.with_input_1_tip_gain(128)
 

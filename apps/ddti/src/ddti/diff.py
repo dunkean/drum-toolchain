@@ -73,6 +73,21 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
         position = f"observed address/reserved byte {byte - 5}"
     elif (difference.observed_packet_family == 0x01 and byte == 77) or (difference.observed_packet_family == 0x02 and byte == 17):
         position = "SysEx end"
+    elif difference.observed_packet_family == 0x01 and 11 <= byte < 71:
+        zone_record, field = divmod(byte - 11, 3)
+        input_number = zone_record // 2 + 1
+        zone = "Tip" if zone_record % 2 == 0 else "Ring"
+        position = {
+            0: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} raw channel (PROBABLE)",
+            1: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} MIDI Note (CONFIRMED)",
+            2: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} companion byte (UNKNOWN)",
+        }[field]
+    elif difference.observed_packet_family == 0x01 and byte == 11 + 0x41:
+        position = "Family-01 body +0x41 (UNKNOWN; observed normalised by the rejected PC round trip)"
+    elif difference.observed_packet_family == 0x02 and difference.observed_packet_index == 0 and byte == 11:
+        position = "Input 1 Tip Gain (CONFIRMED)"
+    elif difference.observed_packet_family == 0x02 and difference.observed_packet_index in {0, 6} and byte == 13:
+        position = "Threshold candidate (HYPOTHESIS; mirrored record scope unresolved)"
     else:
         position = labels.get(byte, f"opaque body byte +0x{byte - 11:02X}" if byte >= 11 else f"packet byte 0x{byte:02X}")
     return (
