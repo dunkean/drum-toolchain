@@ -64,6 +64,10 @@ dump. Do not make a second edit until the next `snapshot n/m: listening` line.
 At the end of a short experiment series, a factory reset followed by one final
 capture is the quickest way to re-establish the known baseline.
 
+The 2026-08-19 final-reset verification was byte-identical to
+`factory_dump_001.golden.syx` (1,836 bytes, SHA-256
+`504ebd7e1a82b98c9b515febb8f3713a7a801ac5e1bbe188fad50370c42c33ce`).
+
 ## Controlled differential experiment (after the golden copy)
 
 For the first comparison, change only **Kit 0, Input 1 Tip MIDI Note: 35 to

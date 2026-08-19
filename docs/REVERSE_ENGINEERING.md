@@ -26,9 +26,10 @@ Confidence levels:
 | Kit/Input zone ordering | family `01` body bytes `00`–`59` | 20 × 3-byte records, Tip/Ring interleaved | per kit | CONFIRMED | factory map plus Input 1/Input 2 controlled diffs |
 | Input 1 Tip MIDI Note | `0x00000C` | uint7 | Kit 0 | CONFIRMED | tested `35/36/37`, restored `35` |
 | Input 2 Tip MIDI Note | `0x00000012` | uint7 | Kit 0 | CONFIRMED | tested `38/39`; distinct field from Input 1 |
-| Zone raw channel byte | preceding note byte in each 3-byte record | uint7 | per kit | HYPOTHESIS | factory value `09`; channel experiment pending |
+| Zone raw channel byte | preceding note byte in each 3-byte record | uint7 | per kit | PROBABLE | two Tip zones: `09→0A` when panel channel `10→11`; inverse (`raw + 1`) pending more kits |
 | Zone raw companion byte | following note byte in each 3-byte record | uint7 | per kit | UNKNOWN | observed `03` in factory Kit 0 |
 | Family `02` byte +`0x05` | `0x000676` (index 0) | uint7 | unknown | UNKNOWN | changed `00→22→04` across saved edits |
+| Family `02` body bytes | records indexes `00` and `02` | raw | unknown | HYPOTHESIS | observed `15→16` and `05→06` after reported Gain/Threshold panel edits; controlled one-field captures still required |
 | Write command | — | — | protocol | UNKNOWN | deliberately not attempted |
 
 ## Experiments
@@ -39,6 +40,8 @@ Confidence levels:
 | 2026-08-19 | Factory-reset panel dump | 32 packets / 1,836 bytes / SHA-256 `504ebd7e…c42c33ce` | raw framing decoder added; golden copy retained |
 | 2026-08-19 | Kit 0/Input 1 Tip note 35→36→37→35 | only `0x00000C` follows note exactly; some Family `02` state also changed on save | note field confirmed; Family `02` remains unknown |
 | 2026-08-19 | Kit 0/Input 2 Tip note 38→39 | `0x000012: 26→27`; Family `02` byte +`0x05`: `22→04` | second input confirms Tip/Ring record layout |
+| 2026-08-19 | Combined Input 1/2 channel, Gain and Threshold edits | two Tip channel bytes `09→0A`; Family `02` records `00`/`02` changed | channel encoding probable; global record semantics not yet assigned |
+| 2026-08-19 | Final factory reset verification | dump `factory_reset_verification_001` byte-identical to golden, 1,836 bytes / SHA-256 `504ebd7e…c42c33ce` | DDTi restored to known factory baseline |
 
 Do not record a semantic field interpretation here without linking it to the
 two raw captures, their hashes, the exact single panel change, and restoration
