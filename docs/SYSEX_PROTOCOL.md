@@ -44,6 +44,30 @@ whether that byte is a length, subtype, or part of another encoding.  The
 offline `ddti decode` command validates this framing and reproduces the exact
 raw stream byte for byte.  It does not modify or reinterpret the payload.
 
+## Confirmed kit MIDI-note records
+
+Family `01` is confirmed as the 21-kit record family: its index `00` was
+changed through the DDTi's Kit 0 panel controls, and the manual documents 21
+available kits.  The first 60 bytes of each family-`01` body contain twenty
+interleaved 3-byte records:
+
+```text
+Input 1 Tip, Input 1 Ring, Input 2 Tip, Input 2 Ring, ... Input 10 Ring
+  raw channel byte, MIDI note, raw companion byte
+```
+
+The MIDI-note byte is confirmed by controlled panel captures:
+
+| Panel action | Packet byte | Observed transition |
+| --- | ---: | --- |
+| Kit 0 / Input 1 Tip note | `0x00000C` | `35 → 36 → 37 → 35` |
+| Kit 0 / Input 2 Tip note | `0x000012` | `38 → 39` |
+
+The three values and two inputs prove direct `uint7` MIDI-note encoding and
+the Tip/Ring interleaving. The surrounding channel and companion bytes remain
+uninterpreted. Family `02` changed during saves but has no assigned semantics
+or checksum rule yet.
+
 ## Unknown protocol fields
 
 | Field | Status |
@@ -52,8 +76,8 @@ raw stream byte for byte.  It does not modify or reinterpret the payload.
 | Model/device ID | `2C` observed; semantic meaning UNKNOWN |
 | Command byte(s) | `0D` observed; semantic meaning UNKNOWN |
 | Addressing | `00 00` observed; semantic meaning UNKNOWN |
-| Payload encoding | UNKNOWN |
-| Checksum | UNKNOWN |
+| Payload encoding | note fields described above; remaining bytes UNKNOWN |
+| Checksum | UNKNOWN; family `02` changes on save require dedicated experiments |
 | 7-bit packing beyond MIDI transport | UNKNOWN |
 | Segmentation/order | UNKNOWN |
 | Inter-message timing | UNKNOWN |

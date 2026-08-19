@@ -38,6 +38,19 @@ assert b"".join(packet.raw for packet in dump.packets) == dump.raw
 print(dump.family_indexes())  # {1: (0, ..., 20), 2: (0, ..., 10)}
 ```
 
+The validated note model is available offline. `with_note` and
+`encode_configuration` are useful for previews and tests only; their result is
+not accepted by `DDTi.write_configuration`.
+
+```python
+from ddti import decode_configuration, encode_configuration
+
+config = decode_configuration(dump)
+assert config.kits[0].inputs[0].tip.note == 35
+preview = config.with_note(0, 1, "tip", 36)
+assert encode_configuration(preview) != encode_configuration(config)
+```
+
 The `ddti` command provides the corresponding `devices`, `info`, `monitor`,
 `dump`, `decode`, and `diff` commands.  There is deliberately no `set`,
 `restore`, or `write` command yet.

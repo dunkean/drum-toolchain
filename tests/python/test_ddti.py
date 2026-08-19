@@ -12,6 +12,7 @@ if str(DDTI_SOURCE) not in sys.path:
 from ddti.capture import _receive_mido_sysex, capture_dump
 from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
+from ddti.models import decode_configuration, encode_configuration
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
@@ -118,3 +119,19 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(dump.to_document()["packet_lengths"], {13: 2})
         with self.assertRaisesRegex(ValueError, "manufacturer"):
             decode_dump(bytes.fromhex("F0 01 02 03 2C 0D 00 00 0A 01 00 01 F7"))
+
+    def test_note_model_uses_interleaved_tip_ring_records_and_is_lossless(self) -> None:
+        body = bytearray()
+        for zone in range(20):
+            body.extend((9, 35 + zone, 3))
+        body.extend(b"\x00" * 6)
+        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        configuration = decode_configuration(decode_dump(raw))
+        self.assertEqual(configuration.kits[0].inputs[0].tip.note, 35)
+        self.assertEqual(configuration.kits[0].inputs[0].ring.note, 36)
+        self.assertEqual(configuration.kits[0].inputs[1].tip.note, 37)
+        self.assertEqual(encode_configuration(configuration), raw)
+        edited = configuration.with_note(0, 2, "tip", 50)
+        self.assertEqual(edited.kits[0].inputs[1].tip.note, 50)
+        differences = diff_bytes(raw, encode_configuration(edited))
+        self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(18, 37, 50)])

@@ -6,6 +6,10 @@ SysEx protocol is experimentally validated.
 
 from .device import DDTi, ProtocolNotValidatedError
 from .discovery import DeviceInfo, discover_devices
+from .models import DDTiConfiguration, DDTiInput, DDTiKit, DDTiZone, decode_configuration, encode_configuration
 from .protocol import DDTiDump, DDTiPacket, decode_dump
 
-__all__ = ["DDTi", "DDTiDump", "DDTiPacket", "DeviceInfo", "ProtocolNotValidatedError", "decode_dump", "discover_devices"]
+__all__ = [
+    "DDTi", "DDTiConfiguration", "DDTiDump", "DDTiInput", "DDTiKit", "DDTiPacket", "DDTiZone", "DeviceInfo",
+    "ProtocolNotValidatedError", "decode_configuration", "decode_dump", "discover_devices", "encode_configuration",
+]

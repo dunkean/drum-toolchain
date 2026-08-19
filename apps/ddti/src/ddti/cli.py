@@ -9,6 +9,7 @@ from .capture import capture_dump
 from .diff import diff_files, render_diff
 from .discovery import discover_devices
 from .monitor import monitor
+from .models import decode_configuration
 from .protocol import decode_file
 
 
@@ -60,5 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "diff":
         print(render_diff(diff_files(args.before, args.after)), end="")
     else:
-        print(json.dumps(decode_file(args.dump).to_document(), indent=2, sort_keys=True))
+        dump = decode_file(args.dump)
+        document = dump.to_document()
+        document["configuration"] = decode_configuration(dump).to_document()
+        print(json.dumps(document, indent=2, sort_keys=True))
     return 0
