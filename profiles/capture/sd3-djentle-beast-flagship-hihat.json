@@ -1,0 +1,104 @@
+{
+  "audio_input": "2",
+  "channels": ["left", "right"],
+  "cooldown_ms": 350,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 100,
+  "requests": [
+    {
+      "articulation": "pedal_chick",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 44,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "foot_splash",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 23,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "tight_tip",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 63,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "closed_tip",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 61,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_1",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 24,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_2",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 25,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_3",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 26,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_max",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 60,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "tight_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 62,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "closed_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    }
+  ],
+  "sample_rate": 44100,
+  "schema_version": 1,
+  "tail_ms": 3500
+}

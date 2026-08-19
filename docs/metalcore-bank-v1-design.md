@@ -16,7 +16,7 @@ small electronic options, not for multiple lower-quality acoustic kits.
 | --- | ---: | --- |
 | Main snare head | 1,000 | ten samples: five velocity bands by two head positions |
 | Rim/cross-stick | 500 | ten samples: six rimshot dynamics and four cross-stick dynamics |
-| ZEITGEIST hi-hat | 1,400 | six bow openings, three edge openings and chick; foot splash is auxiliary |
+| ZEITGEIST hi-hat | 1,400 | five bow openings, two edge states, chick and foot-splash branch |
 | Crash 1 + crash 2 | 1,400 | three dynamics each; low/medium tails may be shorter, hard tails remain natural |
 | Ride | 650 | bow, bell and edge; reduced dynamics acceptable |
 | Kick | 300 | seven velocity layers, tight metalcore attack |
@@ -35,12 +35,23 @@ sound uses six rimshot layers and four cross-stick layers. Arduino routing may
 select the appropriate DDrum Note-P/variation branch, but must not synthesize
 or smooth trigger dynamics.
 
-The main hi-hat uses all ten layers as six bow openness states, three edge
-openness states and one pedal chick. The foot splash is stored in the small
-auxiliary/percussion family and selected by the nested routing contract. The
-existing source library only proves three bow openness states and pedal; a
-dedicated SD3 capture must add the intermediate bow states and identify the
-edge articulation before this sound is built.
+The original CC4 capture is not a valid source for the flagship hi-hat. It sent
+CC4 followed by GM closed-hat note 42, but the resulting nine WAV families are
+nearly identical short closed hits. The local Toontrack note map instead
+exposes discrete articulations: open levels on notes 24, 25, 26 and 60; tight
+and closed tip on 63 and 61; tight and closed edge on 62 and 64; pedal chick
+on 44; and open-pedal/foot-splash on 23. The reproducible dense capture grid is
+`profiles/capture/sd3-djentle-beast-flagship-hihat.json`.
+
+The DDrum4 hi-hat input has only eight Note-P positions, despite a sound having
+ten layers. The first bench candidate will therefore use five bow openness
+states, two edge states, and a pedal branch across those eight positions. The
+two remaining layers can add a second velocity timbre to the most important
+closed state and distinguish chick from foot splash with an Arduino-selected
+velocity window. This exact layout remains a bench hypothesis until all ten
+direct notes have been captured, heard, and replayed through the module. The
+firmware must only select the declared note/velocity branch; it must not add
+trigger cleanup or dynamics processing.
 
 The two main crashes use three useful dynamics apiece. Their low and medium
 samples may use shorter captured tails, while the hard layer retains the full

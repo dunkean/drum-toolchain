@@ -80,3 +80,27 @@ class LegacyCompatibilityTests(unittest.TestCase):
         crash_one = next(request for request in full.requests if request.instrument == "crash_main_1")
         self.assertEqual(crash_one.velocities, (24, 56, 88, 110, 127))
         self.assertEqual(crash_one.repetitions, 3)
+
+    def test_flagship_hihat_uses_discrete_toontrack_articulations(self) -> None:
+        plan = CaptureSessionPlan.read(
+            ROOT / "profiles/capture/sd3-djentle-beast-flagship-hihat.json"
+        )
+        self.assertEqual(len(plan.requests), 10)
+        self.assertEqual(len(plan.takes()), 210)
+        self.assertEqual(plan.tail_ms, 3500)
+        notes = {request.articulation: request.note for request in plan.requests}
+        self.assertEqual(
+            notes,
+            {
+                "pedal_chick": 44,
+                "foot_splash": 23,
+                "tight_tip": 63,
+                "closed_tip": 61,
+                "open_1": 24,
+                "open_2": 25,
+                "open_3": 26,
+                "open_max": 60,
+                "tight_edge": 62,
+                "closed_edge": 64,
+            },
+        )
