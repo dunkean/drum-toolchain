@@ -10,8 +10,8 @@ panel reading is `MEM.LEFT = 6.88`, exactly matching 1,240 installed blocks.
 
 This core is deliberately a playable safety net, not the target allocation.
 The approved direction is now one flagship metalcore kit using approximately
-6,500 blocks, with priority on the positional snare and six-state ZEITGEIST
-hi-hat. Flagship replacements will use unused IDs and be auditioned before any
+6,500 blocks, with priority on the positional snare and multi-state ZEITGEIST
+hi-hat. Flagship replacements use unused IDs and are auditioned before any
 core sound is removed.
 
 Status: active soundbank work. This document distinguishes sounds merely
@@ -37,6 +37,30 @@ blocks therefore agree exactly with the hardware display.
 This is a **stored sound core**, not yet a complete palette. It must remain
 intact while replacements are auditioned. A group-and-number that already
 exists cannot be overwritten: DDrum4 shows `dUP` and ignores the transfer.
+
+## Positional snare candidate
+
+`SNRE_950` was reproducibly built and transferred on 2026-08-19. It contains
+ten original SD3 Modern Metal / Djentle Beast samples: five velocity bands at
+CC16 position 0 and the same five bands at position 127. Its layer matrix
+covers each of the eight DDrum4 velocity points and eight Note-P position
+points exactly once. `ddrum4edit` reports 236 encoded blocks and the complete
+236-message transfer through `UMC404HD 192k MIDI Out 9` has a receipt at
+`D:\Studio\ddrum4-transfers\snre-950-positional-20260819.json`.
+
+The two source-position families are measurably distinct, particularly at the
+harder velocities, but hardware acceptance is not yet a listening result.
+Until the owner confirms `SNRE_950` with `SHIFT + SOUND`, `SHIFT + LISTEN`, and
+a new `MEM.LEFT` reading, retain `SNRE_998` and treat 950 as a candidate only.
+
+## Hi-hat source correction
+
+`HHAT_996` is retained only as a protocol candidate. Its nine nominal CC4
+openings are nearly identical short closed hits because the capture sent GM
+closed-hat note 42. The corrected dense plan uses Toontrack's direct notes for
+five-plus tip openness states, edge states, pedal chick, and foot splash; see
+`profiles/capture/sd3-djentle-beast-flagship-hihat.json`. Do not build a
+flagship sound from the old CC4-fine WAVs.
 
 ## New isolated cymbal reference
 
@@ -105,9 +129,10 @@ the Arduino contract stable while palette assignments evolve.
 
 ## Next soundbank actions
 
-1. Read `MEM.LEFT`; audition `CYMB_993` through a temporary palette role.
-2. If its panel-button tail is natural, record one UMC module render and use
-   it as the cymbal codec reference.
+1. Confirm that `SNRE_950` is present and audible, and record `MEM.LEFT`.
+2. Restore SD3 Modern Metal / Djentle Beast, its `out_WORLDE` MIDI input, and
+   the UMC output-3/4 to input-3/4 audio loop; then execute the direct-note
+   flagship hi-hat capture grid.
 3. Capture/select an SD3 crash source with a measured musical tail beyond four
    seconds, then create two seven-layer flagship crashes with an audited
    velocity layout.
