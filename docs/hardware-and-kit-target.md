@@ -1,7 +1,8 @@
 # Hardware and Kit Target
 
-This is the English working copy of the owner's `Infos.md`. The original file
-remains unchanged at the workspace root.
+This is the concise English working copy of the owner's `Infos.md`. The full
+original French document is versioned at
+[`reference/hardware-inventory-original.fr.md`](reference/hardware-inventory-original.fr.md).
 
 ## Physical kit
 

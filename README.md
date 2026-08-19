@@ -16,6 +16,9 @@ The implementation order is mandatory:
 Read [`docs/DRUM_TOOLCHAIN_EXECUTION_PLAN.md`](docs/DRUM_TOOLCHAIN_EXECUTION_PLAN.md)
 before changing project structure or sending anything to the ddrum4.
 
+Repository navigation and the boundary with the separate WORLDE project are
+documented in [`docs/workspace-organization.md`](docs/workspace-organization.md).
+
 ## Applications
 
 - `apps/drum-sampler`: MIDI-triggered audio capture and neutral sample-library export.
@@ -24,6 +27,21 @@ before changing project structure or sending anything to the ddrum4.
 - `firmware/ddrum4-midi-bridge`: deterministic DDTi/eDRUMin-to-ddrum4 bridge for Arduino Uno.
 - `tools/midi-lab`: MIDI monitoring, learning, trace recording, replay, and hardware probes.
 - `apps/ddti`: desktop configuration editor for the legacy 2016 ddrum DDTi, with capture, reusable presets, exact diffs, persistent last-known state, and a confirmed-fields-only SysEx writer.
+- `hardware/enclosures`: versioned mechanical artifacts for the Arduino MIDI
+  bridge enclosure.
+
+## Documentation
+
+- `docs/hardware-and-kit-target.md`: concise English working specification.
+- `docs/reference/hardware-inventory-original.fr.md`: complete original French
+  hardware inventory and kit goals.
+- `docs/REVERSE_ENGINEERING.md`: current DDTi reverse-engineering knowledge.
+- `docs/history/ddti-reverse-engineering-plan-original.fr.md`: preserved
+  original DDTi execution brief; historical, not the current implementation
+  state.
+
+`Drum_app_design.md` is intentionally deferred until the project organization
+and the active soundbank work have stabilized.
 
 ## Safety
 
