@@ -1,5 +1,5 @@
 {
-  "audio_input": "2",
+  "audio_input": "33",
   "channels": ["left", "right"],
   "cooldown_ms": 350,
   "gate_ms": 100,
@@ -39,43 +39,52 @@
       "channel": 10,
       "controllers": [],
       "instrument": "hi_hat",
-      "note": 61,
+      "note": 42,
       "repetitions": 3,
       "velocities": [16, 36, 56, 76, 96, 112, 127]
     },
     {
-      "articulation": "open_1",
+      "articulation": "loose_tip",
       "channel": 10,
       "controllers": [],
       "instrument": "hi_hat",
-      "note": 24,
+      "note": 12,
       "repetitions": 3,
       "velocities": [16, 36, 56, 76, 96, 112, 127]
     },
     {
-      "articulation": "open_2",
+      "articulation": "open_1_tip",
       "channel": 10,
       "controllers": [],
       "instrument": "hi_hat",
-      "note": 25,
+      "note": 13,
       "repetitions": 3,
       "velocities": [16, 36, 56, 76, 96, 112, 127]
     },
     {
-      "articulation": "open_3",
+      "articulation": "open_3_tip",
       "channel": 10,
       "controllers": [],
       "instrument": "hi_hat",
-      "note": 26,
+      "note": 15,
       "repetitions": 3,
       "velocities": [16, 36, 56, 76, 96, 112, 127]
     },
     {
-      "articulation": "open_max",
+      "articulation": "open_4_tip",
       "channel": 10,
       "controllers": [],
       "instrument": "hi_hat",
-      "note": 60,
+      "note": 16,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_5_tip",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 17,
       "repetitions": 3,
       "velocities": [16, 36, 56, 76, 96, 112, 127]
     },
@@ -93,12 +102,57 @@
       "channel": 10,
       "controllers": [],
       "instrument": "hi_hat",
+      "note": 22,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "loose_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
       "note": 64,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_1_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 24,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_2_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 25,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_3_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 26,
+      "repetitions": 3,
+      "velocities": [16, 36, 56, 76, 96, 112, 127]
+    },
+    {
+      "articulation": "open_4_edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 60,
       "repetitions": 3,
       "velocities": [16, 36, 56, 76, 96, 112, 127]
     }
   ],
-  "sample_rate": 44100,
+  "sample_rate": 48000,
   "schema_version": 1,
   "tail_ms": 3500
 }

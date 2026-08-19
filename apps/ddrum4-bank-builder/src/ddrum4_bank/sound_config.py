@@ -66,6 +66,32 @@ def positional_snare_layers() -> tuple[str, ...]:
     return tuple(rows)
 
 
+def hihat_position_layers(layer_counts: Sequence[int]) -> tuple[str, ...]:
+    """Return a complete eight-position hi-hat matrix using at most ten layers.
+
+    A position with one layer covers the full eight-point velocity axis.  A
+    position with two layers splits that axis into soft (points 1..4) and hard
+    (points 5..8) timbres.  Every position/velocity cell is therefore covered
+    exactly once and no layer can leak into an adjacent nested branch.
+    """
+    if len(layer_counts) != 8 or any(count not in (1, 2) for count in layer_counts):
+        raise ValueError("hi-hat layout requires eight positions with one or two layers each")
+    if sum(layer_counts) > 10:
+        raise ValueError("DDrum4 sounds support at most ten hi-hat layers")
+    rows: list[str] = []
+    for position_index, count in enumerate(layer_counts):
+        velocity_groups = ((0, 1, 2, 3, 4, 5, 6, 7),) if count == 1 else (
+            (0, 1, 2, 3), (4, 5, 6, 7)
+        )
+        for velocity_indexes in velocity_groups:
+            values = _SNARE_LAYER_ROWS[0].split()
+            values[0] = f"{len(rows):02X}"
+            values[4:12] = ["FF" if index in velocity_indexes else "00" for index in range(8)]
+            values[12:20] = ["FF" if index == position_index else "00" for index in range(8)]
+            rows.append(" ".join(values))
+    return tuple(rows)
+
+
 def cymbal_velocity_layers(sample_count: int) -> tuple[str, ...]:
     """Return an audited cymbal layout, refusing invented partial curves.
 

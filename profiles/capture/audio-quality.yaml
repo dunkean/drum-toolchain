@@ -50,6 +50,19 @@ profiles:
     max_duration_seconds: 1.8
     force_mono: true
     trim_tail: false
+  ddrum4_hihat_flagship:
+    # The builder supplies an explicit per-articulation duration: short closed
+    # states should not spend the same memory as open hats and foot splash.
+    # Keep every captured decay up to that reviewed bound.
+    target_sample_rate: 44100
+    trim_threshold_db: -60
+    normalize_dbfs: -2.0
+    fade_in_ms: 1.0
+    fade_out_ms: 15.0
+    highpass_hz: 30
+    lowpass_hz: 17000
+    force_mono: true
+    trim_tail: false
   ddrum4_drum:
     target_sample_rate: 44100
     trim_threshold_db: -50

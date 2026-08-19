@@ -38,18 +38,19 @@ or smooth trigger dynamics.
 The original CC4 capture is not a valid source for the flagship hi-hat. It sent
 CC4 followed by GM closed-hat note 42, but the resulting nine WAV families are
 nearly identical short closed hits. The local Toontrack note map instead
-exposes discrete articulations: open levels on notes 24, 25, 26 and 60; tight
-and closed tip on 63 and 61; tight and closed edge on 62 and 64; pedal chick
-on 44; and open-pedal/foot-splash on 23. The reproducible dense capture grid is
+exposes separate tip and edge families. The captured tip notes are tight 63,
+closed 42, loose 12, and openings 13, 15, 16 and 17. The edge family is tight
+62, closed 22, loose 64, and openings 24, 25, 26 and 60; pedal chick is 44 and
+foot splash is 23. The reproducible dense capture grid is
 `profiles/capture/sd3-djentle-beast-flagship-hihat.json`.
 
 The DDrum4 hi-hat input has only eight Note-P positions, despite a sound having
-ten layers. The first bench candidate will therefore use five bow openness
-states, two edge states, and a pedal branch across those eight positions. The
-two remaining layers can add a second velocity timbre to the most important
-closed state and distinguish chick from foot splash with an Arduino-selected
-velocity window. This exact layout remains a bench hypothesis until all ten
-direct notes have been captured, heard, and replayed through the module. The
+ten layers. The first bench candidate uses chick, six tip openness states and
+foot splash across those eight positions. Tight and closed each receive a soft
+and hard timbre, consuming the two remaining layers. The separately captured
+edge family stays lossless in the source library and will later occupy a
+declared nested branch in another available DDrum role. This exact layout
+remains a bench hypothesis until it has been replayed through the module. The
 firmware must only select the declared note/velocity branch; it must not add
 trigger cleanup or dynamics processing.
 

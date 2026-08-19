@@ -64,6 +64,9 @@ audition remains required before promotion. The owner deleted the obsolete
 `SNRE_950` candidate and then measured `MEM.LEFT = 5.97` with `SNRE_949` still
 installed. Relative to the verified-core baseline of 6.88, the module therefore
 accounts for about 910 blocks for 949, matching the 911-message build closely.
+The owner subsequently confirmed that `SNRE_949` sounds correct; it is now the
+accepted flagship snare candidate. Retain the compact `SNRE_998` only until
+the final palette is assembled.
 
 ## Hi-hat source correction
 
@@ -73,6 +76,15 @@ closed-hat note 42. The corrected dense plan uses Toontrack's direct notes for
 five-plus tip openness states, edge states, pedal chick, and foot splash; see
 `profiles/capture/sd3-djentle-beast-flagship-hihat.json`. Do not build a
 flagship sound from the old CC4-fine WAVs.
+
+The corrected session completed on 2026-08-19 through shared WASAPI at 48 kHz
+and the physical UMC OUT 3/4 to IN 3/4 loop. It produced 336 stereo takes:
+16 articulations by seven velocities by three round robins. Automated review
+found zero silent takes below -70 dBFS and zero clipped takes. The neutral
+library is
+`D:\Studio\sample-library\sd3-modern-metal-djentle-beast\hihat-flagship-c1\library.json`.
+The DDrum build stage resamples selected copies to 44.1 kHz; raw captures stay
+immutable at 48 kHz.
 
 ## New isolated cymbal reference
 
@@ -141,13 +153,10 @@ the Arduino contract stable while palette assignments evolve.
 
 ## Next soundbank actions
 
-1. Audition `SNRE_949` and confirm that its 1.8-second preserved decay fixes the
-   audible cutoff. Keep `SNRE_998` until that listening gate passes.
-2. Restore SD3 Modern Metal / Djentle Beast, its `out_WORLDE` MIDI input, and
-   the UMC output-3/4 to input-3/4 audio loop; then execute the direct-note
-   flagship hi-hat capture grid.
-3. Capture/select an SD3 crash source with a measured musical tail beyond four
+1. Build and audition `HHAT_948` from the completed direct-note flagship
+   capture. Keep `HHAT_996` until that listening gate passes.
+2. Capture/select an SD3 crash source with a measured musical tail beyond four
    seconds, then create two seven-layer flagship crashes with an audited
    velocity layout.
-4. Build the palette assignment only after the three flagship families
+3. Build the palette assignment only after the three flagship families
    (snare, hi-hat, crashes) have passed their own listening gates.

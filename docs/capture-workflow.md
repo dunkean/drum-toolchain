@@ -53,8 +53,11 @@ Use the two versioned sessions under `profiles/capture/` in this order:
    it to an unused sound ID, and record a module render before accepting it.
 
 The saved device indices are currently valid only for this PC: `out_WORLDE 2`
-and UMC input `2` (IN 3-4). Re-list devices immediately before capture if the
-interface topology changed.
+and WASAPI input `33` (UMC IN 3-4). The shared WASAPI endpoint currently runs
+at 48 kHz. SD3 must also use a shared Windows driver during capture: opening
+the UMC input through PortAudio while SD3 owns `UMC ASIO Driver` makes the SD3
+audio engine inactive. Restore ASIO after sampling for the low-latency playing
+profile. Re-list devices immediately before capture if the topology changes.
 
 ### First long-tail diagnostic — 2026-08-10
 

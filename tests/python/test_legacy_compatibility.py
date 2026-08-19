@@ -110,9 +110,10 @@ class LegacyCompatibilityTests(unittest.TestCase):
         plan = CaptureSessionPlan.read(
             ROOT / "profiles/capture/sd3-djentle-beast-flagship-hihat.json"
         )
-        self.assertEqual(len(plan.requests), 10)
-        self.assertEqual(len(plan.takes()), 210)
+        self.assertEqual(len(plan.requests), 16)
+        self.assertEqual(len(plan.takes()), 336)
         self.assertEqual(plan.tail_ms, 3500)
+        self.assertEqual(plan.sample_rate, 48000)
         notes = {request.articulation: request.note for request in plan.requests}
         self.assertEqual(
             notes,
@@ -120,12 +121,18 @@ class LegacyCompatibilityTests(unittest.TestCase):
                 "pedal_chick": 44,
                 "foot_splash": 23,
                 "tight_tip": 63,
-                "closed_tip": 61,
-                "open_1": 24,
-                "open_2": 25,
-                "open_3": 26,
-                "open_max": 60,
+                "closed_tip": 42,
+                "loose_tip": 12,
+                "open_1_tip": 13,
+                "open_3_tip": 15,
+                "open_4_tip": 16,
+                "open_5_tip": 17,
                 "tight_edge": 62,
-                "closed_edge": 64,
+                "closed_edge": 22,
+                "loose_edge": 64,
+                "open_1_edge": 24,
+                "open_2_edge": 25,
+                "open_3_edge": 26,
+                "open_4_edge": 60,
             },
         )
