@@ -32,8 +32,9 @@ Confidence levels:
 | Zone raw companion byte | following note byte in each 3-byte record | uint7 | per kit | UNKNOWN | observed `03` in factory Kit 0 |
 | Family `02` byte +`0x05` | `0x000676` (index 0) | uint7 | unknown | UNKNOWN | changed `00→22→04` across saved edits |
 | Family `02` body bytes | 21 records, indexes `00`–`14` | raw | global trigger | HYPOTHESIS | indexes follow the 20 Tip/Ring zones plus hi-hat control; one Input 1 Gain field confirmed |
-| Family `01` body byte +`0x41` | indexes `00`–`13` | uint7, observed `7F→00` after PC round trip | per kit | UNKNOWN | exact 42-frame factory golden was sent once; all 20 affected records normalised on next panel dump |
-| PC write acceptance | complete 42-frame replay | DDTi accepts data but normalises an unknown field | protocol | UNKNOWN | one authorised full-golden round-trip; no generic writer is safe |
+| Kit Program Change disabled flag | family `01`, body `+0x40` | `1` = panel `---`; `0` = active | per kit | CONFIRMED | Kit 1 controlled `---→0→1`; factory Kit 20 independently contains active value `20` |
+| Kit Program Change value | family `01`, body `+0x41` | direct uint7 `0..127`; ignored while disabled | per kit | CONFIRMED | Kit 1 controlled `---→0→1`; exact changes `7F→00→01` |
+| PC write acceptance | complete 42-frame replay | DDTi canonicalises disabled Program Change from `01 7F` to `01 00` | protocol | PROBABLE | golden replay preserved the disabled flag and all functional fields; controlled Note write still required |
 
 ## Experiments
 
@@ -49,6 +50,7 @@ Confidence levels:
 | 2026-08-19 | Input 1 Threshold `5→6` | complete dump: `family 02/index 00/+0x02: 05→06`, mirrored at `index 06/+0x02` | threshold byte candidate identified; duplicate scope remains unexplained |
 | 2026-08-19 | Final reset verification after Threshold test | `factory_reset_verification_002_full` is byte-identical to `factory_dump_002_full.golden` (2,016 bytes / SHA-256 `43c64c48…1f84c70f`) | hardware restored exactly to the complete factory baseline |
 | 2026-08-19 | Authorised full-golden PC round trip | replayed the exact 42-frame, 2,016-byte factory golden; the following dump differed at Family `01` body `+0x41` in indexes `00`–`13`, each `7F→00`; known note, channel, Gain and Threshold bytes were unchanged | PC sending is disabled; the user factory-reset the module afterwards and requested no repeated verification dumps |
+| 2026-08-19 | Kit 1 Program Change `---→0→1` | two complete 42-frame dumps: `+0x40/+0x41` encoded `01 7F` for `---`, `00 00` for `0`, and `00 01` for `1`; no other bytes changed | former round-trip anomaly identified as canonicalisation of an ignored disabled value; controlled Note write can proceed |
 
 Do not record a semantic field interpretation here without linking it to the
 two raw captures, their hashes, the exact single panel change, and restoration

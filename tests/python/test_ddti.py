@@ -19,7 +19,7 @@ from ddti.presets import load_document
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
-from ddti.transfer import build_transfer_plan, send_reviewed_transfer
+from ddti.transfer import build_note_write_validation_plan, build_transfer_plan, send_reviewed_transfer
 
 
 class _InputPort:
@@ -274,6 +274,26 @@ class DDTiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Gain"):
             configuration.with_input_1_tip_gain(128)
 
+    def test_program_change_decodes_three_observed_states_and_canonicalizes_disabled(self) -> None:
+        normal_zones = bytes((9, 35, 3)) * 20
+        packet = lambda disabled, value: bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + normal_zones + bytes((9, 44, 3, 42, disabled, value, 0xF7))
+        disabled = decode_configuration(decode_dump(packet(1, 127)))
+        self.assertIsNone(disabled.kits[0].program_change)
+        active_zero = disabled.with_program_change(0, 0)
+        self.assertEqual(active_zero.kits[0].program_change, 0)
+        self.assertEqual(active_zero.raw[-3:-1], bytes((0, 0)))
+        active_one = active_zero.with_program_change(0, 1)
+        self.assertEqual(active_one.kits[0].program_change, 1)
+        self.assertEqual(active_one.raw[-3:-1], bytes((0, 1)))
+        canonical = disabled.canonicalize_disabled_program_changes()
+        self.assertEqual(canonical.raw[-3:-1], bytes((1, 0)))
+        self.assertIsNone(canonical.kits[0].program_change)
+        with self.assertRaisesRegex(ValueError, "Program Change"):
+            disabled.with_program_change(0, 128)
+        self.assertIn("Program Change value (CONFIRMED", render_diff(diff_ddti_bytes(disabled.raw, canonical.raw)))
+        with self.assertRaisesRegex(ValueError, "requires all 21|factory golden"):
+            build_note_write_validation_plan(disabled.raw)
+
     def test_role_templates_require_an_explicit_physical_input_layout(self) -> None:
         kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
         raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
@@ -409,6 +429,9 @@ class DDTiTests(unittest.TestCase):
             self.assertTrue(response.json()["staged_only"])
             self.assertEqual(response.json()["hardware_write"], "disabled")
             self.assertEqual(client.get("/kits/0/inputs/1").json()["tip"]["note"], 36)
+            response = client.patch("/kits/0", json={"program_change": 1})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["kit"]["program_change"], 1)
             preset = client.get("/preset")
             self.assertEqual(preset.status_code, 200)
             preset_document = preset.json()

@@ -17,9 +17,11 @@ from pathlib import Path
 
 from .protocol import DDTiDump, decode_dump
 from .device import ProtocolNotValidatedError
+from .models import decode_configuration
 
 
 _COMPLETE_FAMILIES = {1: tuple(range(21)), 2: tuple(range(21))}
+FACTORY_GOLDEN_SHA256 = "43c64c486f72ec349c5ebee4020ef9e176f5d64033118f95fb25f6f81f84c70f"
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,24 @@ def build_transfer_plan(raw: bytes) -> DDTiTransferPlan:
 
 def build_transfer_plan_from_file(path: Path) -> DDTiTransferPlan:
     return build_transfer_plan(path.read_bytes())
+
+
+def build_note_write_validation_plan(raw: bytes) -> DDTiTransferPlan:
+    """Build the one authorised-candidate Note 35->36 validation payload.
+
+    This accepts only the immutable complete factory golden. Disabled Program
+    Changes are first canonicalised to the device-observed ``01 00`` encoding,
+    then exactly Kit index 0 / Input 1 Tip is staged from note 35 to 36.
+    Constructing the plan is offline and opens no MIDI output.
+    """
+    source = build_transfer_plan(raw)
+    if source.sha256 != FACTORY_GOLDEN_SHA256:
+        raise ValueError("note-write validation requires the exact complete factory golden SHA-256")
+    configuration = decode_configuration(source.dump)
+    if configuration.kits[0].inputs[0].tip.note != 35:
+        raise ValueError("factory golden does not contain expected Kit 0 / Input 1 Tip note 35")
+    staged = configuration.canonicalize_disabled_program_changes().with_note(0, 1, "tip", 36)
+    return build_transfer_plan(staged.raw)
 
 
 def send_reviewed_transfer(

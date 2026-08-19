@@ -82,8 +82,10 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
             1: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} MIDI Note (CONFIRMED)",
             2: f"Kit {difference.observed_packet_index + 1} / Input {input_number} {zone} companion byte (UNKNOWN)",
         }[field]
+    elif difference.observed_packet_family == 0x01 and byte == 11 + 0x40:
+        position = "Kit Program Change disabled flag (CONFIRMED; 1=---, 0=active)"
     elif difference.observed_packet_family == 0x01 and byte == 11 + 0x41:
-        position = "Family-01 body +0x41 (UNKNOWN; observed normalised by the rejected PC round trip)"
+        position = "Kit Program Change value (CONFIRMED; ignored while disabled)"
     elif difference.observed_packet_family == 0x02 and difference.observed_packet_index == 0 and byte == 11:
         position = "Input 1 Tip Gain (CONFIRMED)"
     elif difference.observed_packet_family == 0x02 and difference.observed_packet_index in {0, 6} and byte == 13:

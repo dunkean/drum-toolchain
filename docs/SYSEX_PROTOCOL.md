@@ -75,6 +75,21 @@ the Tip/Ring interleaving. The surrounding channel and companion bytes remain
 uninterpreted. Family `02` changed during saves but has no assigned semantics
 or checksum rule yet.
 
+## Confirmed per-kit Program Change
+
+The final two Family-`01` body bytes are the per-kit Program Change fields:
+
+```text
+body +0x40   disabled flag: 1 = panel `---`, 0 = active
+body +0x41   direct uint7 Program Change value 0..127
+```
+
+A controlled Kit 1 sequence produced `01 7F` (`---`), `00 00` (`0`) and
+`00 01` (`1`) with no other changes. The value byte is ignored while the flag
+is disabled. The former golden-replay difference `01 7F -> 01 00` therefore
+canonicalised unused storage without enabling Program Change or changing any
+functional configuration.
+
 ## Unknown protocol fields
 
 | Field | Status |
@@ -83,7 +98,7 @@ or checksum rule yet.
 | Model/device ID | `2C` observed; semantic meaning UNKNOWN |
 | Command byte(s) | `0D` observed; semantic meaning UNKNOWN |
 | Addressing | `00 00` observed; semantic meaning UNKNOWN |
-| Payload encoding | note fields described above; remaining bytes UNKNOWN |
+| Payload encoding | note and Program Change fields described above; remaining bytes UNKNOWN |
 | Checksum | UNKNOWN; family `02` changes on save require dedicated experiments |
 | 7-bit packing beyond MIDI transport | UNKNOWN |
 | Segmentation/order | UNKNOWN |

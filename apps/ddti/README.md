@@ -64,8 +64,8 @@ See [`docs/DDTI_CAPTURE.md`](../../docs/DDTI_CAPTURE.md) for the exact safe
 workflow and the hardware evidence currently known.
 
 The FastAPI service and PySide6 editor both edit only an offline, staged dump.
-They cover the 21 observed kits, expose confirmed MIDI notes, the confirmed
-Input 1 Tip Gain byte, and observed raw channel bytes. They can export/import
+They cover the 21 observed kits, expose confirmed MIDI notes, per-kit Program
+Change (`---` or `0..127`), the confirmed Input 1 Tip Gain byte, and observed raw channel bytes. They can export/import
 portable `ddti-note-preset/v1` JSON and complete
 `ddti-configuration-preset/v1` YAML/JSON presets. Channel, Trigger Type,
 Threshold, and companion bytes remain read-only because their meaning or scope

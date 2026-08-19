@@ -19,6 +19,8 @@ NOTE_PRESET_FORMAT = "ddti-note-preset/v1"
 CONFIGURATION_PRESET_FORMAT = "ddti-configuration-preset/v1"
 _INPUT_1_TIP_GAIN_RECORD = 0
 _INPUT_1_TIP_GAIN_VALUE_INDEX = 0
+_PROGRAM_CHANGE_DISABLED_BODY_OFFSET = 0x40
+_PROGRAM_CHANGE_VALUE_BODY_OFFSET = 0x41
 
 
 @dataclass(frozen=True)
@@ -55,13 +57,22 @@ class DDTiInput:
 class DDTiKit:
     number: int
     inputs: tuple[DDTiInput, ...]
+    program_change: int | None = None
+    program_change_disabled_raw: int = 1
+    raw_program_change_disabled_offset: int = -1
+    raw_program_change_value_offset: int = -1
 
     def __post_init__(self) -> None:
         if len(self.inputs) != 10:
             raise ValueError("observed DDTi kit layout has exactly 10 trigger inputs")
 
     def to_document(self) -> dict[str, object]:
-        return {"kit": self.number, "inputs": [input_.to_document() for input_ in self.inputs]}
+        return {
+            "kit": self.number,
+            "program_change": self.program_change,
+            "program_change_disabled_raw": self.program_change_disabled_raw,
+            "inputs": [input_.to_document() for input_ in self.inputs],
+        }
 
 
 @dataclass(frozen=True)
@@ -137,6 +148,31 @@ class DDTiConfiguration:
         raw = bytearray(self.raw)
         raw[record.raw_offsets[_INPUT_1_TIP_GAIN_VALUE_INDEX]] = gain
         return decode_configuration(decode_dump(bytes(raw)))
+
+    def with_program_change(self, kit: int, program_change: int | None) -> "DDTiConfiguration":
+        """Stage a confirmed per-kit Program Change, or ``None`` for ``---``."""
+        if not 0 <= kit < len(self.kits):
+            raise ValueError(f"kit must be 0..{len(self.kits) - 1}")
+        if program_change is not None and (type(program_change) is not int or not 0 <= program_change <= 127):
+            raise ValueError("Program Change must be null/--- or an integer in 0..127")
+        target = self.kits[kit]
+        if target.raw_program_change_disabled_offset < 0 or target.raw_program_change_value_offset < 0:
+            raise ValueError("kit packet has no decoded Program Change fields")
+        raw = bytearray(self.raw)
+        raw[target.raw_program_change_disabled_offset] = 1 if program_change is None else 0
+        raw[target.raw_program_change_value_offset] = 0 if program_change is None else program_change
+        return decode_configuration(decode_dump(bytes(raw)))
+
+    def canonicalize_disabled_program_changes(self) -> "DDTiConfiguration":
+        """Encode every disabled ``---`` field as the device's observed `01 00`."""
+        updated = self
+        for kit in self.kits:
+            if kit.program_change is None and (
+                kit.program_change_disabled_raw != 1
+                or updated.raw[kit.raw_program_change_value_offset] != 0
+            ):
+                updated = updated.with_program_change(kit.number, None)
+        return updated
 
     def to_note_preset(self) -> dict[str, object]:
         """Export every confirmed note field as a portable offline preset.
@@ -218,6 +254,10 @@ class DDTiConfiguration:
         document: dict[str, object] = {
             "format": CONFIGURATION_PRESET_FORMAT,
             "notes": self.to_note_preset()["kits"],
+            "kit_settings": [
+                {"kit": kit.number, "program_change": kit.program_change}
+                for kit in self.kits
+            ],
             "confirmed_global_trigger": {"input_1_tip_gain": self.input_1_tip_gain},
         }
         if name:
@@ -232,6 +272,21 @@ class DDTiConfiguration:
         if not isinstance(notes, Sequence) or isinstance(notes, (str, bytes)):
             raise ValueError("configuration preset notes must be a list")
         configuration = self.with_note_preset({"format": NOTE_PRESET_FORMAT, "kits": notes})
+        kit_settings = preset.get("kit_settings", [])
+        if not isinstance(kit_settings, Sequence) or isinstance(kit_settings, (str, bytes)):
+            raise ValueError("configuration preset kit_settings must be a list")
+        seen_kit_settings: set[int] = set()
+        for setting in kit_settings:
+            if not isinstance(setting, Mapping):
+                raise ValueError("each configuration preset kit setting must be an object")
+            kit_number = setting.get("kit")
+            if type(kit_number) is not int or not 0 <= kit_number < len(self.kits):
+                raise ValueError("configuration preset contains an unknown kit setting")
+            if kit_number in seen_kit_settings:
+                raise ValueError(f"configuration preset repeats kit setting {kit_number}")
+            seen_kit_settings.add(kit_number)
+            if "program_change" in setting:
+                configuration = configuration.with_program_change(kit_number, setting["program_change"])
         trigger = preset.get("confirmed_global_trigger", {})
         if not isinstance(trigger, Mapping):
             raise ValueError("configuration preset confirmed_global_trigger must be an object")
@@ -241,7 +296,7 @@ class DDTiConfiguration:
 
     def to_document(self) -> dict[str, object]:
         return {
-            "semantic_decoding": "MIDI notes and Input 1 Tip Gain confirmed; remaining bytes stay raw/uninterpreted",
+            "semantic_decoding": "MIDI notes, per-kit Program Change, and Input 1 Tip Gain confirmed; remaining bytes stay raw/uninterpreted",
             "kits": [kit.to_document() for kit in self.kits],
             "confirmed_global_trigger": {"input_1_tip_gain": self.input_1_tip_gain} if self.global_trigger_records else {},
             "global_trigger_records": [record.to_document() for record in self.global_trigger_records],
@@ -280,7 +335,19 @@ def decode_configuration(dump: DDTiDump) -> DDTiConfiguration:
                     raw_note_offset=packet_start + start + 1,
                 ))
             inputs.append(DDTiInput(input_index + 1, zones[0], zones[1]))
-        kits.append(DDTiKit(packet.record_index, tuple(inputs)))
+        if len(packet.body) <= _PROGRAM_CHANGE_VALUE_BODY_OFFSET:
+            raise ValueError(f"kit packet {packet.record_index} is too short for Program Change fields")
+        disabled_raw = packet.body[_PROGRAM_CHANGE_DISABLED_BODY_OFFSET]
+        value_raw = packet.body[_PROGRAM_CHANGE_VALUE_BODY_OFFSET]
+        program_change = None if disabled_raw == 1 else value_raw if disabled_raw == 0 else None
+        kits.append(DDTiKit(
+            packet.record_index,
+            tuple(inputs),
+            program_change,
+            disabled_raw,
+            packet_start + _ZONE_START_IN_PACKET + _PROGRAM_CHANGE_DISABLED_BODY_OFFSET,
+            packet_start + _ZONE_START_IN_PACKET + _PROGRAM_CHANGE_VALUE_BODY_OFFSET,
+        ))
     global_records = []
     for packet in sorted((packet for packet in dump.packets if packet.record_type == 0x02), key=lambda packet: packet.record_index):
         if len(packet.body) != 6:

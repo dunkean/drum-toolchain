@@ -38,9 +38,9 @@ assert b"".join(packet.raw for packet in dump.packets) == dump.raw
 print(dump.family_indexes())  # {1: (0, ..., 20), 2: (0, ..., 10)}
 ```
 
-The validated offline model exposes Kit/Input/Tip-or-Ring notes plus the
-controlled-evidence Input 1 Tip Gain field. `with_note`,
-`with_input_1_tip_gain`, and `encode_configuration` are useful for previews
+The validated offline model exposes Kit/Input/Tip-or-Ring notes, per-kit
+Program Change, plus the controlled-evidence Input 1 Tip Gain field. `with_note`,
+`with_program_change`, `with_input_1_tip_gain`, and `encode_configuration` are useful for previews
 and tests only; their result is not accepted by `DDTi.write_configuration`.
 
 ```python
@@ -53,6 +53,7 @@ assert encode_configuration(preview) != encode_configuration(config)
 
 # The one gain byte whose location was verified by a panel 15 -> 16 change.
 preview = config.with_input_1_tip_gain(16)
+preview = config.with_program_change(0, None)  # panel `---`, canonical 01 00
 ```
 
 The `ddti` command provides the corresponding `devices`, `info`, `monitor`,
@@ -123,6 +124,7 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | GET | `/staged-sysex` | download the staged `.syx` file for offline backup/integration only |
 | GET | `/kits/{kit}/inputs/{input}` | one decoded input |
 | PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
+| PATCH | `/kits/{kit}` | stage `program_change` (`null` for panel `---`, otherwise `0..127`) |
 | PATCH | `/global-trigger/input-1/tip` | stage the confirmed `gain` field in memory only |
 | GET | `/preset` | export the current `ddti-note-preset/v1` document |
 | PUT | `/preset` | stage a full or partial note-preset document in memory only |

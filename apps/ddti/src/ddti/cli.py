@@ -13,7 +13,7 @@ from .models import decode_configuration
 from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
-from .transfer import build_transfer_plan_from_file
+from .transfer import build_note_write_validation_plan, build_transfer_plan_from_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     apply_role.add_argument("output", type=Path, help="new .syx file; existing files are refused")
     transfer_plan = commands.add_parser("transfer-plan", help="validate and review a complete dump for a future hardware transfer; never sends MIDI")
     transfer_plan.add_argument("dump", type=Path)
+    note_write_plan = commands.add_parser("prepare-note-write-test", help="prepare the fixed golden-based Note 35->36 validation payload offline; never sends MIDI")
+    note_write_plan.add_argument("golden", type=Path)
+    note_write_plan.add_argument("output", type=Path, help="new staged .syx file; existing files are refused")
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -172,6 +175,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled", "mapping": "role-template + explicit-layout"}, indent=2))
     elif args.command == "transfer-plan":
         print(json.dumps(build_transfer_plan_from_file(args.dump).to_document(), indent=2, sort_keys=True))
+    elif args.command == "prepare-note-write-test":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite existing file: {args.output}")
+        plan = build_note_write_validation_plan(args.golden.read_bytes())
+        args.output.write_bytes(plan.raw)
+        print(json.dumps({"staged_syx": str(args.output), "sha256": plan.sha256, "packet_count": len(plan.dump.packets), "hardware_write": "disabled"}, indent=2))
     elif args.command == "serve":
         from .api import create_app
         try:

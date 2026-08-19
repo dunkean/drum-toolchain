@@ -38,6 +38,12 @@ def launch(dump_path: Path) -> int:
                 self.kit_selector.addItem(f"Kit {kit.number + 1}", kit.number)
             self.kit_selector.currentIndexChanged.connect(self.refresh)
             kit_row.addWidget(self.kit_selector)
+            kit_row.addWidget(QLabel("Program Change:"))
+            self.program_change = QSpinBox()
+            self.program_change.setRange(-1, 127)
+            self.program_change.setSpecialValueText("---")
+            self.program_change.valueChanged.connect(self.set_program_change)
+            kit_row.addWidget(self.program_change)
             kit_row.addStretch()
             layout.addLayout(kit_row)
             gain_row = QHBoxLayout()
@@ -93,6 +99,9 @@ def launch(dump_path: Path) -> int:
                 self.gain.setValue(self.configuration.input_1_tip_gain)
                 self.gain.blockSignals(False)
             kit = self.configuration.kits[self.selected_kit_number()]
+            self.program_change.blockSignals(True)
+            self.program_change.setValue(-1 if kit.program_change is None else kit.program_change)
+            self.program_change.blockSignals(False)
             for row, input_ in enumerate(kit.inputs):
                 number = QTableWidgetItem(str(input_.number))
                 number.setFlags(number.flags() & ~Qt.ItemIsEditable)
@@ -115,6 +124,12 @@ def launch(dump_path: Path) -> int:
         def set_input_1_tip_gain(self, value: int) -> None:
             if self.configuration.global_trigger_records:
                 self.configuration = self.configuration.with_input_1_tip_gain(value)
+
+        def set_program_change(self, value: int) -> None:
+            self.configuration = self.configuration.with_program_change(
+                self.selected_kit_number(),
+                None if value == -1 else value,
+            )
 
         def choose_new_path(self, title: str, suggestion: Path, file_filter: str) -> Path | None:
             destination, _ = QFileDialog.getSaveFileName(self, title, str(suggestion), file_filter)

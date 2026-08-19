@@ -36,6 +36,12 @@ class Input1TipGainPatch(BaseModel):
     gain: int
 
 
+class ProgramChangePatch(BaseModel):
+    """Per-kit Program Change; JSON null represents the panel's `---`."""
+
+    program_change: int | None
+
+
 class RoleTemplateApply(BaseModel):
     """A named note-role template plus the user's explicit physical layout."""
 
@@ -121,6 +127,20 @@ def create_app(dump_path: Path):
         if not 0 <= kit < len(config.kits):
             raise HTTPException(404, "unknown kit")
         return config.kits[kit].to_document()
+
+    @app.patch("/kits/{kit}")
+    def patch_kit(kit: int, patch: ProgramChangePatch) -> dict[str, object]:
+        with lock:
+            try:
+                updated = state["configuration"].with_program_change(kit, patch.program_change)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            state["configuration"] = updated
+        return {
+            "staged_only": True,
+            "hardware_write": "disabled",
+            "kit": updated.kits[kit].to_document(),
+        }
 
     @app.get("/kits/{kit}/inputs/{input_number}")
     def input_(kit: int, input_number: int) -> dict[str, object]:
