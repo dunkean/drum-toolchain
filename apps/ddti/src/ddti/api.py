@@ -9,6 +9,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from pydantic import BaseModel
+
 from .discovery import discover_devices
 from .models import DDTiConfiguration, decode_configuration
 from .protocol import decode_file
@@ -18,17 +20,19 @@ def _configuration(path: Path) -> DDTiConfiguration:
     return decode_configuration(decode_file(path))
 
 
+class NotePatch(BaseModel):
+    """The only editable fields currently validated for offline staging."""
+
+    tip_note: int | None = None
+    ring_note: int | None = None
+
+
 def create_app(dump_path: Path):
     """Create a local API backed by one explicit, already-captured dump."""
     try:
         from fastapi import FastAPI, HTTPException
-        from pydantic import BaseModel
     except ImportError as error:  # pragma: no cover - optional dependency
         raise RuntimeError("install the 'ddti[api]' extra to run the local API") from error
-
-    class NotePatch(BaseModel):
-        tip_note: int | None = None
-        ring_note: int | None = None
 
     state = {"configuration": _configuration(dump_path)}
     lock = RLock()

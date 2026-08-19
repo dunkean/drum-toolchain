@@ -151,3 +151,46 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(edited.kits[0].inputs[1].tip.note, 50)
         differences = diff_bytes(raw, encode_configuration(edited))
         self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(18, 37, 50)])
+
+    def test_optional_fastapi_stages_notes_without_hardware_output(self) -> None:
+        try:
+            from fastapi.testclient import TestClient
+            from ddti.api import create_app
+        except ImportError:
+            self.skipTest("FastAPI optional extra is not installed")
+        body = bytearray()
+        for zone in range(20):
+            body.extend((9, 35 + zone, 3))
+        body.extend(b"\x00" * 6)
+        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "fixture.syx"
+            source.write_bytes(raw)
+            client = TestClient(create_app(source))
+            self.assertEqual(client.get("/configuration").status_code, 200)
+            response = client.patch("/kits/0/inputs/1", json={"tip_note": 36})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["staged_only"])
+            self.assertEqual(response.json()["hardware_write"], "disabled")
+            self.assertEqual(client.get("/kits/0/inputs/1").json()["tip"]["note"], 36)
+
+    def test_optional_pyside_editor_starts_offscreen(self) -> None:
+        try:
+            import os
+            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+            from PySide6.QtCore import QTimer
+            from PySide6.QtWidgets import QApplication
+            from ddti.gui import launch
+        except ImportError:
+            self.skipTest("PySide6 optional extra is not installed")
+        body = bytearray()
+        for zone in range(20):
+            body.extend((9, 35 + zone, 3))
+        body.extend(b"\x00" * 6)
+        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "fixture.syx"
+            source.write_bytes(raw)
+            application = QApplication.instance() or QApplication([])
+            QTimer.singleShot(20, application.quit)
+            self.assertEqual(launch(source), 0)
