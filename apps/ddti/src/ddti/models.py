@@ -1,9 +1,4 @@
-"""Validated offline model for fields observed in legacy DDTi dumps.
-
-Kit/Input/Tip-or-Ring MIDI notes and Input 1 Tip Gain are the only semantic
-fields here. The other bytes remain raw observations, and no configuration
-produced by this module may be sent to hardware yet.
-"""
+"""Validated offline model for fields observed in legacy DDTi dumps."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -17,8 +12,15 @@ _ZONE_BYTES = 3
 _ZONE_START_IN_PACKET = 11
 NOTE_PRESET_FORMAT = "ddti-note-preset/v1"
 CONFIGURATION_PRESET_FORMAT = "ddti-configuration-preset/v1"
-_INPUT_1_TIP_GAIN_RECORD = 0
-_INPUT_1_TIP_GAIN_VALUE_INDEX = 0
+_INPUT_1_TIP_RECORD = 0
+_INPUT_1_TIP_FIELDS = {
+    "gain": 0,
+    "velocity_curve": 1,
+    "threshold": 2,
+    "xtalk": 3,
+    "retrigger": 4,
+}
+_VELOCITY_CURVE_LABELS = {6: "Lin", 7: "LG1"}
 _PROGRAM_CHANGE_DISABLED_BODY_OFFSET = 0x40
 _PROGRAM_CHANGE_VALUE_BODY_OFFSET = 0x41
 
@@ -77,7 +79,7 @@ class DDTiKit:
 
 @dataclass(frozen=True)
 class DDTiGlobalTriggerRecord:
-    """One lossless Family-02 record; field semantics remain experimental."""
+    """One lossless Family-02 record."""
 
     index: int
     values: tuple[int, ...]
@@ -88,12 +90,24 @@ class DDTiGlobalTriggerRecord:
             raise ValueError("observed global-trigger records contain exactly six bytes")
 
     def to_document(self) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "record": self.index,
             "raw_values": list(self.values),
             "raw_offsets": list(self.raw_offsets),
-            "semantic_decoding": "uninterpreted; Input 1 Tip Gain is confirmed at record 0 / byte 0 only",
+            "semantic_decoding": "raw/uninterpreted",
         }
+        if self.index == _INPUT_1_TIP_RECORD:
+            document["semantic_decoding"] = "Input 1 Tip fields confirmed by controlled panel diff"
+            document["input_1_tip"] = {
+                "gain": self.values[0],
+                "velocity_curve": self.values[1],
+                "velocity_curve_label": _VELOCITY_CURVE_LABELS.get(self.values[1]),
+                "threshold": self.values[2],
+                "xtalk": self.values[3],
+                "retrigger": self.values[4],
+                "trigger_type_raw": self.values[5],
+            }
+        return document
 
 
 @dataclass(frozen=True)
@@ -127,27 +141,39 @@ class DDTiConfiguration:
 
     @property
     def input_1_tip_gain(self) -> int:
-        """Return the one gain byte confirmed by a controlled panel change.
+        return self.input_1_tip_settings["gain"]
 
-        Its byte location is confirmed for Input 1 Tip. The valid panel range
-        has not been fully mapped, so offline edits accept the complete uint7
-        storage range and still cannot be sent to a DDTi.
-        """
-        record = next((record for record in self.global_trigger_records if record.index == _INPUT_1_TIP_GAIN_RECORD), None)
+    @property
+    def input_1_tip_settings(self) -> dict[str, int]:
+        """Return the five settings isolated together in Family 02 record 0."""
+        record = next((record for record in self.global_trigger_records if record.index == _INPUT_1_TIP_RECORD), None)
         if record is None:
-            raise ValueError("dump contains no global-trigger record 0 for Input 1 Tip Gain")
-        return record.values[_INPUT_1_TIP_GAIN_VALUE_INDEX]
+            raise ValueError("dump contains no global-trigger record 0 for Input 1 Tip settings")
+        return {name: record.values[index] for name, index in _INPUT_1_TIP_FIELDS.items()}
+
+    @property
+    def input_1_tip_velocity_curve_label(self) -> str | None:
+        return _VELOCITY_CURVE_LABELS.get(self.input_1_tip_settings["velocity_curve"])
+
+    def with_input_1_tip_settings(self, settings: Mapping[str, object]) -> "DDTiConfiguration":
+        """Stage any subset of the five confirmed Input 1 Tip fields offline."""
+        unknown = set(settings) - set(_INPUT_1_TIP_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown Input 1 Tip setting(s): {', '.join(sorted(unknown))}")
+        record = next((record for record in self.global_trigger_records if record.index == _INPUT_1_TIP_RECORD), None)
+        if record is None:
+            raise ValueError("dump contains no global-trigger record 0 for Input 1 Tip settings")
+        raw = bytearray(self.raw)
+        for name, value in settings.items():
+            if type(value) is not int or not 0 <= value <= 127:
+                display_name = "Gain" if name == "gain" else name
+                raise ValueError(f"Input 1 Tip {display_name} must be an integer in 0..127")
+            raw[record.raw_offsets[_INPUT_1_TIP_FIELDS[name]]] = value
+        return decode_configuration(decode_dump(bytes(raw)))
 
     def with_input_1_tip_gain(self, gain: int) -> "DDTiConfiguration":
         """Stage the confirmed Input 1 Tip Gain byte offline."""
-        if type(gain) is not int or not 0 <= gain <= 127:
-            raise ValueError("Input 1 Tip Gain must be an integer in 0..127")
-        record = next((record for record in self.global_trigger_records if record.index == _INPUT_1_TIP_GAIN_RECORD), None)
-        if record is None:
-            raise ValueError("dump contains no global-trigger record 0 for Input 1 Tip Gain")
-        raw = bytearray(self.raw)
-        raw[record.raw_offsets[_INPUT_1_TIP_GAIN_VALUE_INDEX]] = gain
-        return decode_configuration(decode_dump(bytes(raw)))
+        return self.with_input_1_tip_settings({"gain": gain})
 
     def with_program_change(self, kit: int, program_change: int | None) -> "DDTiConfiguration":
         """Stage a confirmed per-kit Program Change, or ``None`` for ``---``."""
@@ -258,7 +284,7 @@ class DDTiConfiguration:
                 {"kit": kit.number, "program_change": kit.program_change}
                 for kit in self.kits
             ],
-            "confirmed_global_trigger": {"input_1_tip_gain": self.input_1_tip_gain},
+            "confirmed_global_trigger": {"input_1_tip": self.input_1_tip_settings},
         }
         if name:
             document["name"] = name
@@ -290,15 +316,26 @@ class DDTiConfiguration:
         trigger = preset.get("confirmed_global_trigger", {})
         if not isinstance(trigger, Mapping):
             raise ValueError("configuration preset confirmed_global_trigger must be an object")
+        if "input_1_tip" in trigger:
+            input_1_tip = trigger["input_1_tip"]
+            if not isinstance(input_1_tip, Mapping):
+                raise ValueError("confirmed_global_trigger.input_1_tip must be an object")
+            configuration = configuration.with_input_1_tip_settings(input_1_tip)
+        # Keep presets exported by versions before the five-field capture usable.
         if "input_1_tip_gain" in trigger:
             configuration = configuration.with_input_1_tip_gain(trigger["input_1_tip_gain"])
         return configuration
 
     def to_document(self) -> dict[str, object]:
         return {
-            "semantic_decoding": "MIDI notes, per-kit Program Change, and Input 1 Tip Gain confirmed; remaining bytes stay raw/uninterpreted",
+            "semantic_decoding": "MIDI notes, per-kit Program Change, and five Input 1 Tip settings confirmed; remaining bytes stay raw/uninterpreted",
             "kits": [kit.to_document() for kit in self.kits],
-            "confirmed_global_trigger": {"input_1_tip_gain": self.input_1_tip_gain} if self.global_trigger_records else {},
+            "confirmed_global_trigger": {
+                "input_1_tip": {
+                    **self.input_1_tip_settings,
+                    "velocity_curve_label": self.input_1_tip_velocity_curve_label,
+                }
+            } if self.global_trigger_records else {},
             "global_trigger_records": [record.to_document() for record in self.global_trigger_records],
         }
 

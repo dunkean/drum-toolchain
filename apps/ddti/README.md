@@ -4,7 +4,7 @@
 monorepo.  It supports USB/MIDI discovery, traffic monitoring, raw SysEx
 capture, integrity metadata, offline binary diffs, and a confirmed-fields-only
 configuration writer. Controlled transfers were returned byte-identically for
-MIDI Note, Program Change, and Input 1 Tip Gain. Unrestricted raw writes remain
+MIDI Note, Program Change, and the five isolated Input 1 Tip fields. Unrestricted raw writes remain
 disabled.
 
 Install it for the `ddti` command:
@@ -65,11 +65,13 @@ workflow and the hardware evidence currently known.
 
 The FastAPI service and PySide6 editor both edit only an offline, staged dump.
 They cover the 21 observed kits, expose confirmed MIDI notes, per-kit Program
-Change (`---` or `0..127`), the confirmed Input 1 Tip Gain byte, and observed raw channel bytes. They can export/import
+Change (`---` or `0..127`), Input 1 Tip Gain, Velocity Curve, Threshold,
+X-Talk and Retrigger, and observed raw channel bytes. They can export/import
 portable `ddti-note-preset/v1` JSON and complete
 `ddti-configuration-preset/v1` YAML/JSON presets. Channel, Trigger Type,
-Threshold, and companion bytes remain read-only because their meaning or scope
-is not proven. The writer accepts only the confirmed editable subset.
+other trigger records, and companion bytes remain read-only because their
+meaning or scope is not proven. The writer accepts only observed values in the
+confirmed editable subset.
 
 The repository’s named `presets/gm.yaml` and `presets/sd3.yaml` are musical
 role templates, not assumptions about cable wiring. Copy and fill

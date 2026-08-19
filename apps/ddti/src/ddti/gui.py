@@ -43,20 +43,34 @@ def launch(dump_path: Path) -> int:
             kit_row.addWidget(self.program_change)
             kit_row.addStretch()
             layout.addLayout(kit_row)
-            gain_row = QHBoxLayout()
-            gain_row.addWidget(QLabel("Input 1 Tip Gain (global, confirmed):"))
-            self.gain = QSpinBox()
-            self.gain.setRange(0, 127)
-            self.gain.setToolTip("Offline range is 0..127; hardware writes are currently validated only for 15 and 16.")
+            trigger_row = QHBoxLayout()
+            trigger_row.addWidget(QLabel("Input 1 Tip (global):"))
+            self.trigger_spins: dict[str, QSpinBox] = {}
+            for field, label in (
+                ("gain", "Gain"),
+                ("velocity_curve", "Curve"),
+                ("threshold", "Threshold"),
+                ("xtalk", "X-Talk"),
+                ("retrigger", "Retrigger"),
+            ):
+                trigger_row.addWidget(QLabel(label))
+                spin = QSpinBox()
+                spin.setRange(0, 127)
+                spin.setToolTip("The editor preserves uint7 values; hardware writing is restricted to values observed in controlled captures.")
+                self.trigger_spins[field] = spin
+                trigger_row.addWidget(spin)
+            self.curve_label = QLabel("")
+            trigger_row.addWidget(self.curve_label)
             if self.configuration.global_trigger_records:
-                self.gain.setValue(self.configuration.input_1_tip_gain)
-                self.gain.valueChanged.connect(self.set_input_1_tip_gain)
+                for field, spin in self.trigger_spins.items():
+                    spin.setValue(self.configuration.input_1_tip_settings[field])
+                    spin.valueChanged.connect(lambda value, name=field: self.set_input_1_tip_setting(name, value))
             else:
-                self.gain.setEnabled(False)
-                self.gain.setToolTip("The opened dump has no global-trigger record 0.")
-            gain_row.addWidget(self.gain)
-            gain_row.addStretch()
-            layout.addLayout(gain_row)
+                for spin in self.trigger_spins.values():
+                    spin.setEnabled(False)
+                    spin.setToolTip("The opened dump has no global-trigger record 0.")
+            trigger_row.addStretch()
+            layout.addLayout(trigger_row)
             self.table = QTableWidget(10, 5)
             self.table.setHorizontalHeaderLabels(("Input", "Tip note", "Tip channel (raw+1)", "Ring note", "Ring channel (raw+1)"))
             layout.addWidget(self.table)
@@ -92,9 +106,12 @@ def launch(dump_path: Path) -> int:
         def refresh(self, _index: int | None = None) -> None:
             self.table.blockSignals(True)
             if self.configuration.global_trigger_records:
-                self.gain.blockSignals(True)
-                self.gain.setValue(self.configuration.input_1_tip_gain)
-                self.gain.blockSignals(False)
+                for field, spin in self.trigger_spins.items():
+                    spin.blockSignals(True)
+                    spin.setValue(self.configuration.input_1_tip_settings[field])
+                    spin.blockSignals(False)
+                label = self.configuration.input_1_tip_velocity_curve_label
+                self.curve_label.setText(f"({label})" if label else "(raw)")
             kit = self.configuration.kits[self.selected_kit_number()]
             self.program_change.blockSignals(True)
             self.program_change.setValue(-1 if kit.program_change is None else kit.program_change)
@@ -118,9 +135,12 @@ def launch(dump_path: Path) -> int:
         def set_note(self, input_number: int, zone: str, value: int) -> None:
             self.configuration = self.configuration.with_note(self.selected_kit_number(), input_number, zone, value)
 
-        def set_input_1_tip_gain(self, value: int) -> None:
+        def set_input_1_tip_setting(self, field: str, value: int) -> None:
             if self.configuration.global_trigger_records:
-                self.configuration = self.configuration.with_input_1_tip_gain(value)
+                self.configuration = self.configuration.with_input_1_tip_settings({field: value})
+                if field == "velocity_curve":
+                    label = self.configuration.input_1_tip_velocity_curve_label
+                    self.curve_label.setText(f"({label})" if label else "(raw)")
 
         def set_program_change(self, value: int) -> None:
             self.configuration = self.configuration.with_program_change(
@@ -218,7 +238,7 @@ def launch(dump_path: Path) -> int:
             dialog.setText(
                 f"Write {len(plan.differences)} validated byte change(s) to the DDTi?\n\n"
                 f"Candidate SHA-256:\n{plan.sha256}\n\n"
-                "Only confirmed MIDI notes, Program Change and validated Gain values are allowed."
+                "Only confirmed MIDI notes, Program Change and validated Input 1 Tip values are allowed."
             )
             dialog.setDetailedText(render_diff(plan.differences))
             dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)

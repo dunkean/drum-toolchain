@@ -86,10 +86,14 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
         position = "Kit Program Change disabled flag (CONFIRMED; 1=---, 0=active)"
     elif difference.observed_packet_family == 0x01 and byte == 11 + 0x41:
         position = "Kit Program Change value (CONFIRMED; ignored while disabled)"
-    elif difference.observed_packet_family == 0x02 and difference.observed_packet_index == 0 and byte == 11:
-        position = "Input 1 Tip Gain (CONFIRMED)"
-    elif difference.observed_packet_family == 0x02 and difference.observed_packet_index in {0, 6} and byte == 13:
-        position = "Threshold candidate (HYPOTHESIS; mirrored record scope unresolved)"
+    elif difference.observed_packet_family == 0x02 and difference.observed_packet_index == 0 and 11 <= byte <= 15:
+        position = {
+            11: "Input 1 Tip Gain (CONFIRMED)",
+            12: "Input 1 Tip Velocity Curve (CONFIRMED; observed 6=Lin, 7=LG1)",
+            13: "Input 1 Tip Threshold (CONFIRMED)",
+            14: "Input 1 Tip X-Talk (CONFIRMED)",
+            15: "Input 1 Tip Retrigger (CONFIRMED)",
+        }[byte]
     else:
         position = labels.get(byte, f"opaque body byte +0x{byte - 11:02X}" if byte >= 11 else f"packet byte 0x{byte:02X}")
     return (

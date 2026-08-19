@@ -6,9 +6,10 @@ lossless legacy DDTi dump can ever be considered for transfer.
 
 An exact golden-dump round trip initially normalised one byte in each of the
 first twenty kit frames. Controlled panel tests proved it is the ignored value
-of a disabled Program Change. Subsequent Note and Program/Gain transfers were
-returned byte-identically. The safe writer therefore permits only confirmed
-field offsets and keeps unrestricted raw replay hard-disabled.
+of a disabled Program Change. Subsequent Note, Program/Gain, and grouped
+five-setting Input 1 Tip transfers were returned byte-identically. The safe
+writer therefore permits only confirmed field offsets and observed values,
+and keeps unrestricted raw replay hard-disabled.
 """
 from __future__ import annotations
 
@@ -86,7 +87,7 @@ class DDTiSafeWritePlan:
             "byte_count": len(self.raw),
             "packet_count": len(self.transfer.dump.packets),
             "changed_bytes": len(self.differences),
-            "allowed_fields": ["kit MIDI notes", "kit Program Change", "Input 1 Tip Gain 15/16"],
+            "allowed_fields": ["kit MIDI notes", "kit Program Change", "validated Input 1 Tip settings"],
             "hardware_write": "requires explicit confirmation",
         }
 
@@ -123,16 +124,28 @@ def build_safe_write_plan(source_raw: bytes, candidate_raw: bytes) -> DDTiSafeWr
     for kit in source.kits:
         allowed_offsets.add(kit.raw_program_change_disabled_offset)
         allowed_offsets.add(kit.raw_program_change_value_offset)
-    gain_offset = source.global_trigger_records[0].raw_offsets[0]
-    allowed_offsets.add(gain_offset)
+    input_1_tip_offsets = source.global_trigger_records[0].raw_offsets[:5]
+    allowed_offsets.update(input_1_tip_offsets)
 
     for kit in candidate.kits:
         if kit.program_change_disabled_raw not in {0, 1}:
             raise ValueError(f"Kit {kit.number} Program Change disabled flag must be 0 or 1")
         if kit.program_change_disabled_raw == 1 and candidate.raw[kit.raw_program_change_value_offset] != 0:
             raise ValueError(f"Kit {kit.number} disabled Program Change must use canonical value 0")
-    if source.input_1_tip_gain != candidate.input_1_tip_gain and candidate.input_1_tip_gain not in {15, 16}:
-        raise ValueError("Input 1 Tip Gain writes are currently validated only for values 15 and 16")
+    observed_write_values = {
+        "gain": {15, 16},
+        "velocity_curve": {6, 7},
+        "threshold": {5, 7},
+        "xtalk": {1, 4},
+        "retrigger": {10, 14},
+    }
+    source_settings = source.input_1_tip_settings
+    candidate_settings = candidate.input_1_tip_settings
+    for field, allowed_values in observed_write_values.items():
+        if source_settings[field] != candidate_settings[field] and candidate_settings[field] not in allowed_values:
+            ordered = sorted(allowed_values)
+            values = f"{ordered[0]} and {ordered[1]}" if len(ordered) == 2 else ", ".join(map(str, ordered))
+            raise ValueError(f"Input 1 Tip {field} writes are currently validated only for values {values}")
 
     differences = diff_ddti_bytes(source.raw, candidate.raw)
     forbidden = [difference for difference in differences if difference.offset not in allowed_offsets]

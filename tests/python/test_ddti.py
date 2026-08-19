@@ -260,7 +260,7 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(configuration.global_trigger_records[0].values, (0, 6, 5, 1, 10, 0))
         self.assertEqual(configuration.global_trigger_records[20].raw_offsets[0], len(kit) + 20 * 18 + 11)
 
-    def test_configuration_preset_stages_only_confirmed_notes_and_gain(self) -> None:
+    def test_configuration_preset_stages_confirmed_notes_and_input_1_tip_settings(self) -> None:
         kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
         kit = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
         global_record = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
@@ -272,11 +272,20 @@ class DDTiTests(unittest.TestCase):
         staged = configuration.with_configuration_preset({
             "format": "ddti-configuration-preset/v1",
             "notes": [{"kit": 0, "inputs": [{"input": 1, "tip_note": 36}]}],
-            "confirmed_global_trigger": {"input_1_tip_gain": 16},
+            "confirmed_global_trigger": {"input_1_tip": {
+                "gain": 16, "velocity_curve": 7, "threshold": 7, "xtalk": 4, "retrigger": 14,
+            }},
         })
         differences = diff_bytes(configuration.raw, staged.raw)
-        self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(12, 35, 36), (89, 15, 16)])
-        self.assertIn("Input 1 Tip Gain (CONFIRMED)", render_diff(diff_ddti_bytes(configuration.raw, staged.raw)))
+        self.assertEqual(
+            [(change.offset, change.before, change.after) for change in differences],
+            [(12, 35, 36), (89, 15, 16), (90, 6, 7), (91, 5, 7), (92, 1, 4), (93, 10, 14)],
+        )
+        rendered = render_diff(diff_ddti_bytes(configuration.raw, staged.raw))
+        self.assertIn("Input 1 Tip Gain (CONFIRMED)", rendered)
+        self.assertIn("Velocity Curve (CONFIRMED; observed 6=Lin, 7=LG1)", rendered)
+        self.assertIn("Threshold (CONFIRMED)", rendered)
+        self.assertEqual(staged.input_1_tip_velocity_curve_label, "LG1")
         with self.assertRaisesRegex(ValueError, "Gain"):
             configuration.with_input_1_tip_gain(128)
 
@@ -402,7 +411,13 @@ class DDTiTests(unittest.TestCase):
             for index in range(21)
         )
         source = decode_configuration(decode_dump(kits + globals_))
-        candidate = source.with_note(0, 1, "tip", 36).with_program_change(0, 0).with_input_1_tip_gain(16)
+        candidate = (
+            source.with_note(0, 1, "tip", 36)
+            .with_program_change(0, 0)
+            .with_input_1_tip_settings({
+                "gain": 16, "velocity_curve": 7, "threshold": 7, "xtalk": 4, "retrigger": 14,
+            })
+        )
         plan = build_safe_write_plan(source.raw, candidate.raw)
         self.assertEqual(plan.transfer.dump.family_indexes(), {1: tuple(range(21)), 2: tuple(range(21))})
         self.assertEqual(decode_configuration(plan.transfer.dump).kits[0].inputs[0].tip.note, 36)
@@ -426,6 +441,8 @@ class DDTiTests(unittest.TestCase):
             build_safe_write_plan(source.raw, bytes(forbidden))
         with self.assertRaisesRegex(ValueError, "15 and 16"):
             build_safe_write_plan(source.raw, source.with_input_1_tip_gain(17).raw)
+        with self.assertRaisesRegex(ValueError, "velocity_curve"):
+            build_safe_write_plan(source.raw, source.with_input_1_tip_settings({"velocity_curve": 8}).raw)
 
     def test_cli_has_no_hardware_transfer_command(self) -> None:
         with self.assertRaises(SystemExit) as error:
@@ -468,7 +485,7 @@ class DDTiTests(unittest.TestCase):
             text = preset.read_text(encoding="utf-8")
             self.assertIn("format: ddti-configuration-preset/v1", text)
             document = __import__("yaml").safe_load(text)
-            document["confirmed_global_trigger"]["input_1_tip_gain"] = 16
+            document["confirmed_global_trigger"]["input_1_tip"]["gain"] = 16
             preset.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
             self.assertEqual(main(["apply-config", str(source), str(preset), str(staged)]), 0)
             self.assertEqual(decode_configuration(decode_dump(staged.read_bytes())).input_1_tip_gain, 16)
@@ -512,12 +529,14 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.json()["staged_only"])
             self.assertEqual(client.get("/kits/0/inputs/1").json()["ring"]["note"], 61)
-            response = client.patch("/global-trigger/input-1/tip", json={"gain": 16})
+            response = client.patch("/global-trigger/input-1/tip", json={
+                "gain": 16, "velocity_curve": 7, "threshold": 7, "xtalk": 4, "retrigger": 14,
+            })
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["confirmed_global_trigger"]["input_1_tip_gain"], 16)
+            self.assertEqual(response.json()["confirmed_global_trigger"]["input_1_tip"]["gain"], 16)
             configuration_preset = client.get("/configuration-preset")
             self.assertEqual(configuration_preset.status_code, 200)
-            self.assertEqual(configuration_preset.json()["confirmed_global_trigger"]["input_1_tip_gain"], 16)
+            self.assertEqual(configuration_preset.json()["confirmed_global_trigger"]["input_1_tip"]["velocity_curve"], 7)
             response = client.post("/role-template", json={
                 "template": {"format": "ddti-note-role-template/v1", "roles": {"kick": {"note": 36}}},
                 "layout": {"format": "ddti-input-layout/v1", "kits": [0], "bindings": [{"input": 1, "zone": "tip", "role": "kick.note"}]},

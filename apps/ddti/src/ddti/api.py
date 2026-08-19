@@ -31,10 +31,14 @@ class NotePatch(BaseModel):
     ring_note: int | None = None
 
 
-class Input1TipGainPatch(BaseModel):
-    """The only trigger-setting field confirmed by controlled panel evidence."""
+class Input1TipPatch(BaseModel):
+    """Input 1 Tip fields isolated by the controlled five-setting capture."""
 
-    gain: int
+    gain: int | None = None
+    velocity_curve: int | None = None
+    threshold: int | None = None
+    xtalk: int | None = None
+    retrigger: int | None = None
 
 
 class ProgramChangePatch(BaseModel):
@@ -211,18 +215,21 @@ def create_app(dump_path: Path):
         }
 
     @app.patch("/global-trigger/input-1/tip")
-    def patch_input_1_tip_gain(patch: Input1TipGainPatch) -> dict[str, object]:
-        """Stage the controlled-evidence Gain field; never sends MIDI."""
+    def patch_input_1_tip_gain(patch: Input1TipPatch) -> dict[str, object]:
+        """Stage controlled-evidence Input 1 Tip fields; never sends MIDI."""
+        settings = {name: value for name, value in patch.model_dump().items() if value is not None}
+        if not settings:
+            raise HTTPException(422, "supply at least one Input 1 Tip setting")
         with lock:
             try:
-                updated = state["configuration"].with_input_1_tip_gain(patch.gain)
+                updated = state["configuration"].with_input_1_tip_settings(settings)
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
             state["configuration"] = updated
         return {
             "staged_only": True,
             "hardware_write": "disabled",
-            "confirmed_global_trigger": {"input_1_tip_gain": updated.input_1_tip_gain},
+            "confirmed_global_trigger": {"input_1_tip": updated.input_1_tip_settings},
         }
 
     @app.put("/preset")

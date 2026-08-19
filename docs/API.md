@@ -76,8 +76,8 @@ and never opens a MIDI output. Hardware writing uses the separate `write-plan`
 and `write-config` review flow described below.
 
 `export-config` creates a human-editable `ddti-configuration-preset/v1` YAML
-(or JSON) file containing every proven editable field: all kit notes and Input
-1 Tip Gain. `apply-config` applies only these named fields to a new staged
+(or JSON) file containing every proven editable field: all kit notes, Program
+Change, and the five isolated Input 1 Tip settings. `apply-config` applies only these named fields to a new staged
 dump, preserving every unknown byte from its supplied source dump. It also
 never opens MIDI.
 
@@ -109,8 +109,9 @@ ddti write-plan source.syx candidate.syx
 ddti write-config source.syx candidate.syx --output TriggerIO --expected-sha256 <hash-from-plan> --confirm I_AUTHORIZE_DDTI_CONFIRMED_FIELDS
 ```
 
-Only confirmed kit notes, Program Change, and Input 1 Tip Gain values 15/16
-may differ. The transfer uses at least 50 ms between frames. Unrestricted raw
+Only confirmed kit notes, Program Change, and observed Input 1 Tip values may
+differ. The accepted trigger pairs are Gain `15/16`, Curve `6/7` (`Lin/LG1`),
+Threshold `5/7`, X-Talk `1/4`, and Retrigger `10/14`. The transfer uses at least 50 ms between frames. Unrestricted raw
 SysEx replay remains unavailable.
 
 ## Local REST API
@@ -132,7 +133,7 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | GET | `/kits/{kit}/inputs/{input}` | one decoded input |
 | PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
 | PATCH | `/kits/{kit}` | stage `program_change` (`null` for panel `---`, otherwise `0..127`) |
-| PATCH | `/global-trigger/input-1/tip` | stage the confirmed `gain` field in memory only |
+| PATCH | `/global-trigger/input-1/tip` | stage any subset of `gain`, `velocity_curve`, `threshold`, `xtalk`, `retrigger` in memory only |
 | GET | `/preset` | export the current `ddti-note-preset/v1` document |
 | PUT | `/preset` | stage a full or partial note-preset document in memory only |
 | GET/PUT | `/configuration-preset` | export/stage all proven editable values in `ddti-configuration-preset/v1` form |
@@ -151,7 +152,7 @@ opens a MIDI output.
 
 Install `ddti[gui]`, then run `ddti gui captures/factory_dump_001.syx`.
 The PySide6 editor provides a Kit selector for every decoded kit, a compact
-10-input Tip/Ring note table, the confirmed Input 1 Tip Gain control, and
+10-input Tip/Ring note table, five Input 1 Tip controls, and
 non-overwriting export of either the staged SysEx, a note preset, or a YAML
 configuration preset. It can import either preset form into memory. Its
 **Review staged diff** shows the exact byte-level changes. **Write confirmed
