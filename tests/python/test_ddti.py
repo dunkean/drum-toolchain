@@ -11,6 +11,7 @@ if str(DDTI_SOURCE) not in sys.path:
 
 from ddti.capture import _receive_mido_sysex, capture_dump
 from ddti.device import DDTi, ProtocolNotValidatedError
+from ddti.cli import main
 from ddti.diff import diff_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
 
@@ -83,3 +84,18 @@ class DDTiTests(unittest.TestCase):
             device.read_configuration()
         with self.assertRaises(ProtocolNotValidatedError):
             device.write_configuration(object())
+
+    def test_dump_cli_announces_receive_only_listening_before_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch("ddti.cli.capture_dump") as capture, \
+             patch("sys.stdout") as stdout:
+            capture.return_value = type("Result", (), {
+                "syx_path": Path(temporary) / "dump.syx",
+                "hex_path": Path(temporary) / "dump.hex",
+                "metadata_path": Path(temporary) / "dump.json",
+                "sha256": "a" * 64,
+                "message_count": 1,
+            })()
+            self.assertEqual(main(["dump", str(Path(temporary) / "dump"), "--input", "TriggerIO", "--listen"]), 0)
+        output = "".join(str(call.args[0]) for call in stdout.write.call_args_list)
+        self.assertIn("never opens a MIDI output", output)

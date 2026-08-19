@@ -47,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "dump":
         if not args.listen:
             raise ValueError("dump is receive-only; pass --listen after starting no other MIDI sender and preparing the panel export")
+        print(
+            f"listening on {args.input!r} for a panel-initiated SysEx dump; "
+            "this command never opens a MIDI output",
+            flush=True,
+        )
         result = capture_dump(args.input, args.stem, seconds=args.seconds, idle_seconds=args.idle_seconds)
         print(json.dumps({"syx": str(result.syx_path), "hex": str(result.hex_path), "metadata": str(result.metadata_path), "sha256": result.sha256, "messages": result.message_count}, indent=2))
     else:
