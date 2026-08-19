@@ -10,7 +10,7 @@ DDTI_SOURCE = Path(__file__).resolve().parents[2] / "apps" / "ddti" / "src"
 if str(DDTI_SOURCE) not in sys.path:
     sys.path.insert(0, str(DDTI_SOURCE))
 
-from ddti.capture import CaptureResult, _receive_mido_sysex, capture_dump, capture_series
+from ddti.capture import CaptureResult, _WINDOWS_SYSEX_BUFFER_COUNT, _receive_mido_sysex, capture_dump, capture_series
 from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
 from ddti.models import decode_configuration, encode_configuration
@@ -90,6 +90,9 @@ class DDTiTests(unittest.TestCase):
                 capture_dump("TriggerIO", stem, seconds=1, idle_seconds=1, receiver="mido")
         receiver.assert_called_once_with("TriggerIO 30", seconds=1, idle_seconds=1)
         windows_receiver.assert_not_called()
+
+    def test_windows_receiver_has_capacity_for_the_observed_full_dump(self) -> None:
+        self.assertGreaterEqual(_WINDOWS_SYSEX_BUFFER_COUNT, 42)
 
     def test_capture_series_uses_new_numbered_stems_without_reopening_a_cli(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

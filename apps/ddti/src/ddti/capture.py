@@ -13,6 +13,9 @@ from typing import Callable, Literal
 from .sysex import SysExMessage, parse_stream, render_hex
 
 
+_WINDOWS_SYSEX_BUFFER_COUNT = 64
+
+
 @dataclass(frozen=True)
 class CaptureResult:
     source_port: str
@@ -187,12 +190,12 @@ def _receive_windows_sysex(name: str, *, seconds: float, idle_seconds: float) ->
     result = winmm.midiInOpen(c.byref(handle), device_index, callback, 0, callback_function)
     if result:
         raise RuntimeError(f"Windows MM could not open MIDI input {name!r}: error {result}")
-    # 32 queued 64-KiB buffers tolerate packet sizing that is still unknown;
-    # queue all buffers before starting so no received packet is dropped while
-    # a Python callback reallocates memory.
+    # A full legacy DDTi dump has 42 SysEx packets. Queue more than that before
+    # starting: the former 32-buffer limit silently truncated the final eleven
+    # global-trigger packets on Windows.
     buffers: list[tuple[object, MidiHeader]] = []
     try:
-        for _ in range(32):
+        for _ in range(_WINDOWS_SYSEX_BUFFER_COUNT):
             buffer = c.create_string_buffer(65_536)
             header = MidiHeader(c.cast(buffer, c.c_void_p), 65_536, 0, 0, 0, None, 0, 0, (dword_ptr * 8)())
             if result := winmm.midiInPrepareHeader(handle, c.byref(header), header_size):

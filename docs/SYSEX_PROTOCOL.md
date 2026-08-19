@@ -6,12 +6,14 @@ a factory reset.  This repository has still sent no DDTi SysEx message.
 
 ## Verified framing capability of the tooling
 
-The first factory dump is 1,836 bytes in 32 complete standard MIDI SysEx
-frames, SHA-256
-`504ebd7e1a82b98c9b515febb8f3713a7a801ac5e1bbe188fad50370c42c33ce`.
-Three local byte-identical copies exist, including the immutable
-`factory_dump_001.golden.syx`.  The tooling accepts a capture only when it is
-a concatenation of complete standard MIDI SysEx frames:
+The original 1,836-byte / 32-frame factory capture is retained as an immutable
+**partial prefix** only. An independent `python-rtmidi` capture revealed that
+the Windows native reader had queued only 32 buffers and omitted the final 11
+frames. A complete observed DDTi dump is **2,016 bytes in 42 SysEx frames**:
+21 kit frames followed by 21 global-trigger frames. The original SHA-256
+`504ebd7e…c42c33ce` must not be used as a full-configuration golden. The
+tooling accepts a capture only when it is a concatenation of complete standard
+MIDI SysEx frames:
 
 ```text
 F0  <zero or more 7-bit data bytes>  F7
@@ -37,7 +39,7 @@ Two record families occur in order:
 | `TT` | Index sequence | Packets | Packet size | Opaque body |
 | ---: | --- | ---: | ---: | ---: |
 | `01` | `00`–`14` | 21 | 78 bytes | 66 bytes |
-| `02` | `00`–`0A` | 11 | 18 bytes | 6 bytes |
+| `02` | `00`–`14` | 21 | 18 bytes | 6 bytes |
 
 `LL` is `46` for family `01` and `0A` for family `02`; it is not yet known
 whether that byte is a length, subtype, or part of another encoding.  The
