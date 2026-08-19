@@ -67,7 +67,10 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
     def test_cymbal_builder_refuses_unreviewed_partial_velocity_layout(self) -> None:
         with self.assertRaisesRegex(ValueError, "no audited DDrum4 cymbal velocity layout"):
             cymbal_velocity_layers(4)
-        self.assertEqual(len(cymbal_velocity_layers(1)), 1)
+        single = cymbal_velocity_layers(1)
+        self.assertEqual(len(single), 1)
+        # A one-layer cymbal must respond at the panel's hard velocity too.
+        self.assertEqual(single[0].split()[4:12], ["FF"] * 8)
         self.assertEqual(len(cymbal_velocity_layers(7)), 7)
 
     def test_render_comparison_measures_onset_level_tail_and_tone(self) -> None:

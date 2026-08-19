@@ -25,6 +25,17 @@ _SNARE_LAYER_ROWS = (
     "06 00 02 00 FF 00 00 00 00 00 00 00 FF FF FF FF FF FF FF FF 00 00 00 00 00 00 00 00 63 63 00 00 63 00 00 00 09 00 06 00 04 63 32 00 04 00 00 00 00 00",
 )
 
+# A one-sample cymbal has no neighbouring layers with which to crossfade.
+# Its eight gain-velocity points must therefore remain at full gain from soft
+# to hard.  Reusing the first row of _SNARE_LAYER_ROWS would only activate it
+# in the soft part of the range and makes a panel-button (hard-velocity) test
+# silent.
+_SINGLE_CYMBAL_FULL_RANGE_ROW = (
+    "00 00 02 00 FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF "
+    "00 00 00 00 00 00 00 00 63 63 00 00 63 00 00 00 09 00 06 00 "
+    "04 63 32 00 04 00 00 00 00 00"
+)
+
 
 def snare_velocity_layers(sample_count: int) -> tuple[str, ...]:
     """Return the verified 1..7 layer velocity-crossfade layout."""
@@ -45,7 +56,7 @@ def cymbal_velocity_layers(sample_count: int) -> tuple[str, ...]:
     ddrum4ui with the module's panel-button velocity sweep.
     """
     if sample_count == 1:
-        return _SNARE_LAYER_ROWS[:1]
+        return (_SINGLE_CYMBAL_FULL_RANGE_ROW,)
     if sample_count == len(_SNARE_LAYER_ROWS):
         return _SNARE_LAYER_ROWS
     raise ValueError(
