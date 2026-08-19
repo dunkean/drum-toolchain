@@ -28,7 +28,7 @@ from ddrum4_bank.compiler import compile_nested, compile_nested_file, write_comp
 from ddrum4_bank.selection import select_snare, select_velocity_layers
 from ddrum4_bank.cymbal_build import materialize_flagship_cymbal
 from ddrum4_bank.snare_build import materialize_positional_snare
-from ddrum4_bank.hihat_build import FLAGSHIP_HIHAT_BRANCHES, materialize_flagship_hihat
+from ddrum4_bank.hihat_build import FLAGSHIP_HIHAT_BRANCHES, FLAGSHIP_HIHAT_EDGE_BRANCHES, materialize_flagship_hihat
 from drum_sampler.audio import QualityProfile
 from drum_sampler.library import SampleTake, merge_libraries
 from drum_domain import validate_document
@@ -73,15 +73,25 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
                 library,
                 raw_directory=raw,
                 output_directory=root / "build",
-                sound_id="HHAT_948",
+                sound_id="CYMB_946",
                 instrument="hi_hat",
                 template=template,
                 profile=QualityProfile(force_mono=True, trim_tail=False),
             )
             self.assertEqual(len(build.branches), 8)
+            self.assertEqual(build.sound_id, "CYMB_946")
             self.assertEqual(len(build.layers), 10)
             self.assertEqual(tuple(layer.position for layer in build.layers), (1, 2, 2, 3, 3, 4, 5, 6, 7, 8))
             self.assertIn("VL1 01 01 01 01 01 01 01 01 01 01", build.config.read_text(encoding="utf-8"))
+
+    def test_edge_companion_uses_ten_layers_and_accepts_cymbal_group(self) -> None:
+        self.assertEqual(len(FLAGSHIP_HIHAT_EDGE_BRANCHES), 8)
+        self.assertEqual(sum(len(branch.velocities) for branch in FLAGSHIP_HIHAT_EDGE_BRANCHES), 10)
+        self.assertEqual(
+            tuple(branch.articulation for branch in FLAGSHIP_HIHAT_EDGE_BRANCHES),
+            ("tight_edge", "closed_edge", "loose_edge", "open_1_edge", "open_2_edge",
+             "open_3_edge", "open_4_edge", "open_4_tip"),
+        )
 
     def test_flagship_cymbal_preparation_selects_best_round_robin(self) -> None:
         import numpy as np

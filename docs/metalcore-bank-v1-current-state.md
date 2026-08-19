@@ -86,6 +86,35 @@ library is
 The DDrum build stage resamples selected copies to 44.1 kHz; raw captures stay
 immutable at 48 kHz.
 
+The physical loop capture was rejected after hardware listening because
+normalising its very low input level also raised the analogue noise floor and
+made every tail end in loud hiss. The sampler now accepts a versioned
+`loopback:` input and records the SD3 output directly from the Windows WASAPI
+render endpoint. The selected clean bow/pedal source is
+`D:\Studio\sample-library\sd3-modern-metal-djentle-beast\hihat-ddrum-selected-digital-c2`.
+
+`HHAT_947` is the accepted primary hi-hat sound. Its eight Note-P positions
+are chick, tight bow, closed bow, loose bow, open 1, open 3, open 5 and foot
+splash. Tight and closed each have soft/hard timbres, for ten layers total.
+All 902 encoded packets were transferred through the UMC and the owner
+confirmed that the positions sound correct, have natural tails and no hiss.
+`MEM.LEFT` changed from 5.97 to 4.18, so its authoritative module cost is
+1,790 blocks. The transfer receipt is
+`D:\Studio\ddrum4-transfers\hhat-947-flagship-digital-c2-20260819.json`.
+
+Eight positions cannot also hold a useful edge family without removing bow
+openings or pedal articulations. The edge family is therefore a separate
+Arduino-selected nested sound rather than a velocity hack. The clean digital
+source at
+`D:\Studio\sample-library\sd3-modern-metal-djentle-beast\hihat-edge-selected-digital-c1`
+contains tight/closed edge at two velocities, loose and open 1..4 edge, plus
+the missing open-4 bow transition. `CYMB_946` compiles these as eight Note-P
+positions and ten layers. It reports 1,059 encoded blocks and was transferred
+successfully with receipt
+`D:\Studio\ddrum4-transfers\cymb-946-hihat-edge-digital-c1-20260819.json`.
+Hardware assignment, listening and the new `MEM.LEFT` reading are still
+required before accepting it.
+
 ## New isolated cymbal reference
 
 `CYMB_993` was built and sent on 2026-08-10 as the first unambiguous cymbal
@@ -153,8 +182,9 @@ the Arduino contract stable while palette assignments evolve.
 
 ## Next soundbank actions
 
-1. Build and audition `HHAT_948` from the completed direct-note flagship
-   capture. Keep `HHAT_996` until that listening gate passes.
+1. Assign and audition the transferred `CYMB_946` edge companion, then record
+   its real module cost. Keep `HHAT_947` unchanged as the accepted bow/pedal
+   family.
 2. Capture/select an SD3 crash source with a measured musical tail beyond four
    seconds, then create two seven-layer flagship crashes with an audited
    velocity layout.

@@ -1,0 +1,22 @@
+{
+  "audio_input": "loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)",
+  "channels": ["left", "right"],
+  "cooldown_ms": 350,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 200,
+  "requests": [
+    {"articulation": "pedal_chick", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 44, "repetitions": 1, "velocities": [96]},
+    {"articulation": "tight_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 63, "repetitions": 1, "velocities": [36, 112]},
+    {"articulation": "closed_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 42, "repetitions": 1, "velocities": [36, 112]},
+    {"articulation": "loose_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 12, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_1_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 13, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_3_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 15, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_5_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 17, "repetitions": 1, "velocities": [96]},
+    {"articulation": "foot_splash", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 23, "repetitions": 1, "velocities": [112]}
+  ],
+  "sample_rate": 48000,
+  "schema_version": 1,
+  "tail_ms": 6500
+}

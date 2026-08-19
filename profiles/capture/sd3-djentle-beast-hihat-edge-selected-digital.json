@@ -1,0 +1,22 @@
+{
+  "audio_input": "loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)",
+  "channels": ["left", "right"],
+  "cooldown_ms": 350,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 200,
+  "requests": [
+    {"articulation": "tight_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 62, "repetitions": 1, "velocities": [36, 112]},
+    {"articulation": "closed_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 22, "repetitions": 1, "velocities": [36, 112]},
+    {"articulation": "loose_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 64, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_1_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 24, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_2_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 25, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_3_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 26, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_4_edge", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 60, "repetitions": 1, "velocities": [96]},
+    {"articulation": "open_4_tip", "channel": 10, "controllers": [], "instrument": "hi_hat", "note": 16, "repetitions": 1, "velocities": [96]}
+  ],
+  "sample_rate": 48000,
+  "schema_version": 1,
+  "tail_ms": 6500
+}

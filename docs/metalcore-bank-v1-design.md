@@ -45,14 +45,14 @@ foot splash is 23. The reproducible dense capture grid is
 `profiles/capture/sd3-djentle-beast-flagship-hihat.json`.
 
 The DDrum4 hi-hat input has only eight Note-P positions, despite a sound having
-ten layers. The first bench candidate uses chick, six tip openness states and
-foot splash across those eight positions. Tight and closed each receive a soft
-and hard timbre, consuming the two remaining layers. The separately captured
-edge family stays lossless in the source library and will later occupy a
-declared nested branch in another available DDrum role. This exact layout
-remains a bench hypothesis until it has been replayed through the module. The
-firmware must only select the declared note/velocity branch; it must not add
-trigger cleanup or dynamics processing.
+ten layers. The accepted `HHAT_947` uses chick, tight/closed/loose bow, open
+1/3/5 bow and foot splash. Tight and closed each receive a soft and hard
+timbre, consuming the two remaining layers. The separately captured edge
+family occupies `CYMB_946`, a declared nested branch in another DDrum role:
+tight/closed edge at two timbres, loose and open 1..4 edge, and an open-4 bow
+transition. Arduino routing selects only the declared sound position and
+passes the original velocity; it must not add trigger cleanup or dynamics
+processing.
 
 The two main crashes use three useful dynamics apiece. Their low and medium
 samples may use shorter captured tails, while the hard layer retains the full

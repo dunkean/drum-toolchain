@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
+import threading
 from math import gcd
 from hashlib import sha256
 
@@ -79,9 +80,26 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
         raise FileExistsError(f"raw capture already exists and will not be overwritten: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     frames = round((duration + preroll) * sample_rate)
+    if audio_input.startswith("loopback:"):
+        return _capture_loopback(
+            midi_port=midi_port, query=audio_input.split(":", 1)[1], note=note,
+            velocity=velocity, output=output, channel=channel,
+            controllers=controllers, frames=frames, duration=duration, gate=gate,
+            preroll=preroll, sample_rate=sample_rate, channels=channels,
+        )
     recording = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32",
                        device=resolve_device(audio_input))
     time.sleep(preroll)
+    _emit_note(midi_port, note, velocity, channel, controllers, gate, duration)
+    sd.wait()
+    wavfile.write(output, sample_rate, _float_to_pcm(recording))
+    return output
+
+
+def _emit_note(
+    midi_port: str, note: int, velocity: int, channel: int,
+    controllers: tuple[tuple[int, int], ...], gate: float, duration: float,
+) -> None:
     with mido.open_output(midi_port) as port:
         for control, value in controllers:
             port.send(mido.Message("control_change", channel=channel - 1, control=control, value=value))
@@ -90,7 +108,38 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
         port.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
         time.sleep(min(gate, duration))
         port.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
-    sd.wait()
+
+
+def _capture_loopback(
+    *, midi_port: str, query: str, note: int, velocity: int, output: Path,
+    channel: int, controllers: tuple[tuple[int, int], ...], frames: int,
+    duration: float, gate: float, preroll: float, sample_rate: int, channels: int,
+) -> Path:
+    """Capture a Windows playback endpoint digitally through WASAPI loopback."""
+    import soundcard as sc
+
+    matches = [
+        microphone for microphone in sc.all_microphones(include_loopback=True)
+        if microphone.isloopback and query.lower() in microphone.name.lower()
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"expected one loopback device containing {query!r}, found {[item.name for item in matches]}")
+    trigger_error: list[BaseException] = []
+
+    def trigger() -> None:
+        try:
+            time.sleep(preroll)
+            _emit_note(midi_port, note, velocity, channel, controllers, gate, duration)
+        except BaseException as error:  # propagate a worker failure on the caller thread
+            trigger_error.append(error)
+
+    worker = threading.Thread(target=trigger, name="drum-sampler-midi-trigger")
+    worker.start()
+    with matches[0].recorder(samplerate=sample_rate, channels=list(range(channels))) as recorder:
+        recording = recorder.record(numframes=frames)
+    worker.join()
+    if trigger_error:
+        raise RuntimeError("MIDI trigger failed during loopback capture") from trigger_error[0]
     wavfile.write(output, sample_rate, _float_to_pcm(recording))
     return output
 

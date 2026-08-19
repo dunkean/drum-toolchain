@@ -13,7 +13,7 @@ from drum_sampler.library import SampleLibrary, SampleTake
 from .sound_config import hihat_position_layers, materialize_sound_config
 
 
-_SOUND_ID = re.compile(r"^HHAT_[0-9]{3}$")
+_SOUND_ID = re.compile(r"^[A-Z0-9]{3,4}_[0-9]{3}$")
 
 
 @dataclass(frozen=True)
@@ -25,14 +25,30 @@ class HihatBranch:
 
 
 FLAGSHIP_HIHAT_BRANCHES = (
-    HihatBranch(1, "pedal_chick", (96,), 0.70),
-    HihatBranch(2, "tight_tip", (36, 112), 0.90),
-    HihatBranch(3, "closed_tip", (36, 112), 1.10),
-    HihatBranch(4, "loose_tip", (96,), 1.50),
-    HihatBranch(5, "open_1_tip", (96,), 2.00),
-    HihatBranch(6, "open_3_tip", (96,), 2.70),
-    HihatBranch(7, "open_5_tip", (96,), 3.50),
-    HihatBranch(8, "foot_splash", (112,), 3.20),
+    HihatBranch(1, "pedal_chick", (96,), 1.00),
+    HihatBranch(2, "tight_tip", (36, 112), 1.00),
+    HihatBranch(3, "closed_tip", (36, 112), 1.00),
+    HihatBranch(4, "loose_tip", (96,), 1.20),
+    HihatBranch(5, "open_1_tip", (96,), 1.30),
+    HihatBranch(6, "open_3_tip", (96,), 5.50),
+    HihatBranch(7, "open_5_tip", (96,), 5.80),
+    HihatBranch(8, "foot_splash", (112,), 5.30),
+)
+
+
+# The primary HHAT sound exhausts its eight Note-P positions.  Keep the edge
+# family in a second, Arduino-selected nested sound instead of sacrificing
+# bow openness or encoding articulation into velocity.  Position 8 adds the
+# missing bow open-4 transition, so all ten available layers remain useful.
+FLAGSHIP_HIHAT_EDGE_BRANCHES = (
+    HihatBranch(1, "tight_edge", (36, 112), 1.00),
+    HihatBranch(2, "closed_edge", (36, 112), 1.10),
+    HihatBranch(3, "loose_edge", (96,), 1.20),
+    HihatBranch(4, "open_1_edge", (96,), 1.30),
+    HihatBranch(5, "open_2_edge", (96,), 2.10),
+    HihatBranch(6, "open_3_edge", (96,), 5.80),
+    HihatBranch(7, "open_4_edge", (96,), 5.60),
+    HihatBranch(8, "open_4_tip", (96,), 5.60),
 )
 
 
@@ -110,7 +126,7 @@ def materialize_flagship_hihat(
 ) -> FlagshipHihatBuild:
     """Prepare an explicit eight-position/ten-layer sound without sending MIDI."""
     if not _SOUND_ID.fullmatch(sound_id):
-        raise ValueError("flagship hi-hat sound_id must be HHAT plus a three-digit number")
+        raise ValueError("sound_id must be an uppercase DDrum4 group and three-digit number")
     branch_tuple = tuple(branches)
     if tuple(branch.position for branch in branch_tuple) != tuple(range(1, 9)):
         raise ValueError("flagship hi-hat branches must declare positions 1..8 in order")

@@ -110,6 +110,10 @@ def build_parser() -> argparse.ArgumentParser:
     hihat.add_argument("--template", required=True, type=Path)
     hihat.add_argument("--quality-profile", required=True, type=Path)
     hihat.add_argument("--quality-name", default="ddrum4_hihat_flagship")
+    hihat.add_argument(
+        "--layout", choices=("bow", "edge"), default="bow",
+        help="bow/pedal primary sound or edge/open-4 nested companion",
+    )
     hihat.add_argument("--report", required=True, type=Path)
     allocation = subparsers.add_parser("compare-plan", help="compare offline quality-first and compact soundbank allocation plans")
     allocation.add_argument("plan", type=Path)
@@ -279,7 +283,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build-flagship-hihat":
         from drum_sampler.audio import load_quality_profile
         from drum_sampler.library import SampleLibrary
-        from .hihat_build import materialize_flagship_hihat
+        from .hihat_build import (
+            FLAGSHIP_HIHAT_BRANCHES,
+            FLAGSHIP_HIHAT_EDGE_BRANCHES,
+            materialize_flagship_hihat,
+        )
         if args.report.exists():
             raise FileExistsError(f"refusing to overwrite build report: {args.report}")
         profile = load_quality_profile(args.quality_profile, args.quality_name)
@@ -291,6 +299,11 @@ def main(argv: list[str] | None = None) -> int:
             instrument=args.instrument,
             template=args.template,
             profile=profile,
+            branches=(
+                FLAGSHIP_HIHAT_BRANCHES
+                if args.layout == "bow"
+                else FLAGSHIP_HIHAT_EDGE_BRANCHES
+            ),
         )
         backend = _backend(args.ddrum4edit)
         backend.build(build.config, build.sound)

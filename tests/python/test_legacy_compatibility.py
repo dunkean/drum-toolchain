@@ -136,3 +136,13 @@ class LegacyCompatibilityTests(unittest.TestCase):
                 "open_4_edge": 60,
             },
         )
+        bow = CaptureSessionPlan.read(
+            ROOT / "profiles/capture/sd3-djentle-beast-hihat-ddrum-selected-digital.json"
+        )
+        edge = CaptureSessionPlan.read(
+            ROOT / "profiles/capture/sd3-djentle-beast-hihat-edge-selected-digital.json"
+        )
+        self.assertTrue(bow.audio_input.startswith("loopback:"))
+        self.assertTrue(edge.audio_input.startswith("loopback:"))
+        self.assertEqual(len(bow.takes()), 10)
+        self.assertEqual(len(edge.takes()), 10)
