@@ -37,5 +37,9 @@ guess a dump-request frame from other ddrum products or newer DDTi models.
 ## Next evidence required
 
 Capture a panel-initiated dump using the documented procedure in
-[`DDTI_CAPTURE.md`](DDTI_CAPTURE.md).  Only then can this document name the
+[`DDTI_CAPTURE.md`](DDTI_CAPTURE.md).  The legacy
+[owner's manual](https://www.ddrum.com/images/manuals/DDTi%20manual.pdf)
+documents **FUNCTION UP + VALUE UP** as the action that requests a Data Dump
+and transfers all presets to the SysEx application.  This is the only panel
+operation the capture workflow uses.  Only a real capture can establish the
 observed manufacturer ID, packet sequence, and candidate checksum rules.

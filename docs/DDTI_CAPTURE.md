@@ -16,20 +16,25 @@ identified MIDI input (`TriggerIO 30`) and never opens `TriggerIO 10`.
    ddti dump captures/factory_dump_001 --input TriggerIO --listen --seconds 90 --idle-seconds 5
    ```
 
-4. Only after the listener says it is active, perform the DDTi's documented
-   **panel SysEx transmit/export** operation.  Do not use a guessed inbound
-   request.  If the panel procedure is not known, stop here and consult the
-   DDTi manual; this project has not yet verified a button sequence.
-5. Let the transfer complete and wait for the capture command to finish after
+4. Only after the listener says it is active, press **FUNCTION UP** and
+   **VALUE UP** simultaneously on the DDTi front panel, then release both.
+   The legacy [DDTi owner's manual](https://www.ddrum.com/images/manuals/DDTi%20manual.pdf)
+   documents this exact combination as a Data Dump request which transfers all
+   presets to the connected SysEx application over USB or MIDI.  This is a
+   documented panel action, not a PC-to-DDTi SysEx command; the actual received
+   bytes remain unverified until the capture finishes.
+5. Do not press **VALUE DOWN**, do not power-cycle the DDTi, and do not use the
+   simultaneous **VALUE UP + VALUE DOWN** power-on operation (factory reset).
+6. Let the transfer complete and wait for the capture command to finish after
    five seconds of inactivity.
-6. Inspect the three new artifacts and their SHA-256 hash:
+7. Inspect the three new artifacts and their SHA-256 hash:
 
    ```powershell
    Get-Content captures/factory_dump_001.json
    Get-Content captures/factory_dump_001.hex
    ```
 
-7. Before changing a single panel value, create two byte-identical copies
+8. Before changing a single panel value, create two byte-identical copies
    outside version control, one explicitly named `golden`:
 
    ```powershell

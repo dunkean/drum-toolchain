@@ -24,9 +24,11 @@ python -m ddti monitor --input TriggerIO --output captures/monitor.jsonl
 
 ## First safe capture
 
-No command sends MIDI or SysEx.  Start the listener first, then trigger the
-DDTi's *documented panel dump/export operation*.  Do not guess a request
-message and do not use an update utility.
+No command sends MIDI or SysEx.  Start the listener first, then press
+**FUNCTION UP** and **VALUE UP** simultaneously on the DDTi.  The legacy DDTi
+owner's manual documents this as a transfer of all presets to the connected
+SysEx application over USB or MIDI.  Do not use a firmware updater or send a
+guessed request message.
 
 ```powershell
 ddti dump captures/factory_dump_001 --input TriggerIO --listen --seconds 90 --idle-seconds 5
