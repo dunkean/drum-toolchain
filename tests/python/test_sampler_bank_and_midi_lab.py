@@ -118,10 +118,11 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
                 library, raw_directory=raw, output_directory=root / "build", sound_id="CYMB_777",
                 instrument="crash", template=template,
                 profile=QualityProfile(trim_threshold_db=-80, force_mono=True, max_duration_seconds=0.05),
-                velocities=(56,),
+                velocities=(56,), layer_durations=(0.04,),
             )
             self.assertEqual(build.layers[0].raw_file, "best.wav")
             self.assertEqual(build.layers[0].channels, 1)
+            self.assertEqual(build.layers[0].max_duration_seconds, 0.04)
             self.assertTrue(build.config.is_file())
             self.assertTrue((root / "build" / "CYMB_777_s01.wav").is_file())
 

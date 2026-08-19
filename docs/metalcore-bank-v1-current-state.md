@@ -64,9 +64,21 @@ audition remains required before promotion. The owner deleted the obsolete
 `SNRE_950` candidate and then measured `MEM.LEFT = 5.97` with `SNRE_949` still
 installed. Relative to the verified-core baseline of 6.88, the module therefore
 accounts for about 910 blocks for 949, matching the 911-message build closely.
-The owner subsequently confirmed that `SNRE_949` sounds correct; it is now the
-accepted flagship snare candidate. Retain the compact `SNRE_998` only until
-the final palette is assembled.
+The owner initially confirmed the length of `SNRE_949`, but later analogue
+noise analysis showed why its low layers could sound like hiss: every raw take
+had an approximately -95 dBFS input noise floor, which normalisation raised to
+about -59 dBFS for velocity 24. It was therefore superseded rather than kept.
+
+`SNRE_943` uses the same five-velocity by two-position matrix and the same
+1.8-second preparation, captured directly from the WASAPI render endpoint.
+All ten source files have exact digital silence before the hit and the final
+100 ms of every prepared WAV is also exactly silent. Its 911 packets were
+transferred with receipt
+`D:\Studio\ddrum4-transfers\snre-943-positional-digital-c1-20260819.json`.
+The owner approved its decay, dynamics and positional behavior, then deleted
+949. Its measured module cost is exactly 0.91 (`MEM.LEFT` 3.38 to 2.47 on
+installation, then back to 3.38 after deleting 949). `SNRE_943` is the
+accepted flagship snare.
 
 ## Hi-hat source correction
 
@@ -98,8 +110,9 @@ are chick, tight bow, closed bow, loose bow, open 1, open 3, open 5 and foot
 splash. Tight and closed each have soft/hard timbres, for ten layers total.
 All 902 encoded packets were transferred through the UMC and the owner
 confirmed that the positions sound correct, have natural tails and no hiss.
-`MEM.LEFT` changed from 5.97 to 4.18, so its authoritative module cost is
-1,790 blocks. The transfer receipt is
+The module reported `MEM.LEFT = 4.18` after installation. That reading also
+included the rejected analogue 948 candidate, so it must not be used to claim
+an isolated 947 cost. The transfer receipt is
 `D:\Studio\ddrum4-transfers\hhat-947-flagship-digital-c2-20260819.json`.
 
 Eight positions cannot also hold a useful edge family without removing bow
@@ -112,8 +125,15 @@ the missing open-4 bow transition. `CYMB_946` compiles these as eight Note-P
 positions and ten layers. It reports 1,059 encoded blocks and was transferred
 successfully with receipt
 `D:\Studio\ddrum4-transfers\cymb-946-hihat-edge-digital-c1-20260819.json`.
-Hardware assignment, listening and the new `MEM.LEFT` reading are still
-required before accepting it.
+The owner assigned it to CYMB1 with `Note P = 8` and confirmed that all eight
+positions sound correct, without hiss or cut tails. `MEM.LEFT` changed from
+4.18 to 3.20, so its authoritative cost is 980 blocks. It is now the accepted
+edge companion.
+
+The live palette note ranges were verified directly: CYMB1 `G#5` is MIDI
+80..87, CYMB2 `E6` is MIDI 88..95 and HHAT `C7` is MIDI 96..103. These
+adjacent eight-note ranges must remain non-overlapping in the generated
+Arduino routing contract.
 
 ## New isolated cymbal reference
 
@@ -167,6 +187,30 @@ new musical crash tail. Do not call either crash a finished metalcore sound
 until SD3 is captured through a mixer/output configuration with a genuine
 longer tail, or a different approved source is selected.
 
+## Direct digital flagship crashes
+
+The clean direct-render library is
+`D:\Studio\sample-library\sd3-modern-metal-djentle-beast\crashes-selected-digital-c1`.
+It contains seven velocities each for notes 49 and 57. Strong-hit material
+remains above -90 dBFS for about 5.1 and 5.2 seconds respectively, with exact
+digital silence outside the render.
+
+The first `CYMB_945` build used velocity-dependent windows from 0.7 to 5.2
+seconds. Hardware listening rejected it because panel and medium hits selected
+audibly short layers. It was deleted. The accepted c2 build gives all seven
+layers a fixed 6.5-second window and disables tail trimming; silence after the
+natural SD3 decay is cheap, clean safety margin rather than analogue noise.
+It encodes to 2,283 blocks and was transferred with receipt
+`D:\Studio\ddrum4-transfers\cymb-945-crash1-digital-long-c2-20260819.json`.
+The owner confirmed that the long crash sounds correct. `MEM.LEFT` is 1.87,
+although its isolated cost was not measured because the short 945 was deleted
+between readings.
+
+`CYMB_944` c2 has been built offline from the second crash with the identical
+seven-layer/6.5-second policy and also encodes to 2,283 blocks. It must not be
+transferred until obsolete `CYMB_994` and `CYMB_995` are deleted and the new
+free-memory reading confirms sufficient space.
+
 ## Palette target after listening gates
 
 The stable roles remain:
@@ -182,11 +226,9 @@ the Arduino contract stable while palette assignments evolve.
 
 ## Next soundbank actions
 
-1. Assign and audition the transferred `CYMB_946` edge companion, then record
-   its real module cost. Keep `HHAT_947` unchanged as the accepted bow/pedal
-   family.
-2. Capture/select an SD3 crash source with a measured musical tail beyond four
-   seconds, then create two seven-layer flagship crashes with an audited
-   velocity layout.
-3. Build the palette assignment only after the three flagship families
-   (snare, hi-hat, crashes) have passed their own listening gates.
+1. Delete obsolete compact crashes 994 and 995, record `MEM.LEFT`, then
+   transfer and audition the already-built long `CYMB_944`.
+2. Build the palette assignment after the two flagship crashes pass their
+   listening gates.
+3. Continue with ride and auxiliary nested cymbals under the remaining measured
+   budget; retain compact ride sounds 987..989 until their replacement passes.

@@ -1,7 +1,7 @@
 """Reproducible offline preparation of a flagship multi-layer DDrum cymbal."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
 import re
@@ -19,6 +19,7 @@ _SOUND_ID = re.compile(r"^[A-Z0-9]{3,4}_[0-9]{3}$")
 @dataclass(frozen=True)
 class PreparedCymbalLayer:
     velocity: int
+    max_duration_seconds: float | None
     raw_file: str
     prepared_file: str
     raw_peak_dbfs: float
@@ -67,6 +68,7 @@ def materialize_flagship_cymbal(
     template: Path,
     profile: QualityProfile,
     velocities: Sequence[int],
+    layer_durations: Sequence[float] | None = None,
 ) -> FlagshipCymbalBuild:
     """Prepare selected raw takes and emit a ddrum4edit config, never MIDI.
 
@@ -79,6 +81,13 @@ def materialize_flagship_cymbal(
         raise ValueError("sound_id must be an uppercase DDrum4 group and three-digit number")
     if not 1 <= len(velocities) <= 7 or len(set(velocities)) != len(velocities):
         raise ValueError("flagship cymbal needs 1..7 unique velocity layers")
+    durations = (
+        tuple(profile.max_duration_seconds for _ in velocities)
+        if layer_durations is None
+        else tuple(float(value) for value in layer_durations)
+    )
+    if len(durations) != len(velocities) or any(value is not None and value <= 0 for value in durations):
+        raise ValueError("layer_durations must contain one positive duration per velocity")
     # Validate before processing any WAV so an unreviewed partial curve never
     # leaves a half-built directory on disk.
     layer_rows = cymbal_velocity_layers(len(velocities))
@@ -92,7 +101,7 @@ def materialize_flagship_cymbal(
     layers: list[PreparedCymbalLayer] = []
     sample_files: list[str] = []
     output_directory.mkdir(parents=True)
-    for index, velocity in enumerate(velocities, 1):
+    for index, (velocity, duration) in enumerate(zip(velocities, durations), 1):
         candidates = [
             take for take in library.takes
             if take.instrument == instrument and take.velocity == velocity and take.status == "captured"
@@ -104,10 +113,15 @@ def materialize_flagship_cymbal(
         if not raw.is_file():
             raise FileNotFoundError(f"captured raw take is missing: {raw}")
         prepared_name = f"{sound_id}_s{index:02d}.wav"
-        facts = process_wav(raw, output_directory / prepared_name, profile)
+        facts = process_wav(
+            raw,
+            output_directory / prepared_name,
+            replace(profile, max_duration_seconds=duration),
+        )
         sample_files.append(prepared_name)
         layers.append(PreparedCymbalLayer(
             velocity=velocity,
+            max_duration_seconds=duration,
             raw_file=take.raw_file,
             prepared_file=prepared_name,
             raw_peak_dbfs=take.peak_dbfs,

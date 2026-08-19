@@ -98,3 +98,19 @@ profiles:
     lowpass_hz: 15500
     max_duration_seconds: 4.5
     force_mono: true
+  ddrum4_crash_flagship:
+    # Direct WASAPI loopback is digitally silent after the SD3 render. Keep
+    # each selected decay down to -90 dB; the builder supplies a shorter bound
+    # for soft layers and the full measured tail for hard layers.
+    target_sample_rate: 44100
+    trim_threshold_db: -90
+    normalize_dbfs: -2.0
+    fade_in_ms: 1.0
+    fade_out_ms: 30.0
+    highpass_hz: 30
+    lowpass_hz: 17000
+    force_mono: true
+    # Keep a fixed silent safety window after the natural SD3 decay. Hardware
+    # listening showed that velocity-dependent trimming makes panel and soft
+    # hits feel unnaturally short even when the hard source tail is intact.
+    trim_tail: false

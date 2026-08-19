@@ -75,7 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     cymbal.add_argument("--template", required=True, type=Path)
     cymbal.add_argument("--quality-profile", required=True, type=Path)
     cymbal.add_argument("--quality-name", default="ddrum4_cymbal_flagship")
-    cymbal.add_argument("--velocities", type=int, nargs="+", default=[56, 88, 110, 127])
+    cymbal.add_argument("--velocities", type=int, nargs="+", default=[24, 40, 56, 72, 88, 110, 127])
+    cymbal.add_argument(
+        "--layer-durations", type=float, nargs="+",
+        help="one maximum duration per velocity; preserves long hard tails without bloating soft layers",
+    )
     cymbal.add_argument("--max-duration-seconds", type=float)
     cymbal.add_argument("--trim-threshold-db", type=float)
     cymbal.add_argument("--report", required=True, type=Path)
@@ -249,12 +253,13 @@ def main(argv: list[str] | None = None) -> int:
             output_directory=args.output_directory, sound_id=args.sound_id,
             instrument=args.instrument, template=args.template,
             profile=replace(profile, **overrides), velocities=args.velocities,
+            layer_durations=args.layer_durations,
         )
         backend = _backend(args.ddrum4edit)
         backend.build(build.config, build.sound)
         blocks = backend.encoded_blocks(build.sound)
         build.write_report(args.report, blocks)
-        print(f"built {build.sound_id}: {blocks} blocks at {build.profile.max_duration_seconds}s; wrote {args.report}")
+        print(f"built {build.sound_id}: {blocks} blocks / {len(build.layers)} layers; wrote {args.report}")
         return 0
     if args.command == "build-positional-snare":
         from drum_sampler.audio import load_quality_profile
