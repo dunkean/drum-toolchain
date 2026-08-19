@@ -9,6 +9,7 @@ from .capture import capture_dump
 from .diff import diff_files, render_diff
 from .discovery import discover_devices
 from .monitor import monitor
+from .protocol import decode_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     comparison = commands.add_parser("diff", help="offline byte-level diff of two complete .syx streams")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
+    decode = commands.add_parser("decode", help="inspect observed legacy DDTi packet structure offline")
+    decode.add_argument("dump", type=Path)
     return parser
 
 
@@ -54,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         result = capture_dump(args.input, args.stem, seconds=args.seconds, idle_seconds=args.idle_seconds)
         print(json.dumps({"syx": str(result.syx_path), "hex": str(result.hex_path), "metadata": str(result.metadata_path), "sha256": result.sha256, "messages": result.message_count}, indent=2))
-    else:
+    elif args.command == "diff":
         print(render_diff(diff_files(args.before, args.after)), end="")
+    else:
+        print(json.dumps(decode_file(args.dump).to_document(), indent=2, sort_keys=True))
     return 0

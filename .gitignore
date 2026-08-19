@@ -27,6 +27,8 @@ _deps/
 .piolibdeps/
 
 # Generated, local, and hardware artifacts
+captures/*
+!captures/README.md
 contracts/generated/*
 !contracts/generated/.gitkeep
 firmware/ddrum4-midi-bridge/generated/*

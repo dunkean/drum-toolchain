@@ -20,6 +20,7 @@ Or run directly from a checkout:
 $env:PYTHONPATH = 'apps/ddti/src'
 python -m ddti devices
 python -m ddti monitor --input TriggerIO --output captures/monitor.jsonl
+python -m ddti decode captures/factory_dump_001.syx
 ```
 
 ## First safe capture

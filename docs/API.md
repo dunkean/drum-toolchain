@@ -28,6 +28,16 @@ frames = parse_stream(Path("captures/factory_dump_001.syx").read_bytes())
 differences = diff_files(Path("dump_a.syx"), Path("dump_b.syx"))
 ```
 
+For the captured legacy DDTi framing, use the lossless structural decoder:
+
+```python
+from ddti import decode_dump
+
+dump = decode_dump(Path("captures/factory_dump_001.syx").read_bytes())
+assert b"".join(packet.raw for packet in dump.packets) == dump.raw
+print(dump.family_indexes())  # {1: (0, ..., 20), 2: (0, ..., 10)}
+```
+
 The `ddti` command provides the corresponding `devices`, `info`, `monitor`,
-`dump`, and `diff` commands.  There is deliberately no `set`, `restore`, or
-`write` command yet.
+`dump`, `decode`, and `diff` commands.  There is deliberately no `set`,
+`restore`, or `write` command yet.

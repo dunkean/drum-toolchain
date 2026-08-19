@@ -12,6 +12,7 @@ if str(DDTI_SOURCE) not in sys.path:
 from ddti.capture import _receive_mido_sysex, capture_dump
 from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
+from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
 
@@ -51,7 +52,15 @@ class DDTiTests(unittest.TestCase):
             before, after = root / "a.syx", root / "b.syx"
             before.write_bytes(bytes.fromhex("F0 01 F7"))
             after.write_bytes(bytes.fromhex("F0 02 F7"))
-            self.assertEqual(diff_files(before, after)[0].offset, 1)
+            # Generic malformed-to-DDTi framing is intentionally rejected by the DDTi-aware file diff.
+            with self.assertRaisesRegex(ValueError, "too short|manufacturer"):
+                diff_files(before, after)
+            before.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 01 F7"))
+            after.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 02 F7"))
+            change = diff_files(before, after)[0]
+            self.assertEqual(change.offset, 11)
+            self.assertEqual(change.observed_packet_family, 1)
+            self.assertIn("family 0x01", render_diff((change,)))
 
     def test_capture_writes_hashed_triad_without_overwriting(self) -> None:
         import mido
@@ -99,3 +108,13 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(main(["dump", str(Path(temporary) / "dump"), "--input", "TriggerIO", "--listen"]), 0)
         output = "".join(str(call.args[0]) for call in stdout.write.call_args_list)
         self.assertIn("never opens a MIDI output", output)
+
+    def test_observed_packet_decoder_preserves_raw_stream_and_groups_families(self) -> None:
+        first = bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 01 F7")
+        second = bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 02 03 02 F7")
+        dump = decode_dump(first + second)
+        self.assertEqual(dump.raw, first + second)
+        self.assertEqual(dump.family_indexes(), {1: (0,), 2: (3,)})
+        self.assertEqual(dump.to_document()["packet_lengths"], {13: 2})
+        with self.assertRaisesRegex(ValueError, "manufacturer"):
+            decode_dump(bytes.fromhex("F0 01 02 03 2C 0D 00 00 0A 01 00 01 F7"))
