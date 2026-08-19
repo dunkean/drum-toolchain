@@ -12,6 +12,10 @@ dependencies = [
   "python-rtmidi>=1.5,<2",
 ]
 
+[project.optional-dependencies]
+api = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
+gui = ["PySide6>=6.8,<7"]
+
 [project.scripts]
 ddti = "ddti.cli:main"
 

@@ -1,9 +1,9 @@
 # DDTi Python API
 
-The DDTi API is intentionally read-first.  It does not yet expose REST or GUI
-layers because the required dump format and safe write framing are unknown.
-Those layers will call this package rather than duplicate protocol logic once
-the round-trip decoder is validated.
+The DDTi API is intentionally read-first. The local REST API and desktop GUI
+operate on an explicit, already-captured dump; they never open a MIDI output or
+write to the module. They call the central library rather than duplicate its
+protocol decoding.
 
 ```python
 from ddti import DDTi, discover_devices
@@ -54,3 +54,31 @@ assert encode_configuration(preview) != encode_configuration(config)
 The `ddti` command provides the corresponding `devices`, `info`, `monitor`,
 `dump`, `decode`, and `diff` commands.  There is deliberately no `set`,
 `restore`, or `write` command yet.
+
+## Local REST API
+
+Install `ddti[api]`, then run:
+
+```powershell
+ddti serve captures/factory_dump_001.syx
+```
+
+The service binds to `127.0.0.1:8765` by default and exposes:
+
+| Method | Path | Behaviour |
+| --- | --- | --- |
+| GET | `/device`, `/device/status` | OS/MIDI discovery only |
+| GET | `/configuration`, `/kits`, `/kits/{kit}` | decoded captured configuration |
+| GET | `/kits/{kit}/inputs/{input}` | one decoded input |
+| PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
+
+The PATCH response explicitly states `hardware_write: disabled`. Restarting
+the service discards staged changes unless they have been exported through the
+offline GUI.
+
+## Desktop GUI
+
+Install `ddti[gui]`, then run `ddti gui captures/factory_dump_001.syx`.
+The PySide6 editor provides a compact 10-input Tip/Ring table for Kit 0, staged
+note editing, and a non-overwriting local file export. Its **Write to DDTi**
+control is disabled by design.

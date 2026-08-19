@@ -14,6 +14,14 @@ ddti devices
 ddti info
 ```
 
+Optional local interfaces are deliberately separate from the core library:
+
+```powershell
+python -m pip install -e 'apps/ddti[api,gui]'
+ddti serve captures/factory_dump_001.syx
+ddti gui captures/factory_dump_001.syx
+```
+
 Or run directly from a checkout:
 
 ```powershell
@@ -46,3 +54,8 @@ Copy-Item captures/factory_dump_001.json captures/factory_dump_001.golden.json
 
 See [`docs/DDTI_CAPTURE.md`](../../docs/DDTI_CAPTURE.md) for the exact safe
 workflow and the hardware evidence currently known.
+
+The FastAPI service and PySide6 table both edit only an offline, staged dump.
+They expose confirmed MIDI notes and observed channel bytes, but have no
+hardware-write path until the remaining protocol fields are experimentally
+validated.

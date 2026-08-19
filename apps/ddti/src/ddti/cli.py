@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     comparison.add_argument("after", type=Path)
     decode = commands.add_parser("decode", help="inspect observed legacy DDTi packet structure offline")
     decode.add_argument("dump", type=Path)
+    api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
+    api.add_argument("dump", type=Path)
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8765)
+    gui = commands.add_parser("gui", help="run the optional offline PySide6 note editor")
+    gui.add_argument("dump", type=Path)
     return parser
 
 
@@ -90,9 +96,19 @@ def main(argv: list[str] | None = None) -> int:
         ], indent=2))
     elif args.command == "diff":
         print(render_diff(diff_files(args.before, args.after)), end="")
-    else:
+    elif args.command == "decode":
         dump = decode_file(args.dump)
         document = dump.to_document()
         document["configuration"] = decode_configuration(dump).to_document()
         print(json.dumps(document, indent=2, sort_keys=True))
+    elif args.command == "serve":
+        from .api import create_app
+        try:
+            import uvicorn
+        except ImportError as error:
+            raise RuntimeError("install the 'ddti[api]' extra to run the local API") from error
+        uvicorn.run(create_app(args.dump), host=args.host, port=args.port)
+    else:
+        from .gui import launch
+        return launch(args.dump)
     return 0
