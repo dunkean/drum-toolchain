@@ -90,6 +90,16 @@ is disabled. The former golden-replay difference `01 7F -> 01 00` therefore
 canonicalised unused storage without enabling Program Change or changing any
 functional configuration.
 
+## Controlled write validation
+
+A hash-locked 42-frame transfer was built from the complete factory golden,
+canonicalised disabled Program Changes to `01 00`, and changed only Kit 0 /
+Input 1 Tip Note from `35` to `36`. It was sent at 50 ms per frame. The next
+panel dump was byte-identical to the sent stream (2,016 bytes, SHA-256
+`c14e5136f3db716d3ad85986c9d1b5c6b72346d976132c537b0abfa323ee1cdb`).
+This is a strict write PASS for confirmed MIDI-note fields. It does not by
+itself validate writes to remaining raw trigger fields.
+
 ## Unknown protocol fields
 
 | Field | Status |

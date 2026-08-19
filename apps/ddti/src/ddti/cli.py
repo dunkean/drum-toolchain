@@ -13,7 +13,7 @@ from .models import decode_configuration
 from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
-from .transfer import build_note_write_validation_plan, build_transfer_plan_from_file
+from .transfer import build_note_write_validation_plan, build_transfer_plan_from_file, send_note_write_validation
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -71,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
     note_write_plan = commands.add_parser("prepare-note-write-test", help="prepare the fixed golden-based Note 35->36 validation payload offline; never sends MIDI")
     note_write_plan.add_argument("golden", type=Path)
     note_write_plan.add_argument("output", type=Path, help="new staged .syx file; existing files are refused")
+    note_write = commands.add_parser("run-note-write-test", help="send only the hash-locked Note 35->36 hardware validation payload")
+    note_write.add_argument("staged", type=Path)
+    note_write.add_argument("--output", required=True, help="unique DDTi MIDI output name or substring")
+    note_write.add_argument("--expected-sha256", required=True)
+    note_write.add_argument("--confirm", required=True, help="must be I_AUTHORIZE_DDTI_NOTE_35_TO_36")
+    note_write.add_argument("--inter-message-ms", type=float, default=50)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -181,6 +187,16 @@ def main(argv: list[str] | None = None) -> int:
         plan = build_note_write_validation_plan(args.golden.read_bytes())
         args.output.write_bytes(plan.raw)
         print(json.dumps({"staged_syx": str(args.output), "sha256": plan.sha256, "packet_count": len(plan.dump.packets), "hardware_write": "disabled"}, indent=2))
+    elif args.command == "run-note-write-test":
+        plan = build_transfer_plan_from_file(args.staged)
+        result = send_note_write_validation(
+            plan,
+            args.output,
+            expected_sha256=args.expected_sha256,
+            confirmation=args.confirm,
+            inter_message_ms=args.inter_message_ms,
+        )
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
     elif args.command == "serve":
         from .api import create_app
         try:

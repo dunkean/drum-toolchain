@@ -14,14 +14,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from .protocol import DDTiDump, decode_dump
 from .device import ProtocolNotValidatedError
 from .models import decode_configuration
+from .sysex import parse_stream
 
 
 _COMPLETE_FAMILIES = {1: tuple(range(21)), 2: tuple(range(21))}
 FACTORY_GOLDEN_SHA256 = "43c64c486f72ec349c5ebee4020ef9e176f5d64033118f95fb25f6f81f84c70f"
+NOTE_WRITE_VALIDATION_SHA256 = "c14e5136f3db716d3ad85986c9d1b5c6b72346d976132c537b0abfa323ee1cdb"
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,51 @@ def build_note_write_validation_plan(raw: bytes) -> DDTiTransferPlan:
         raise ValueError("factory golden does not contain expected Kit 0 / Input 1 Tip note 35")
     staged = configuration.canonicalize_disabled_program_changes().with_note(0, 1, "tip", 36)
     return build_transfer_plan(staged.raw)
+
+
+def _resolve_output(query: str) -> str:
+    import mido
+
+    names = list(mido.get_output_names())
+    exact = [name for name in names if name.casefold() == query.casefold()]
+    matches = exact or [name for name in names if query.casefold() in name.casefold()]
+    if len(matches) != 1:
+        raise ValueError(f"expected exactly one MIDI output matching {query!r}; found {matches}")
+    return matches[0]
+
+
+def send_note_write_validation(
+    plan: DDTiTransferPlan,
+    output_query: str,
+    *,
+    expected_sha256: str,
+    confirmation: str,
+    inter_message_ms: float = 50,
+) -> DDTiTransferResult:
+    """Send only the fixed, reviewed Note 35->36 validation payload.
+
+    This is not a generic writer. Both the compiled-in payload hash and the
+    caller-reviewed hash must match, the dedicated confirmation token is
+    mandatory, and timing cannot be reduced below the 50 ms validation rate.
+    """
+    if plan.sha256 != NOTE_WRITE_VALIDATION_SHA256:
+        raise ValueError("payload is not the fixed Note 35->36 validation stream")
+    if expected_sha256.casefold() != NOTE_WRITE_VALIDATION_SHA256:
+        raise ValueError("expected SHA-256 does not match the fixed validation stream")
+    if confirmation != "I_AUTHORIZE_DDTI_NOTE_35_TO_36":
+        raise ValueError("dedicated Note 35->36 confirmation token is required")
+    if inter_message_ms < 50:
+        raise ValueError("validation transfer requires at least 50 ms between messages")
+
+    import mido
+
+    name = _resolve_output(output_query)
+    frames = parse_stream(plan.raw)
+    with mido.open_output(name) as output:
+        for frame in frames:
+            output.send(mido.Message("sysex", data=frame.data))
+            time.sleep(inter_message_ms / 1000)
+    return DDTiTransferResult(name, len(frames), len(plan.raw), plan.sha256)
 
 
 def send_reviewed_transfer(

@@ -19,7 +19,7 @@ from ddti.presets import load_document
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
-from ddti.transfer import build_note_write_validation_plan, build_transfer_plan, send_reviewed_transfer
+from ddti.transfer import build_note_write_validation_plan, build_transfer_plan, send_note_write_validation, send_reviewed_transfer
 
 
 class _InputPort:
@@ -360,6 +360,27 @@ class DDTiTests(unittest.TestCase):
                 send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_UNDERSTAND_DDTI_WRITE")
         open_output.assert_not_called()
         self.assertEqual(output.messages, [])
+
+    def test_note_write_validation_rejects_any_unreviewed_payload_before_output(self) -> None:
+        kits = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + (bytes((9, 35, 3)) * 20) + bytes(6) + bytes((0xF7,))
+            for index in range(21)
+        )
+        globals_ = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
+        plan = build_transfer_plan(kits + globals_)
+        output = _OutputPort()
+        with patch("mido.open_output", return_value=output) as open_output:
+            with self.assertRaisesRegex(ValueError, "not the fixed"):
+                send_note_write_validation(
+                    plan,
+                    "TriggerIO",
+                    expected_sha256=plan.sha256,
+                    confirmation="I_AUTHORIZE_DDTI_NOTE_35_TO_36",
+                )
+        open_output.assert_not_called()
 
     def test_cli_has_no_hardware_transfer_command(self) -> None:
         with self.assertRaises(SystemExit) as error:

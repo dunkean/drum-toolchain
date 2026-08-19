@@ -51,6 +51,7 @@ Confidence levels:
 | 2026-08-19 | Final reset verification after Threshold test | `factory_reset_verification_002_full` is byte-identical to `factory_dump_002_full.golden` (2,016 bytes / SHA-256 `43c64c48…1f84c70f`) | hardware restored exactly to the complete factory baseline |
 | 2026-08-19 | Authorised full-golden PC round trip | replayed the exact 42-frame, 2,016-byte factory golden; the following dump differed at Family `01` body `+0x41` in indexes `00`–`13`, each `7F→00`; known note, channel, Gain and Threshold bytes were unchanged | PC sending is disabled; the user factory-reset the module afterwards and requested no repeated verification dumps |
 | 2026-08-19 | Kit 1 Program Change `---→0→1` | two complete 42-frame dumps: `+0x40/+0x41` encoded `01 7F` for `---`, `00 00` for `0`, and `00 01` for `1`; no other bytes changed | former round-trip anomaly identified as canonicalisation of an ignored disabled value; controlled Note write can proceed |
+| 2026-08-19 | Controlled PC write: Kit 0/Input 1 Tip Note `35→36` | sent 42 frames / 2,016 bytes at 50 ms intervals after canonicalising disabled Program Changes; sent and returned dumps are byte-identical, SHA-256 `c14e5136…1cdb` | strict hardware write PASS for confirmed notes and canonical disabled Program Change storage; user factory-reset afterwards |
 
 Do not record a semantic field interpretation here without linking it to the
 two raw captures, their hashes, the exact single panel change, and restoration
