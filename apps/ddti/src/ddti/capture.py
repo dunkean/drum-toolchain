@@ -117,9 +117,15 @@ def _require_complete_ddti_dump(raw: bytes) -> None:
     dump = decode_dump(raw)
     expected = tuple(range(21))
     if dump.family_indexes() != {1: expected, 2: expected}:
+        families = dump.family_indexes()
+        details = "; ".join(
+            f"family {family}: received {len(families.get(family, ()))}/21, "
+            f"missing {sorted(set(expected) - set(families.get(family, ())))}"
+            for family in (1, 2)
+        )
         raise ValueError(
             "incomplete DDTi panel dump: expected 21 kit and 21 global-trigger packets; "
-            "no capture artifact was written"
+            f"{details}; no capture artifact was written"
         )
 
 

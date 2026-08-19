@@ -7,9 +7,9 @@ lossless legacy DDTi dump can ever be considered for transfer.
 An exact golden-dump round trip initially normalised one byte in each of the
 first twenty kit frames. Controlled panel tests proved it is the ignored value
 of a disabled Program Change. Subsequent Note, Program/Gain, and grouped
-five-setting Input 1 Tip transfers were returned byte-identically. The safe
-writer therefore permits only confirmed field offsets and observed values,
-and keeps unrestricted raw replay hard-disabled.
+trigger-setting transfers were returned byte-identically; a controlled panel
+dump mapped PP and SS to raw 0 and 33. The safe writer permits modeled fields
+within their validated ranges and keeps unrestricted raw replay hard-disabled.
 """
 from __future__ import annotations
 
@@ -87,7 +87,13 @@ class DDTiSafeWritePlan:
             "byte_count": len(self.raw),
             "packet_count": len(self.transfer.dump.packets),
             "changed_bytes": len(self.differences),
-            "allowed_fields": ["kit MIDI notes", "kit Program Change", "validated Input 1 Tip settings"],
+            "allowed_fields": [
+                "kit MIDI channels and notes",
+                "kit hi-hat routing",
+                "kit Program Change",
+                "global trigger response settings",
+                "PP/SS trigger type",
+            ],
             "hardware_write": "requires explicit confirmation",
         }
 
@@ -116,36 +122,40 @@ def build_safe_write_plan(source_raw: bytes, candidate_raw: bytes) -> DDTiSafeWr
     candidate_plan = build_transfer_plan(candidate.raw)
 
     allowed_offsets = {
-        zone.raw_note_offset
+        offset
         for kit in source.kits
         for input_ in kit.inputs
         for zone in (input_.tip, input_.ring)
+        for offset in (zone.raw_channel_offset, zone.raw_note_offset)
     }
     for kit in source.kits:
-        allowed_offsets.add(kit.raw_program_change_disabled_offset)
-        allowed_offsets.add(kit.raw_program_change_value_offset)
-    input_1_tip_offsets = source.global_trigger_records[0].raw_offsets[:5]
-    allowed_offsets.update(input_1_tip_offsets)
+        allowed_offsets.update((
+            kit.hi_hat.raw_pedal_channel_offset,
+            kit.hi_hat.raw_pedal_note_offset,
+            kit.hi_hat.raw_closed_note_offset,
+            kit.raw_program_change_disabled_offset,
+            kit.raw_program_change_value_offset,
+        ))
+    for record in source.global_trigger_records:
+        allowed_offsets.update(record.raw_offsets[:5])
+        if record.index != 20:
+            allowed_offsets.add(record.raw_offsets[5])
 
     for kit in candidate.kits:
         if kit.program_change_disabled_raw not in {0, 1}:
             raise ValueError(f"Kit {kit.number} Program Change disabled flag must be 0 or 1")
         if kit.program_change_disabled_raw == 1 and candidate.raw[kit.raw_program_change_value_offset] != 0:
             raise ValueError(f"Kit {kit.number} disabled Program Change must use canonical value 0")
-    observed_write_values = {
-        "gain": {15, 16},
-        "velocity_curve": {6, 7},
-        "threshold": {5, 7},
-        "xtalk": {1, 4},
-        "retrigger": {10, 14},
-    }
-    source_settings = source.input_1_tip_settings
-    candidate_settings = candidate.input_1_tip_settings
-    for field, allowed_values in observed_write_values.items():
-        if source_settings[field] != candidate_settings[field] and candidate_settings[field] not in allowed_values:
-            ordered = sorted(allowed_values)
-            values = f"{ordered[0]} and {ordered[1]}" if len(ordered) == 2 else ", ".join(map(str, ordered))
-            raise ValueError(f"Input 1 Tip {field} writes are currently validated only for values {values}")
+    for source_record, candidate_record in zip(
+        source.global_trigger_records, candidate.global_trigger_records, strict=True
+    ):
+        if (
+            source_record.trigger_type_raw != candidate_record.trigger_type_raw
+            and candidate_record.trigger_type_raw not in {0, 33}
+        ):
+            raise ValueError(
+                f"{candidate_record.label} Trigger Type writes are validated only for PP and SS"
+            )
 
     differences = diff_ddti_bytes(source.raw, candidate.raw)
     forbidden = [difference for difference in differences if difference.offset not in allowed_offsets]

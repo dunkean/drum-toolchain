@@ -46,8 +46,9 @@ class Input1TipPatch(BaseModel):
 
 
 class GlobalTriggerPatch(Input1TipPatch):
-    """Decoded settings only; the unresolved final byte is read-only."""
+    """Global response settings plus the validated PP/SS trigger type."""
 
+    trigger_type: str | None = None
 
 class HiHatKitPatch(BaseModel):
     pedal_channel: int | None = None
@@ -253,6 +254,13 @@ def create_app(dump_path: Path):
         values = {name: value for name, value in patch.model_dump().items() if value is not None}
         if not values:
             raise HTTPException(422, "supply at least one global trigger setting")
+        trigger_type = values.pop("trigger_type", None)
+        if trigger_type is not None:
+            type_codes = {"PP": 0, "SS": 33}
+            try:
+                values["trigger_type_raw"] = type_codes[str(trigger_type).upper()]
+            except KeyError as error:
+                raise HTTPException(422, "trigger_type must be PP or SS") from error
         with lock:
             try:
                 updated = state["configuration"].with_global_trigger_settings(record, values)

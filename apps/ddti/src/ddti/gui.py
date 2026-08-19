@@ -8,7 +8,7 @@ from threading import Event
 
 from .capture import CaptureCancelled, capture_dump
 from .diff import diff_ddti_bytes, render_diff
-from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, VELOCITY_CURVE_LABELS, decode_configuration
+from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, TRIGGER_TYPE_LABELS, VELOCITY_CURVE_LABELS, decode_configuration
 from .mappings import apply_role_template
 from .monitor import observe_messages
 from .presets import load_document, write_document
@@ -282,14 +282,14 @@ def launch(dump_path: Path | None = None) -> int:
             group = QGroupBox("Réponse et filtrage")
             form = QFormLayout(group)
             self.trigger_spins: dict[str, QSpinBox] = {}
-            for field, label in (
-                ("gain", "Gain"),
-                ("threshold", "Threshold"),
-                ("xtalk", "X-Talk / calibration brute"),
-                ("retrigger", "Retrigger (ms)"),
+            for field, label, maximum in (
+                ("gain", "Gain", 20),
+                ("threshold", "Threshold", 127),
+                ("xtalk", "X-Talk / calibration brute", 127),
+                ("retrigger", "Retrigger (ms)", 127),
             ):
                 spin = QSpinBox()
-                spin.setRange(0, 127)
+                spin.setRange(0, maximum)
                 spin.valueChanged.connect(lambda value, name=field: self.set_global_trigger(name, value))
                 self.trigger_spins[field] = spin
                 form.addRow(label, spin)
@@ -298,16 +298,18 @@ def launch(dump_path: Path | None = None) -> int:
                 self.curve.addItem(f"{label}  (code {value})", value)
             self.curve.currentIndexChanged.connect(self.set_velocity_curve)
             form.insertRow(1, "Velocity Curve", self.curve)
-            self.trigger_type_raw = QSpinBox()
-            self.trigger_type_raw.setRange(0, 127)
-            self.trigger_type_raw.setReadOnly(True)
-            self.trigger_type_raw.setToolTip("Visible mais verrouillé jusqu’à la validation du dernier octet sur ce DDTi 2016.")
-            form.addRow("Dernier octet (brut, verrouillé)", self.trigger_type_raw)
+            self.trigger_type = QComboBox()
+            for raw, label in TRIGGER_TYPE_LABELS.items():
+                self.trigger_type.addItem(f"{label}  (code {raw})", raw)
+            self.trigger_type_known_count = self.trigger_type.count()
+            self.trigger_type.currentIndexChanged.connect(self.set_trigger_type)
+            self.trigger_type.setToolTip("PP et SS ont été isolés par test matériel sur ce DDTi 2016.")
+            form.addRow("Trigger Type", self.trigger_type)
             layout.addWidget(group)
             note = QLabel(
                 "Ces réglages sont globaux pour les 21 kits. Sur la pédale hi-hat, X-Talk contient la calibration. "
-                "Types documentés : PP1–PP5, SS, PS, SP, SUS, AS ; HH1–HH7 sont auto-détectés. "
-                "Leur encodage SysEx reste verrouillé jusqu’au test matériel."
+                "PP et SS sont modifiables et validés par test matériel. Les autres variantes restent préservées "
+                "telles quelles lorsqu’elles ne sont pas encore cartographiées."
             )
             note.setWordWrap(True)
             note.setObjectName("subtitle")
@@ -418,7 +420,16 @@ def launch(dump_path: Path | None = None) -> int:
                 curve_index = self.curve.findData(curve_value)
             self.curve.setCurrentIndex(curve_index)
             self.curve.blockSignals(False)
-            self.trigger_type_raw.setValue(record.trigger_type_raw)
+            self.trigger_type.blockSignals(True)
+            while self.trigger_type.count() > self.trigger_type_known_count:
+                self.trigger_type.removeItem(self.trigger_type.count() - 1)
+            type_index = self.trigger_type.findData(record.trigger_type_raw)
+            if type_index < 0:
+                self.trigger_type.addItem(f"Non cartographié  (code {record.trigger_type_raw})", record.trigger_type_raw)
+                type_index = self.trigger_type.findData(record.trigger_type_raw)
+            self.trigger_type.setCurrentIndex(type_index)
+            self.trigger_type.setEnabled(record.index != 20)
+            self.trigger_type.blockSignals(False)
             self._refreshing = False
             self.refresh_status()
 
@@ -587,6 +598,15 @@ def launch(dump_path: Path | None = None) -> int:
             if self._refreshing or index < 0:
                 return
             self.set_global_trigger("velocity_curve", int(self.curve.itemData(index)))
+
+        def set_trigger_type(self, index: int) -> None:
+            if self._refreshing or index < 0:
+                return
+            raw = int(self.trigger_type.itemData(index))
+            if raw not in TRIGGER_TYPE_LABELS:
+                return
+            self.set_global_trigger("trigger_type_raw", raw)
+            self.refresh_trigger()
 
         def choose_new_path(self, title: str, suggestion: Path, file_filter: str) -> Path | None:
             destination, _ = QFileDialog.getSaveFileName(self, title, str(suggestion), file_filter)

@@ -36,6 +36,10 @@ VELOCITY_CURVE_LABELS = {
     13: "SPL3",
     14: "SPL4",
 }
+TRIGGER_TYPE_LABELS = {
+    0: "PP",
+    33: "SS",
+}
 _INPUT_1_TIP_RECORD = 0
 _PROGRAM_CHANGE_DISABLED_BODY_OFFSET = 0x40
 _PROGRAM_CHANGE_VALUE_BODY_OFFSET = 0x41
@@ -162,6 +166,10 @@ class DDTiGlobalTriggerRecord:
     def trigger_type_raw(self) -> int:
         return self.values[5]
 
+    @property
+    def trigger_type_label(self) -> str | None:
+        return TRIGGER_TYPE_LABELS.get(self.trigger_type_raw)
+
     def to_document(self) -> dict[str, object]:
         document: dict[str, object] = {
             "record": self.index,
@@ -173,7 +181,8 @@ class DDTiGlobalTriggerRecord:
             "settings": self.settings,
             "velocity_curve_label": VELOCITY_CURVE_LABELS.get(self.values[1]),
             "trigger_type_raw": self.trigger_type_raw,
-            "semantic_decoding": "five setting bytes mapped; trigger-type byte remains raw",
+            "trigger_type": self.trigger_type_label,
+            "semantic_decoding": "five setting bytes mapped; PP and SS trigger types validated",
         }
         return document
 
@@ -289,6 +298,12 @@ class DDTiConfiguration:
                 raise ValueError(f"{record.label} {display_name} must be an integer in 0..127")
             value_index = 5 if name == "trigger_type_raw" else GLOBAL_TRIGGER_FIELDS[name]
             if (
+                name == "gain"
+                and value > 20
+                and value != record.values[value_index]
+            ):
+                raise ValueError(f"{record.label} Gain must be an integer in 0..20")
+            if (
                 name == "velocity_curve"
                 and value not in VELOCITY_CURVE_LABELS
                 and value != record.values[value_index]
@@ -301,6 +316,14 @@ class DDTiConfiguration:
                 and value != record.values[value_index]
             ):
                 raise ValueError(f"{record.label} X-Talk must be an integer in 0..7")
+            if name == "trigger_type_raw" and record.index == 20 and value != record.values[value_index]:
+                raise ValueError("Hi-hat pedal Trigger Type is not editable")
+            if (
+                name == "trigger_type_raw"
+                and value not in TRIGGER_TYPE_LABELS
+                and value != record.values[value_index]
+            ):
+                raise ValueError(f"{record.label} Trigger Type must be PP or SS")
             raw[record.raw_offsets[value_index]] = value
         return decode_configuration(decode_dump(bytes(raw)))
 
@@ -406,8 +429,9 @@ class DDTiConfiguration:
     def to_configuration_preset(self, *, name: str | None = None) -> dict[str, object]:
         """Export the complete modeled configuration as a portable preset.
 
-        The unresolved final trigger byte is carried under its explicit raw
-        name; every byte outside the model remains in the source dump.
+        PP/SS are exported semantically and the final trigger byte is also
+        carried under its explicit raw name for diagnostics. Every byte outside
+        the model remains in the source dump.
         """
         document: dict[str, object] = {
             "format": CONFIGURATION_PRESET_FORMAT,
@@ -437,6 +461,7 @@ class DDTiConfiguration:
                     "record": record.index,
                     "target": record.label,
                     **record.settings,
+                    "trigger_type": record.trigger_type_label,
                     "trigger_type_raw": record.trigger_type_raw,
                 }
                 for record in self.global_trigger_records
@@ -520,6 +545,15 @@ class DDTiConfiguration:
                 for name in GLOBAL_TRIGGER_FIELDS
                 if name in entry
             }
+            trigger_type = entry.get("trigger_type")
+            if trigger_type is not None:
+                if not isinstance(trigger_type, str):
+                    raise ValueError("global trigger trigger_type must be PP, SS, or null")
+                by_label = {label: raw for raw, label in TRIGGER_TYPE_LABELS.items()}
+                try:
+                    values["trigger_type_raw"] = by_label[trigger_type.upper()]
+                except KeyError as error:
+                    raise ValueError("global trigger trigger_type must be PP or SS") from error
             configuration = configuration.with_global_trigger_settings(record, values)
         # The complete list is canonical. Consume the legacy alias only for
         # older presets without record 0, otherwise a stale alias could undo a
@@ -535,7 +569,7 @@ class DDTiConfiguration:
 
     def to_document(self) -> dict[str, object]:
         return {
-            "semantic_decoding": "per-kit channels/notes/hi-hat/Program Change and five global setting columns decoded; trigger type stays raw",
+            "semantic_decoding": "per-kit routing, Program Change and five global settings decoded; PP/SS trigger types mapped",
             "kits": [kit.to_document() for kit in self.kits],
             "global_trigger_records": [record.to_document() for record in self.global_trigger_records],
         }

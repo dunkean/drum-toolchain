@@ -41,11 +41,11 @@ print(dump.family_indexes())  # {1: (0, ..., 20), 2: (0, ..., 10)}
 
 The lossless offline model exposes all 21 kits, Tip/Ring channel and note
 routing, per-kit Program Change and hi-hat routing, plus five response settings
-for each of the 20 zones and the hi-hat pedal. The sixth global byte is kept as
-raw data because Trigger Type is not yet safely decoded. Hardware output
-additionally requires source-relative field validation, candidate-hash review
-and explicit confirmation. `trigger_type_raw` is included in exported complete
-presets as diagnostic evidence but is read-only: preset import ignores it.
+for each of the 20 zones and the hi-hat pedal. Controlled panel evidence maps
+Trigger Type `PP` to raw `0` and `SS` to raw `33`; these two values are editable.
+Other sixth-byte values remain diagnostic raw data and are preserved unchanged.
+Hardware output additionally requires source-relative field validation,
+candidate-hash review and explicit confirmation.
 Velocity Curve accepts the 15 documented curve codes (`0..14`), and X-Talk
 accepts `0..7` for normal pad records. The hi-hat record uses that byte as its
 separate Calibration value and therefore retains the full raw byte range.
@@ -58,7 +58,7 @@ assert config.kits[0].inputs[0].tip.note == 35
 preview = config.with_note(0, 1, "tip", 36)
 preview = preview.with_zone(0, 2, "tip", channel=12, note=39)
 preview = preview.with_hi_hat_kit_settings(0, pedal_channel=11, pedal_note=45, closed_note=43)
-preview = preview.with_global_trigger_settings(2, {"gain": 17, "threshold": 8})
+preview = preview.with_global_trigger_settings(2, {"gain": 17, "threshold": 8, "trigger_type_raw": 33})
 assert encode_configuration(preview) != encode_configuration(config)
 
 # The one gain byte whose location was verified by a panel 15 -> 16 change.
@@ -117,10 +117,11 @@ ddti write-plan source.syx candidate.syx
 ddti write-config source.syx candidate.syx --output TriggerIO --expected-sha256 <hash-from-plan> --confirm I_AUTHORIZE_DDTI_CONFIRMED_FIELDS
 ```
 
-Only confirmed kit notes, Program Change, and observed Input 1 Tip values may
-differ. The accepted trigger pairs are Gain `15/16`, Curve `6/7` (`Lin/LG1`),
-Threshold `5/7`, X-Talk `1/4`, and Retrigger `10/14`. The transfer uses at least 50 ms between frames. Unrestricted raw
-SysEx replay remains unavailable.
+Modeled kit channels/notes, hi-hat routing, Program Change and the five global
+response fields may differ. Trigger Type changes are limited to validated `PP`
+and `SS`; unknown raw codes and all opaque companion bytes are preserved. The
+transfer uses at least 50 ms between frames. Unrestricted raw SysEx replay
+remains unavailable.
 
 ## Local REST API
 

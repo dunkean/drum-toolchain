@@ -329,7 +329,8 @@ class DDTiTests(unittest.TestCase):
             source.with_zone(0, 2, "tip", channel=12, note=39)
             .with_hi_hat_kit_settings(0, pedal_channel=11, pedal_note=45, closed_note=43)
             .with_global_trigger_settings(2, {
-                "gain": 17, "velocity_curve": 8, "threshold": 8, "xtalk": 5, "retrigger": 15,
+                "gain": 17, "velocity_curve": 8, "threshold": 8, "xtalk": 5,
+                "retrigger": 15, "trigger_type_raw": 33,
             })
         )
         self.assertEqual(staged.kits[0].inputs[1].tip.channel, 12)
@@ -343,7 +344,7 @@ class DDTiTests(unittest.TestCase):
         preset["global_triggers"][2]["trigger_type_raw"] = 99
         round_tripped = source.with_configuration_preset(preset)
         self.assertEqual(round_tripped.raw, staged.canonicalize_disabled_program_changes().raw)
-        self.assertEqual(round_tripped.global_trigger_records[2].trigger_type_raw, 0)
+        self.assertEqual(round_tripped.global_trigger_records[2].trigger_type_raw, 33)
 
         with tempfile.TemporaryDirectory() as temporary:
             store = DDTiStateStore(Path(temporary))
@@ -506,9 +507,15 @@ class DDTiTests(unittest.TestCase):
         source = decode_configuration(decode_dump(kits + globals_))
         candidate = (
             source.with_note(0, 1, "tip", 36)
+            .with_zone(0, 2, "tip", channel=12)
+            .with_hi_hat_kit_settings(0, pedal_channel=11, pedal_note=45, closed_note=43)
             .with_program_change(0, 0)
             .with_input_1_tip_settings({
-                "gain": 16, "velocity_curve": 7, "threshold": 7, "xtalk": 4, "retrigger": 14,
+                "gain": 20, "velocity_curve": 14, "threshold": 127, "xtalk": 7, "retrigger": 127,
+            })
+            .with_global_trigger_settings(2, {
+                "gain": 17, "velocity_curve": 8, "threshold": 8, "xtalk": 5,
+                "retrigger": 15, "trigger_type_raw": 33,
             })
         )
         plan = build_safe_write_plan(source.raw, candidate.raw)
@@ -532,10 +539,12 @@ class DDTiTests(unittest.TestCase):
         forbidden[13] = 4  # confirmed note companion byte remains unvalidated
         with self.assertRaisesRegex(ProtocolNotValidatedError, "unvalidated"):
             build_safe_write_plan(source.raw, bytes(forbidden))
-        with self.assertRaisesRegex(ValueError, "15 and 16"):
-            build_safe_write_plan(source.raw, source.with_input_1_tip_gain(17).raw)
-        with self.assertRaisesRegex(ValueError, "velocity_curve"):
-            build_safe_write_plan(source.raw, source.with_input_1_tip_settings({"velocity_curve": 8}).raw)
+        with self.assertRaisesRegex(ValueError, "PP or SS"):
+            source.with_global_trigger_settings(2, {"trigger_type_raw": 34})
+        with self.assertRaisesRegex(ValueError, "not editable"):
+            source.with_global_trigger_settings(20, {"trigger_type_raw": 33})
+        with self.assertRaisesRegex(ValueError, "0..20"):
+            source.with_global_trigger_settings(2, {"gain": 21})
 
     def test_cli_has_no_hardware_transfer_command(self) -> None:
         with self.assertRaises(SystemExit) as error:
@@ -678,13 +687,16 @@ class DDTiTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["hi_hat"]["closed_note"], 43)
-            response = generic_client.patch("/global-triggers/2", json={"gain": 17, "threshold": 8})
+            response = generic_client.patch(
+                "/global-triggers/2", json={"gain": 17, "threshold": 8, "trigger_type": "SS"}
+            )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["global_trigger"]["target"], "Input 2 Tip")
             self.assertEqual(response.json()["global_trigger"]["settings"]["threshold"], 8)
-            rejected_plan = generic_client.get("/write-plan")
-            self.assertEqual(rejected_plan.status_code, 422)
-            self.assertIn("candidate changes unvalidated DDTi byte(s)", rejected_plan.json()["detail"])
+            self.assertEqual(response.json()["global_trigger"]["trigger_type"], "SS")
+            generic_plan = generic_client.get("/write-plan")
+            self.assertEqual(generic_plan.status_code, 200)
+            self.assertGreater(generic_plan.json()["changed_bytes"], 0)
 
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:

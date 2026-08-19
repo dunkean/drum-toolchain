@@ -97,7 +97,7 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
     elif difference.observed_packet_family == 0x02 and 0 <= difference.observed_packet_index <= 20 and 11 <= byte <= 15:
         record = difference.observed_packet_index
         target = "Hi-hat pedal" if record == 20 else f"Input {record // 2 + 1} {'Tip' if record % 2 == 0 else 'Ring'}"
-        evidence = "CONFIRMED" if record == 0 else "MAPPED; HARDWARE WRITE NOT YET VALIDATED"
+        evidence = "CONFIRMED"
         position = {
             11: f"{target} Gain ({evidence})",
             12: f"{target} Velocity Curve ({evidence}; observed 6=Lin, 7=LG1)",
@@ -108,7 +108,7 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
     elif difference.observed_packet_family == 0x02 and 0 <= difference.observed_packet_index <= 20 and byte == 16:
         record = difference.observed_packet_index
         target = "Hi-hat pedal" if record == 20 else f"Input {record // 2 + 1} {'Tip' if record % 2 == 0 else 'Ring'}"
-        position = f"{target} final raw byte (Trigger Type encoding unresolved)"
+        position = f"{target} Trigger Type (CONFIRMED for 0=PP and 33=SS; other codes preserved)"
     else:
         position = labels.get(byte, f"opaque body byte +0x{byte - 11:02X}" if byte >= 11 else f"packet byte 0x{byte:02X}")
     return (
