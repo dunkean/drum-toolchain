@@ -264,7 +264,7 @@ class DDTiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires all 21"):
             build_transfer_plan(kits)
 
-    def test_reviewed_transfer_requires_exact_hash_and_confirmation_before_opening_output(self) -> None:
+    def test_reviewed_transfer_is_hard_disabled_before_opening_output(self) -> None:
         kits = b"".join(
             bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + (bytes((9, 35, 3)) * 20) + bytes(6) + bytes((0xF7,))
             for index in range(21)
@@ -274,16 +274,17 @@ class DDTiTests(unittest.TestCase):
             for index in range(21)
         )
         plan = build_transfer_plan(kits + globals_)
-        with self.assertRaisesRegex(ValueError, "confirmation"):
-            send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="no")
         output = _OutputPort()
-        with patch("ddti.transfer._resolve_output", return_value="TriggerIO 10"), \
-             patch("mido.open_output", return_value=output), \
-             patch("ddti.transfer.time.sleep"):
-            result = send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_UNDERSTAND_DDTI_WRITE")
-        self.assertEqual(result.packet_count, 42)
-        self.assertEqual(len(output.messages), 42)
-        self.assertEqual(bytes(output.messages[0].bytes()), kits[:78])
+        with patch("mido.open_output", return_value=output) as open_output:
+            with self.assertRaisesRegex(ProtocolNotValidatedError, "round trip changed"):
+                send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_UNDERSTAND_DDTI_WRITE")
+        open_output.assert_not_called()
+        self.assertEqual(output.messages, [])
+
+    def test_cli_has_no_hardware_transfer_command(self) -> None:
+        with self.assertRaises(SystemExit) as error:
+            main(["transfer", "would-not-be-read.syx"])
+        self.assertEqual(error.exception.code, 2)
 
     def test_preset_cli_exports_and_applies_to_a_new_staged_file(self) -> None:
         body = bytearray()

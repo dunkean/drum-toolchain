@@ -3,15 +3,20 @@
 This module intentionally does not import MIDI libraries or open output ports.
 It establishes the invariant a hardware sender will require: only a complete,
 lossless legacy DDTi dump can ever be considered for transfer.
+
+An exact golden-dump round trip was attempted on 2026-08-19.  The DDTi
+normalised one still-unexplained byte in each of the first twenty kit frames.
+Consequently the sender is deliberately hard-disabled until that field and
+the device's acceptance rules are understood.  A review plan remains useful
+for offline configuration work and future validation.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import time
 
 from .protocol import DDTiDump, decode_dump
-from .sysex import parse_stream
+from .device import ProtocolNotValidatedError
 
 
 _COMPLETE_FAMILIES = {1: tuple(range(21)), 2: tuple(range(21))}
@@ -63,17 +68,6 @@ def build_transfer_plan_from_file(path: Path) -> DDTiTransferPlan:
     return build_transfer_plan(path.read_bytes())
 
 
-def _resolve_output(query: str) -> str:
-    import mido
-
-    names = list(mido.get_output_names())
-    exact = [name for name in names if name.casefold() == query.casefold()]
-    matches = exact or [name for name in names if query.casefold() in name.casefold()]
-    if len(matches) != 1:
-        raise ValueError(f"expected exactly one MIDI output matching {query!r}; found {matches}")
-    return matches[0]
-
-
 def send_reviewed_transfer(
     plan: DDTiTransferPlan,
     output_query: str,
@@ -82,25 +76,16 @@ def send_reviewed_transfer(
     confirmation: str,
     inter_message_ms: float = 10,
 ) -> DDTiTransferResult:
-    """Transmit a previously reviewed complete dump after explicit confirmation.
+    """Raise unconditionally: the legacy DDTi sender is not validated.
 
-    The caller must supply the exact plan SHA-256 and confirmation phrase. This
-    is deliberately a separate operation from plan construction so a GUI/API
-    cannot transmit merely by staging an edit.
+    Parameters are intentionally retained as an audit-friendly future API, but
+    this function must not import ``mido``, resolve an output, or send a byte.
+    The exact full golden dump produced a repeatable ``0x7f -> 0x00`` change at
+    family-01 body offset ``+0x41`` for indexes 0--19.  It is not safe to infer
+    that this is cosmetic or that other staged fields can be restored.
     """
-    if expected_sha256.casefold() != plan.sha256:
-        raise ValueError("expected SHA-256 does not match the reviewed transfer plan")
-    if confirmation != "I_UNDERSTAND_DDTI_WRITE":
-        raise ValueError("explicit confirmation phrase is required")
-    if inter_message_ms < 0:
-        raise ValueError("inter_message_ms must be non-negative")
-    import mido
-
-    name = _resolve_output(output_query)
-    frames = parse_stream(plan.raw)
-    with mido.open_output(name) as output:
-        for frame in frames:
-            output.send(mido.Message("sysex", data=frame.data))
-            if inter_message_ms:
-                time.sleep(inter_message_ms / 1000)
-    return DDTiTransferResult(name, len(frames), len(plan.raw), plan.sha256)
+    del plan, output_query, expected_sha256, confirmation, inter_message_ms
+    raise ProtocolNotValidatedError(
+        "DDTi writes are disabled: the 2026-08-19 full-dump round trip changed "
+        "family-01 body byte +0x41 in records 0--19"
+    )

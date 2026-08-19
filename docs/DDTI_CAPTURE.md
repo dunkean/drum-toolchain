@@ -103,9 +103,11 @@ ddti session captures/gain-threshold-test --input TriggerIO --listen --label gai
 3. At snapshot 3, factory reset using the documented power-on panel action,
    then dump. It must have no byte differences from the golden dump.
 
-The 2026-08-19 final-reset verification was byte-identical to
-`factory_dump_001.golden.syx` (1,836 bytes, SHA-256
-`504ebd7e1a82b98c9b515febb8f3713a7a801ac5e1bbe188fad50370c42c33ce`).
+The 2026-08-19 final-reset verification was byte-identical to the **complete**
+`factory_dump_002_full.golden.syx` (2,016 bytes, SHA-256
+`43c64c486f72ec349c5ebee4020ef9e176f5d64033118f95fb25f6f81f84c70f`).
+The older 1,836-byte file is only a truncated prefix and must not be used as a
+golden baseline.
 
 ## Controlled differential experiment (after the golden copy)
 

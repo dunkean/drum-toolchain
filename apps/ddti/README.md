@@ -4,7 +4,8 @@
 monorepo.  It supports USB/MIDI discovery, traffic monitoring, raw SysEx
 capture, integrity metadata, and offline binary diffs.  It deliberately has
 no implemented configuration writer until the legacy DDTi protocol has been
-confirmed from controlled dumps.
+confirmed from controlled dumps. An exact full-dump round-trip was tested once
+and changed an unexplained field, so hardware writing is explicitly disabled.
 
 Install it for the `ddti` command:
 
@@ -65,6 +66,8 @@ presets. Channel and companion bytes remain read-only because their meaning is
 not proven. No hardware-write path exists until the remaining protocol fields
 are experimentally validated.
 
-`ddti transfer-plan` is the mandatory review gate for the eventual transfer
+`ddti transfer-plan` is an offline review gate for a possible future transfer
 path. It accepts only a complete 42-packet dump and displays its SHA-256; it
-does not open a MIDI output or send any bytes.
+does not open a MIDI output or send any bytes. There is deliberately no
+`ddti transfer` command while the observed round-trip mutation remains
+unexplained.

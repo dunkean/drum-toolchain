@@ -1,8 +1,11 @@
 # Legacy DDTi SysEx protocol
 
-Status: **structural framing observed; configuration semantics unresolved**.
+Status: **structural framing observed; configuration semantics unresolved; PC
+writing disabled**.
 The dump below was received from the connected legacy DDTi on 2026-08-19 after
-a factory reset.  This repository has still sent no DDTi SysEx message.
+a factory reset. One explicitly authorised full-dump replay was later made;
+the DDTi accepted it but changed an unexplained byte in the subsequent panel
+dump, so this repository exposes no active hardware writer.
 
 ## Verified framing capability of the tooling
 
@@ -87,8 +90,13 @@ or checksum rule yet.
 | Inter-message timing | UNKNOWN |
 | Read/configuration-write commands | UNKNOWN |
 
-No code sends a DDTi SysEx message.  In particular, this project does not
-guess a dump-request frame from other ddrum products or newer DDTi models.
+No currently available command or public API sends a DDTi SysEx message.  The
+one authorised 2026-08-19 test replayed the exact 42-frame factory golden and
+then showed `0x7F -> 0x00` at Family `01` body offset `+0x41` in records
+`00`–`13`. That byte's meaning and whether it is derived state are UNKNOWN;
+therefore any writer, including a verbatim restore, is unsafe. In particular,
+this project does not guess a dump-request frame from other ddrum products or
+newer DDTi models.
 
 ## Next evidence required
 
