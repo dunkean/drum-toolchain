@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, decode_configuration, encode_configuration
+from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
 
@@ -64,9 +65,12 @@ def launch(dump_path: Path) -> int:
             export_configuration = QPushButton("Export config preset")
             export_configuration.clicked.connect(self.export_configuration_preset)
             buttons.addWidget(export_configuration)
-            import_preset = QPushButton("Import note preset")
+            import_preset = QPushButton("Import config preset")
             import_preset.clicked.connect(self.import_preset)
             buttons.addWidget(import_preset)
+            apply_role = QPushButton("Apply GM/SD3 role preset")
+            apply_role.clicked.connect(self.apply_role_preset)
+            buttons.addWidget(apply_role)
             write = QPushButton("Write to DDTi (disabled)")
             write.setEnabled(False)
             buttons.addWidget(write)
@@ -157,6 +161,25 @@ def launch(dump_path: Path) -> int:
                 return
             self.refresh()
             QMessageBox.information(self, "Imported", "Settings staged in memory only. Export a new SysEx file to retain them.")
+
+        def apply_role_preset(self) -> None:
+            template_name, _ = QFileDialog.getOpenFileName(self, "Choose GM/SD3 role template", "", "Preset (*.yaml *.yml *.json)")
+            if not template_name:
+                return
+            layout_name, _ = QFileDialog.getOpenFileName(self, "Choose explicit DDTi input layout", "", "Layout (*.yaml *.yml *.json)")
+            if not layout_name:
+                return
+            try:
+                self.configuration = apply_role_template(
+                    self.configuration,
+                    load_document(Path(template_name)),
+                    load_document(Path(layout_name)),
+                )
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Role preset not applied", str(error))
+                return
+            self.refresh()
+            QMessageBox.information(self, "Role preset staged", "The named role mapping was applied only to the explicit input/zone bindings. Export a new SysEx file to retain it; nothing was sent to the DDTi.")
 
     application = QApplication.instance() or QApplication([])
     editor = Editor(dump_path)

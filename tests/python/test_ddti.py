@@ -14,6 +14,8 @@ from ddti.capture import CaptureResult, _WINDOWS_SYSEX_BUFFER_COUNT, _receive_mi
 from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
 from ddti.models import decode_configuration, encode_configuration
+from ddti.mappings import apply_role_template
+from ddti.presets import load_document
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
@@ -269,6 +271,41 @@ class DDTiTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Gain"):
             configuration.with_input_1_tip_gain(128)
 
+    def test_role_templates_require_an_explicit_physical_input_layout(self) -> None:
+        kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
+        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
+        configuration = decode_configuration(decode_dump(raw))
+        template = {
+            "format": "ddti-note-role-template/v1",
+            "roles": {"kick": {"note": 36}, "snare": {"tip": 38, "ring": 40}},
+        }
+        layout = {
+            "format": "ddti-input-layout/v1",
+            "kits": [0],
+            "bindings": [
+                {"input": 1, "zone": "tip", "role": "kick.note"},
+                {"input": 2, "zone": "tip", "role": "snare.tip"},
+                {"input": 2, "zone": "ring", "role": "snare.ring"},
+            ],
+        }
+        staged = apply_role_template(configuration, template, layout)
+        self.assertEqual(staged.kits[0].inputs[0].tip.note, 36)
+        self.assertEqual(staged.kits[0].inputs[1].tip.note, 38)
+        self.assertEqual(staged.kits[0].inputs[1].ring.note, 40)
+        with self.assertRaisesRegex(ValueError, "repeats Input"):
+            apply_role_template(configuration, template, {**layout, "bindings": layout["bindings"] + [{"input": 1, "zone": "tip", "role": "kick.note"}]})
+        repository = Path(__file__).resolve().parents[2]
+        self.assertEqual(load_document(repository / "presets" / "sd3.yaml")["format"], "ddti-note-role-template/v1")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, template_path, layout_path, staged_path = root / "source.syx", root / "template.yaml", root / "layout.yaml", root / "staged.syx"
+            source.write_bytes(raw)
+            import yaml
+            template_path.write_text(yaml.safe_dump(template), encoding="utf-8")
+            layout_path.write_text(yaml.safe_dump(layout), encoding="utf-8")
+            self.assertEqual(main(["apply-role-preset", str(source), str(template_path), str(layout_path), str(staged_path)]), 0)
+            self.assertEqual(decode_configuration(decode_dump(staged_path.read_bytes())).kits[0].inputs[1].ring.note, 40)
+
     def test_transfer_plan_accepts_only_a_complete_observed_dump(self) -> None:
         kits = b"".join(
             bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + (bytes((9, 35, 3)) * 20) + bytes(6) + bytes((0xF7,))
@@ -383,6 +420,12 @@ class DDTiTests(unittest.TestCase):
             configuration_preset = client.get("/configuration-preset")
             self.assertEqual(configuration_preset.status_code, 200)
             self.assertEqual(configuration_preset.json()["confirmed_global_trigger"]["input_1_tip_gain"], 16)
+            response = client.post("/role-template", json={
+                "template": {"format": "ddti-note-role-template/v1", "roles": {"kick": {"note": 36}}},
+                "layout": {"format": "ddti-input-layout/v1", "kits": [0], "bindings": [{"input": 1, "zone": "tip", "role": "kick.note"}]},
+            })
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(client.get("/kits/0/inputs/1").json()["tip"]["note"], 36)
 
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:

@@ -10,6 +10,7 @@ from .diff import diff_files, render_diff
 from .discovery import discover_devices
 from .monitor import monitor
 from .models import decode_configuration
+from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
 from .transfer import build_transfer_plan_from_file
@@ -60,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     apply_configuration.add_argument("dump", type=Path)
     apply_configuration.add_argument("preset", type=Path)
     apply_configuration.add_argument("output", type=Path, help="new .syx file; existing files are refused")
+    apply_role = commands.add_parser("apply-role-preset", help="apply a GM/SD3 role template through an explicit offline DDTi input layout")
+    apply_role.add_argument("dump", type=Path)
+    apply_role.add_argument("template", type=Path, help="role template YAML/JSON, for example presets/sd3.yaml")
+    apply_role.add_argument("layout", type=Path, help="explicit physical DDTi input layout YAML/JSON")
+    apply_role.add_argument("output", type=Path, help="new .syx file; existing files are refused")
     transfer_plan = commands.add_parser("transfer-plan", help="validate and review a complete dump for a future hardware transfer; never sends MIDI")
     transfer_plan.add_argument("dump", type=Path)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
@@ -154,6 +160,16 @@ def main(argv: list[str] | None = None) -> int:
         configuration = decode_configuration(decode_file(args.dump)).with_configuration_preset(load_document(args.preset))
         args.output.write_bytes(configuration.raw)
         print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled"}, indent=2))
+    elif args.command == "apply-role-preset":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite existing file: {args.output}")
+        configuration = apply_role_template(
+            decode_configuration(decode_file(args.dump)),
+            load_document(args.template),
+            load_document(args.layout),
+        )
+        args.output.write_bytes(configuration.raw)
+        print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled", "mapping": "role-template + explicit-layout"}, indent=2))
     elif args.command == "transfer-plan":
         print(json.dumps(build_transfer_plan_from_file(args.dump).to_document(), indent=2, sort_keys=True))
     elif args.command == "serve":

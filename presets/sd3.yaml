@@ -1,6 +1,7 @@
+format: ddti-note-role-template/v1
 name: Superior Drummer 3 starter mapping
 status: template-not-device-validated
-kit:
+roles:
   kick:
     note: 36
   snare:

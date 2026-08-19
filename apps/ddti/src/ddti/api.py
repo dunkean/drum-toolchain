@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .discovery import discover_devices
 from .models import DDTiConfiguration, decode_configuration
+from .mappings import apply_role_template
 from .protocol import decode_file
 from .transfer import build_transfer_plan
 
@@ -32,6 +33,13 @@ class Input1TipGainPatch(BaseModel):
     """The only trigger-setting field confirmed by controlled panel evidence."""
 
     gain: int
+
+
+class RoleTemplateApply(BaseModel):
+    """A named note-role template plus the user's explicit physical layout."""
+
+    template: dict[str, object]
+    layout: dict[str, object]
 
 
 def create_app(dump_path: Path):
@@ -152,5 +160,20 @@ def create_app(dump_path: Path):
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
         return {"staged_only": True, "hardware_write": "disabled", "preset": current().to_configuration_preset()}
+
+    @app.post("/role-template")
+    def stage_role_template(request: RoleTemplateApply) -> dict[str, object]:
+        """Stage GM/SD3 roles through user-supplied input bindings only."""
+        with lock:
+            try:
+                state["configuration"] = apply_role_template(state["configuration"], request.template, request.layout)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        return {
+            "staged_only": True,
+            "hardware_write": "disabled",
+            "mapping": "role-template + explicit-layout",
+            "configuration": current().to_document(),
+        }
 
     return app

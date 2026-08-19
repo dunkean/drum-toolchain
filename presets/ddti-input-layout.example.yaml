@@ -1,0 +1,22 @@
+# Copy this file, fill only the bindings which match your physical wiring,
+# then pass it with a role template such as presets/sd3.yaml. This is offline:
+# it writes a staged .syx file and never sends MIDI to the DDTi.
+format: ddti-input-layout/v1
+name: My DDTi physical layout
+
+# DDTi kit numbers to receive the role-template notes. Use [0] for one kit;
+# list the exact kit numbers you intend to configure, never assume all kits.
+kits: [0]
+
+# Each input/zone can appear once. "role" is <role>.<articulation> from the
+# template. Add only verified physical assignments for your kit.
+bindings: []
+# - input: 1
+#   zone: tip
+#   role: kick.note
+# - input: 2
+#   zone: tip
+#   role: snare.tip
+# - input: 2
+#   zone: ring
+#   role: snare.ring

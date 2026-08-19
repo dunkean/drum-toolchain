@@ -34,6 +34,8 @@ python -m ddti export-preset captures/factory_dump_001.syx presets/factory-notes
 python -m ddti apply-preset captures/factory_dump_001.syx presets/factory-notes.json captures/factory-notes-staged.syx
 python -m ddti export-config captures/factory_dump_002_full.golden.syx presets/my-sd3.yaml --name "My SD3 mapping"
 python -m ddti apply-config captures/factory_dump_002_full.golden.syx presets/my-sd3.yaml captures/my-sd3-staged.syx
+Copy-Item presets/ddti-input-layout.example.yaml presets/my-ddti-layout.yaml
+python -m ddti apply-role-preset captures/factory_dump_002_full.golden.syx presets/sd3.yaml presets/my-ddti-layout.yaml captures/sd3-staged.syx
 python -m ddti transfer-plan captures/factory_dump_002_full.golden.syx
 ```
 
@@ -69,6 +71,13 @@ portable `ddti-note-preset/v1` JSON and complete
 Threshold, and companion bytes remain read-only because their meaning or scope
 is not proven. No hardware-write path exists until the remaining protocol
 fields are experimentally validated.
+
+The repository’s named `presets/gm.yaml` and `presets/sd3.yaml` are musical
+role templates, not assumptions about cable wiring. Copy and fill
+`presets/ddti-input-layout.example.yaml` with the exact physical Input/Tip/Ring
+assignments for your kit and the exact target kit numbers. `apply-role-preset`
+then creates a new staged dump. The GUI offers the same two-file flow through
+**Apply GM/SD3 role preset**. Neither flow opens a MIDI output.
 
 `ddti transfer-plan` is an offline review gate for a possible future transfer
 path. It accepts only a complete 42-packet dump and displays its SHA-256; it

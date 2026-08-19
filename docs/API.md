@@ -78,6 +78,23 @@ hardware `write` command yet.
 dump, preserving every unknown byte from its supplied source dump. It also
 never opens MIDI.
 
+## Named GM / SD3 mappings
+
+`presets/gm.yaml` and `presets/sd3.yaml` use
+`ddti-note-role-template/v1`: they name musical roles and notes but deliberately
+do **not** claim which DDTi socket is kick, snare, or hi-hat. Create a copy of
+`presets/ddti-input-layout.example.yaml`, add only your observed physical
+bindings, then stage it offline:
+
+```powershell
+ddti apply-role-preset captures/factory_dump_002_full.golden.syx presets/sd3.yaml presets/my-ddti-layout.yaml captures/sd3-staged.syx
+```
+
+The layout selects exact kit numbers and uses bindings such as
+`{input: 2, zone: ring, role: snare.ring}`. Duplicate Input/zone bindings,
+unknown roles, and unknown kits are rejected. This protects against silently
+using a generic SD3 template with a guessed physical layout.
+
 `ddti transfer-plan complete-dump.syx` validates that a file contains the full
 21-kit plus 21-global-record transfer and prints its hash, packet count and
 review state. It is deliberately output-free; it is the gate that a future
@@ -108,6 +125,7 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | GET | `/preset` | export the current `ddti-note-preset/v1` document |
 | PUT | `/preset` | stage a full or partial note-preset document in memory only |
 | GET/PUT | `/configuration-preset` | export/stage all proven editable values in `ddti-configuration-preset/v1` form |
+| POST | `/role-template` | stage a `ddti-note-role-template/v1` plus explicit `ddti-input-layout/v1` binding document |
 | GET | `/transfer/plan` | validate and review the complete staged transfer; sends nothing |
 
 The PATCH response explicitly states `hardware_write: disabled`. Restarting
