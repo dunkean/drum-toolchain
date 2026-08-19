@@ -19,7 +19,23 @@ GLOBAL_TRIGGER_FIELDS = {
     "xtalk": 3,
     "retrigger": 4,
 }
-VELOCITY_CURVE_LABELS = {6: "Lin", 7: "LG1"}
+VELOCITY_CURVE_LABELS = {
+    0: "Cst",
+    1: "OFF",
+    2: "E1",
+    3: "E2",
+    4: "E3",
+    5: "E4",
+    6: "Lin",
+    7: "LG1",
+    8: "LG2",
+    9: "LG3",
+    10: "LG4",
+    11: "SPL1",
+    12: "SPL2",
+    13: "SPL3",
+    14: "SPL4",
+}
 _INPUT_1_TIP_RECORD = 0
 _PROGRAM_CHANGE_DISABLED_BODY_OFFSET = 0x40
 _PROGRAM_CHANGE_VALUE_BODY_OFFSET = 0x41
@@ -272,6 +288,19 @@ class DDTiConfiguration:
                 display_name = "Gain" if name == "gain" else name
                 raise ValueError(f"{record.label} {display_name} must be an integer in 0..127")
             value_index = 5 if name == "trigger_type_raw" else GLOBAL_TRIGGER_FIELDS[name]
+            if (
+                name == "velocity_curve"
+                and value not in VELOCITY_CURVE_LABELS
+                and value != record.values[value_index]
+            ):
+                raise ValueError(f"{record.label} Velocity Curve must be one of 0..14")
+            if (
+                name == "xtalk"
+                and record.index != 20
+                and value > 7
+                and value != record.values[value_index]
+            ):
+                raise ValueError(f"{record.label} X-Talk must be an integer in 0..7")
             raw[record.raw_offsets[value_index]] = value
         return decode_configuration(decode_dump(bytes(raw)))
 
@@ -488,7 +517,7 @@ class DDTiConfiguration:
             seen_records.add(record)
             values = {
                 name: entry[name]
-                for name in (*GLOBAL_TRIGGER_FIELDS, "trigger_type_raw")
+                for name in GLOBAL_TRIGGER_FIELDS
                 if name in entry
             }
             configuration = configuration.with_global_trigger_settings(record, values)

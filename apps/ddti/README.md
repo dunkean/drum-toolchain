@@ -70,13 +70,19 @@ complete `ddti-configuration-preset/v1` document carries all 21 kits, all 20
 Tip/Ring channel and note pairs per kit, Program Change, hi-hat pedal routing
 and closed note, plus Gain, Velocity Curve, Threshold, X-Talk/Calibration and
 Retrigger for all 21 global targets. The unresolved final byte of each global
-record is preserved as raw data and remains read-only in the GUI.
+record is exported for inspection as `trigger_type_raw`, remains read-only in
+the GUI, and is deliberately ignored when a configuration is imported.
+Velocity Curve offers the documented `Cst`, `OFF`, `E1`–`E4`, `Lin`,
+`LG1`–`LG4` and `SPL1`–`SPL4` choices; ordinary X-Talk is constrained to
+`0..7`, while the hi-hat record keeps its separate raw Calibration range.
 
 Click **Synchroniser** and perform the documented panel dump to replace the
 working state. A complete 42-frame capture is saved under `%LOCALAPPDATA%\DDTi
 Editor`; later launches can use `ddti gui` without another dump. The DDTi has
 no validated PC command that starts a dump, so the panel key combination is
-still required when a fresh hardware read is actually needed.
+still required when a fresh hardware read is actually needed. During the
+three-minute listening window, the same button becomes **Annuler l’écoute**;
+closing the application also cancels and joins the listener cleanly.
 
 Offline editing and preset import cover more fields than the current hardware
 write allowlist. **Envoyer au DDTi** refuses any unvalidated changed offset

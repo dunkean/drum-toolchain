@@ -21,7 +21,9 @@ from .transfer import build_safe_write_plan, build_transfer_plan, send_safe_conf
 
 
 def _configuration(path: Path) -> DDTiConfiguration:
-    return decode_configuration(decode_file(path))
+    configuration = decode_configuration(decode_file(path))
+    build_transfer_plan(configuration.raw)
+    return configuration
 
 
 class NotePatch(BaseModel):
@@ -44,7 +46,7 @@ class Input1TipPatch(BaseModel):
 
 
 class GlobalTriggerPatch(Input1TipPatch):
-    trigger_type_raw: int | None = None
+    """Decoded settings only; the unresolved final byte is read-only."""
 
 
 class HiHatKitPatch(BaseModel):

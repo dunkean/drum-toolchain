@@ -17,6 +17,10 @@ from .sysex import SysExMessage, parse_stream, render_hex
 _WINDOWS_SYSEX_BUFFER_COUNT = 64
 
 
+class CaptureCancelled(RuntimeError):
+    """Raised when a caller explicitly cancels a receive-only capture."""
+
+
 @dataclass(frozen=True)
 class CaptureResult:
     source_port: str
@@ -50,6 +54,7 @@ def capture_dump(
     seconds: float,
     idle_seconds: float,
     receiver: Literal["auto", "mido"] = "auto",
+    cancelled: Callable[[], bool] | None = None,
 ) -> CaptureResult:
     """Listen only; write received complete SysEx frames to three new files."""
     if seconds <= 0 or idle_seconds <= 0:
@@ -60,13 +65,17 @@ def capture_dump(
     existing = [path for path in paths if path.exists()]
     if existing:
         raise FileExistsError(f"refusing to overwrite capture artifact(s): {', '.join(map(str, existing))}")
+    if cancelled is not None and cancelled():
+        raise CaptureCancelled("DDTi capture cancelled")
     name = _resolve_input(port_query)
     use_windows_receiver = receiver == "auto" and platform.system() == "Windows"
     messages = (
-        _receive_windows_sysex(name, seconds=seconds, idle_seconds=idle_seconds)
+        _receive_windows_sysex(name, seconds=seconds, idle_seconds=idle_seconds, cancelled=cancelled)
         if use_windows_receiver
-        else _receive_mido_sysex(name, seconds=seconds, idle_seconds=idle_seconds)
+        else _receive_mido_sysex(name, seconds=seconds, idle_seconds=idle_seconds, cancelled=cancelled)
     )
+    if cancelled is not None and cancelled():
+        raise CaptureCancelled("DDTi capture cancelled")
     if not messages:
         raise ValueError("no SysEx received; start the DDTi panel dump while this listener is running")
     raw = b"".join(message.raw for message in messages)
@@ -143,7 +152,13 @@ def capture_series(
     return tuple(results)
 
 
-def _receive_mido_sysex(name: str, *, seconds: float, idle_seconds: float) -> list[SysExMessage]:
+def _receive_mido_sysex(
+    name: str,
+    *,
+    seconds: float,
+    idle_seconds: float,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[SysExMessage]:
     """Portable fallback used for development and small standard SysEx frames."""
     import mido
 
@@ -152,6 +167,8 @@ def _receive_mido_sysex(name: str, *, seconds: float, idle_seconds: float) -> li
     messages: list[SysExMessage] = []
     with mido.open_input(name) as input_port:
         while time.monotonic() - started < seconds:
+            if cancelled is not None and cancelled():
+                break
             pending = list(input_port.iter_pending())
             if pending:
                 last_message = time.monotonic()
@@ -164,7 +181,13 @@ def _receive_mido_sysex(name: str, *, seconds: float, idle_seconds: float) -> li
     return messages
 
 
-def _receive_windows_sysex(name: str, *, seconds: float, idle_seconds: float) -> list[SysExMessage]:
+def _receive_windows_sysex(
+    name: str,
+    *,
+    seconds: float,
+    idle_seconds: float,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[SysExMessage]:
     """Receive Windows-MM long messages with 64 KiB buffers.
 
     `python-rtmidi` can use comparatively small input buffers.  Direct WinMM
@@ -224,6 +247,8 @@ def _receive_windows_sysex(name: str, *, seconds: float, idle_seconds: float) ->
         last_count = 0
         last_message = started
         while time.monotonic() - started < seconds:
+            if cancelled is not None and cancelled():
+                break
             if len(raw_messages) != last_count:
                 last_count = len(raw_messages)
                 last_message = time.monotonic()

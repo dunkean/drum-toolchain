@@ -44,7 +44,11 @@ routing, per-kit Program Change and hi-hat routing, plus five response settings
 for each of the 20 zones and the hi-hat pedal. The sixth global byte is kept as
 raw data because Trigger Type is not yet safely decoded. Hardware output
 additionally requires source-relative field validation, candidate-hash review
-and explicit confirmation.
+and explicit confirmation. `trigger_type_raw` is included in exported complete
+presets as diagnostic evidence but is read-only: preset import ignores it.
+Velocity Curve accepts the 15 documented curve codes (`0..14`), and X-Talk
+accepts `0..7` for normal pad records. The hi-hat record uses that byte as its
+separate Calibration value and therefore retains the full raw byte range.
 
 ```python
 from ddti import decode_configuration, encode_configuration
@@ -162,5 +166,7 @@ editor provides the 21-kit selector, a 10-input Tip/Ring routing table, hi-hat
 kit settings, and a selector for all 21 global response records. It imports or
 exports complete YAML/JSON configurations and staged SysEx, performs a complete
 panel-initiated synchronization in a background thread, and shows the exact
-byte diff before output. **Envoyer au DDTi** re-runs the write allowlist,
+byte diff before output. The synchronization button can cancel the listener,
+and closing or discarding staged changes requires confirmation. **Envoyer au
+DDTi** re-runs the write allowlist,
 presents the hash and diff, and requires confirmation before sending 42 frames.

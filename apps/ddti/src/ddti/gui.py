@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 
-from .capture import capture_dump
+from .capture import CaptureCancelled, capture_dump
 from .diff import diff_ddti_bytes, render_diff
 from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, VELOCITY_CURVE_LABELS, decode_configuration
 from .mappings import apply_role_template
@@ -48,7 +49,7 @@ def _decode_complete_configuration(path: Path) -> DDTiConfiguration:
 
 def launch(dump_path: Path | None = None) -> int:
     try:
-        from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+        from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
         from PySide6.QtWidgets import (
             QApplication, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
             QHeaderView, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton,
@@ -61,15 +62,30 @@ def launch(dump_path: Path | None = None) -> int:
     class CaptureWorker(QObject):
         completed = Signal(object)
         failed = Signal(str)
+        cancelled = Signal()
 
         def __init__(self, stem: Path) -> None:
             super().__init__()
             self.stem = stem
+            self.cancel_event = Event()
+
+        def cancel(self) -> None:
+            self.cancel_event.set()
 
         @Slot()
         def run(self) -> None:
             try:
-                self.completed.emit(capture_dump("TriggerIO", self.stem, seconds=180, idle_seconds=5))
+                self.completed.emit(
+                    capture_dump(
+                        "TriggerIO",
+                        self.stem,
+                        seconds=180,
+                        idle_seconds=5,
+                        cancelled=self.cancel_event.is_set,
+                    )
+                )
+            except CaptureCancelled:
+                self.cancelled.emit()
             except Exception as error:  # pragma: no cover - hardware/runtime path
                 self.failed.emit(str(error))
 
@@ -80,6 +96,9 @@ def launch(dump_path: Path | None = None) -> int:
             self._refreshing = False
             self.capture_thread = None
             self.capture_worker = None
+            self._close_confirmed = False
+            self._close_after_capture = False
+            self._startup_warning: str | None = None
             if source is None:
                 if not self.state_store.exists():
                     raise ValueError("no dump supplied and no last-known DDTi state exists")
@@ -88,12 +107,25 @@ def launch(dump_path: Path | None = None) -> int:
             else:
                 self.configuration = _decode_complete_configuration(source)
                 self.source_label = str(source)
-                self.state_store.save(self.configuration.raw, source=str(source), reason="opened verified dump")
+                try:
+                    self.state_store.save(self.configuration.raw, source=str(source), reason="opened verified dump")
+                except OSError as error:
+                    self._startup_warning = str(error)
             self.source_raw = self.configuration.raw
             self.setWindowTitle("DDTi Editor — configuration complète")
             self.setMinimumSize(1100, 700)
             self._build_ui()
             self.refresh_all()
+            if self._startup_warning:
+                QTimer.singleShot(
+                    0,
+                    lambda: QMessageBox.warning(
+                        self,
+                        "Cache local indisponible",
+                        "Le dump est ouvert, mais le dernier état connu n’a pas pu être mémorisé.\n\n"
+                        + self._startup_warning,
+                    ),
+                )
 
         def _build_ui(self) -> None:
             root = QWidget(self)
@@ -132,6 +164,7 @@ def launch(dump_path: Path | None = None) -> int:
             splitter.setStretchFactor(1, 1)
             outer.addWidget(splitter, 1)
             actions = QHBoxLayout()
+            self.action_buttons: list[QPushButton] = []
             for text, callback in (
                 ("Synchroniser", self.synchronize_from_ddti),
                 ("Ouvrir un dump", self.open_dump),
@@ -145,6 +178,7 @@ def launch(dump_path: Path | None = None) -> int:
                 button = QPushButton(text)
                 button.clicked.connect(callback)
                 actions.addWidget(button)
+                self.action_buttons.append(button)
                 if text == "Synchroniser":
                     self.synchronize_button = button
             actions.addStretch()
@@ -152,6 +186,7 @@ def launch(dump_path: Path | None = None) -> int:
             write.setObjectName("primary")
             write.clicked.connect(self.write_to_ddti)
             actions.addWidget(write)
+            self.write_button = write
             outer.addLayout(actions)
             self.setCentralWidget(root)
             self.statusBar().showMessage(f"Source : {self.source_label}")
@@ -219,9 +254,8 @@ def launch(dump_path: Path | None = None) -> int:
                 self.trigger_spins[field] = spin
                 form.addRow(label, spin)
             self.curve = QComboBox()
-            for value in range(128):
-                label = VELOCITY_CURVE_LABELS.get(value)
-                self.curve.addItem(f"{label}  (code {value})" if label else f"Code {value}", value)
+            for value, label in VELOCITY_CURVE_LABELS.items():
+                self.curve.addItem(f"{label}  (code {value})", value)
             self.curve.currentIndexChanged.connect(self.set_velocity_curve)
             form.insertRow(1, "Velocity Curve", self.curve)
             self.trigger_type_raw = QSpinBox()
@@ -230,7 +264,11 @@ def launch(dump_path: Path | None = None) -> int:
             self.trigger_type_raw.setToolTip("Visible mais verrouillé jusqu’à la validation du dernier octet sur ce DDTi 2016.")
             form.addRow("Dernier octet (brut, verrouillé)", self.trigger_type_raw)
             layout.addWidget(group)
-            note = QLabel("Ces réglages sont globaux pour les 21 kits. Sur la pédale hi-hat, X-Talk contient la calibration.")
+            note = QLabel(
+                "Ces réglages sont globaux pour les 21 kits. Sur la pédale hi-hat, X-Talk contient la calibration. "
+                "Types documentés : PP1–PP5, SS, PS, SP, SUS, AS ; HH1–HH7 sont auto-détectés. "
+                "Leur encodage SysEx reste verrouillé jusqu’au test matériel."
+            )
             note.setWordWrap(True)
             note.setObjectName("subtitle")
             layout.addWidget(note)
@@ -289,10 +327,17 @@ def launch(dump_path: Path | None = None) -> int:
             record = self.configuration.global_trigger_records[self.selected_record()]
             for field, spin in self.trigger_spins.items():
                 spin.blockSignals(True)
+                if field == "xtalk":
+                    spin.setMaximum(127 if record.index == 20 else max(7, record.settings[field]))
                 spin.setValue(record.settings[field])
                 spin.blockSignals(False)
             self.curve.blockSignals(True)
-            self.curve.setCurrentIndex(record.settings["velocity_curve"])
+            curve_value = record.settings["velocity_curve"]
+            curve_index = self.curve.findData(curve_value)
+            if curve_index < 0:
+                self.curve.addItem(f"Code brut non documenté {curve_value}", curve_value)
+                curve_index = self.curve.findData(curve_value)
+            self.curve.setCurrentIndex(curve_index)
             self.curve.blockSignals(False)
             self.trigger_type_raw.setValue(record.trigger_type_raw)
             self._refreshing = False
@@ -306,6 +351,20 @@ def launch(dump_path: Path | None = None) -> int:
             self.change_status.setObjectName("statusGood" if count == 0 else "statusChanged")
             self.change_status.style().unpolish(self.change_status)
             self.change_status.style().polish(self.change_status)
+
+        def _has_staged_changes(self) -> bool:
+            return self.configuration.raw != self.source_raw
+
+        def _save_last_known(self, raw: bytes, *, source: str, reason: str) -> Path | None:
+            try:
+                return self.state_store.save(raw, source=source, reason=reason)
+            except OSError as error:
+                QMessageBox.warning(
+                    self,
+                    "Cache local indisponible",
+                    "L’état de travail reste ouvert, mais il n’a pas pu être mémorisé.\n\n" + str(error),
+                )
+                return None
 
         def set_zone(self, input_number: int, zone: str, field: str, value: int) -> None:
             if self._refreshing:
@@ -347,6 +406,16 @@ def launch(dump_path: Path | None = None) -> int:
             return path
 
         def open_dump(self) -> None:
+            if self._has_staged_changes():
+                answer = QMessageBox.question(
+                    self,
+                    "Remplacer les changements ?",
+                    "Ouvrir un autre dump abandonnera les changements non envoyés. Continuer ?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    return
             filename, _ = QFileDialog.getOpenFileName(self, "Ouvrir un dump DDTi", "", "SysEx (*.syx)")
             if not filename:
                 return
@@ -358,14 +427,26 @@ def launch(dump_path: Path | None = None) -> int:
             self.configuration = configuration
             self.source_raw = configuration.raw
             self.source_label = filename
-            self.state_store.save(configuration.raw, source=filename, reason="opened verified dump")
+            self._save_last_known(configuration.raw, source=filename, reason="opened verified dump")
             self.refresh_all()
             self.statusBar().showMessage(f"Source : {filename}")
 
         def synchronize_from_ddti(self) -> None:
             if self.capture_thread is not None and self.capture_thread.isRunning():
-                self.statusBar().showMessage("Une synchronisation DDTi est déjà en cours.")
+                self.capture_worker.cancel()
+                self.synchronize_button.setEnabled(False)
+                self.device_status.setText("● Annulation de l’écoute…")
                 return
+            if self._has_staged_changes():
+                answer = QMessageBox.question(
+                    self,
+                    "Remplacer les changements ?",
+                    "La synchronisation remplacera les changements non envoyés. Continuer ?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    return
             answer = QMessageBox.information(
                 self,
                 "Synchronisation DDTi",
@@ -384,20 +465,37 @@ def launch(dump_path: Path | None = None) -> int:
             self.capture_thread.started.connect(self.capture_worker.run)
             self.capture_worker.completed.connect(self._synchronization_complete)
             self.capture_worker.failed.connect(self._synchronization_failed)
+            self.capture_worker.cancelled.connect(self._synchronization_cancelled)
             self.capture_worker.completed.connect(self.capture_thread.quit)
             self.capture_worker.failed.connect(self.capture_thread.quit)
+            self.capture_worker.cancelled.connect(self.capture_thread.quit)
             self.capture_thread.finished.connect(self.capture_worker.deleteLater)
             self.capture_thread.finished.connect(self.capture_thread.deleteLater)
             self.device_status.setText("● Écoute du dump DDTi…")
-            self.synchronize_button.setEnabled(False)
+            self.synchronize_button.setText("Annuler l’écoute")
+            self._set_capture_active(True)
             self.capture_thread.finished.connect(self._synchronization_finished)
             self.capture_thread.start()
 
+        def _set_capture_active(self, active: bool) -> None:
+            for button in self.action_buttons:
+                if button is not self.synchronize_button:
+                    button.setEnabled(not active)
+            self.write_button.setEnabled(not active)
+            self.kit_list.setEnabled(not active)
+            self.tabs.setEnabled(not active)
+            if not active:
+                self.synchronize_button.setEnabled(True)
+                self.synchronize_button.setText("Synchroniser")
+
         @Slot()
         def _synchronization_finished(self) -> None:
-            self.synchronize_button.setEnabled(True)
+            self._set_capture_active(False)
             self.capture_thread = None
             self.capture_worker = None
+            if self._close_after_capture:
+                self._close_after_capture = False
+                QTimer.singleShot(0, self.close)
 
         @Slot(object)
         def _synchronization_complete(self, result) -> None:
@@ -409,7 +507,11 @@ def launch(dump_path: Path | None = None) -> int:
             self.configuration = configuration
             self.source_raw = configuration.raw
             self.source_label = str(result.syx_path)
-            self.state_store.save(configuration.raw, source=self.source_label, reason="complete panel synchronization")
+            self._save_last_known(
+                configuration.raw,
+                source=self.source_label,
+                reason="complete panel synchronization",
+            )
             self.refresh_all()
             self.device_status.setText("● Synchronisé — 42 trames reçues")
             self.statusBar().showMessage(f"Source : {self.source_label}")
@@ -417,7 +519,12 @@ def launch(dump_path: Path | None = None) -> int:
         @Slot(str)
         def _synchronization_failed(self, message: str) -> None:
             self.device_status.setText("● Synchronisation échouée")
-            QMessageBox.warning(self, "Synchronisation échouée", message)
+            if not self._close_after_capture:
+                QMessageBox.warning(self, "Synchronisation échouée", message)
+
+        @Slot()
+        def _synchronization_cancelled(self) -> None:
+            self.device_status.setText("● Synchronisation annulée")
 
         def import_preset(self) -> None:
             filename, _ = QFileDialog.getOpenFileName(self, "Importer une configuration", "", "Configuration (*.yaml *.yml *.json)")
@@ -454,12 +561,22 @@ def launch(dump_path: Path | None = None) -> int:
         def export_configuration_preset(self) -> None:
             path = self.choose_new_path("Exporter la configuration", Path("ddti-config.yaml"), "YAML (*.yaml *.yml);;JSON (*.json)")
             if path is not None:
-                write_document(path, self.configuration.to_configuration_preset(name=path.stem))
+                try:
+                    write_document(path, self.configuration.to_configuration_preset(name=path.stem))
+                except (OSError, ValueError) as error:
+                    QMessageBox.warning(self, "Export impossible", str(error))
+                    return
+                self.statusBar().showMessage(f"Configuration exportée : {path}")
 
         def export_sysex(self) -> None:
             path = self.choose_new_path("Exporter le SysEx", Path("ddti-staged.syx"), "SysEx (*.syx)")
             if path is not None:
-                path.write_bytes(self.configuration.raw)
+                try:
+                    path.write_bytes(self.configuration.raw)
+                except OSError as error:
+                    QMessageBox.warning(self, "Export impossible", str(error))
+                    return
+                self.statusBar().showMessage(f"SysEx exporté : {path}")
 
         def review_staged_diff(self) -> None:
             differences = diff_ddti_bytes(self.source_raw, self.configuration.raw)
@@ -470,6 +587,17 @@ def launch(dump_path: Path | None = None) -> int:
             dialog.exec()
 
         def discard_changes(self) -> None:
+            if not self._has_staged_changes():
+                return
+            answer = QMessageBox.question(
+                self,
+                "Annuler les changements",
+                "Abandonner tous les changements non envoyés ?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
             self.configuration = decode_configuration(decode_dump(self.source_raw))
             self.refresh_all()
 
@@ -489,15 +617,71 @@ def launch(dump_path: Path | None = None) -> int:
             if dialog.exec() != QMessageBox.Yes:
                 return
             try:
+                self.state_store.save(
+                    self.source_raw,
+                    source=self.source_label,
+                    reason="pre-write persistence check",
+                )
+            except OSError as error:
+                QMessageBox.warning(
+                    self,
+                    "Envoi refusé",
+                    f"L’état de sécurité local ne peut pas être écrit. Aucun octet n’a été envoyé.\n\n{error}",
+                )
+                return
+            try:
                 result = send_safe_configuration(self.source_raw, self.configuration.raw, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_AUTHORIZE_DDTI_CONFIRMED_FIELDS", inter_message_ms=50)
             except (ValueError, RuntimeError) as error:
                 QMessageBox.warning(self, "Échec de l’envoi", str(error))
                 return
             self.source_raw = plan.raw
             self.configuration = decode_configuration(plan.transfer.dump)
-            saved = self.state_store.save(plan.raw, source=self.source_label, reason="successful confirmed-fields write")
+            try:
+                saved = self.state_store.save(
+                    plan.raw,
+                    source=self.source_label,
+                    reason="successful confirmed-fields write",
+                )
+            except OSError as error:
+                self.refresh_all()
+                self.device_status.setText("● Envoyé — cache local à resynchroniser")
+                QMessageBox.critical(
+                    self,
+                    "DDTi envoyé, cache non sauvegardé",
+                    "Le DDTi a bien reçu la configuration, mais le cache local n’a pas pu être mis à jour. "
+                    f"Garde l’application ouverte et resynchronise avant de la fermer.\n\n{error}",
+                )
+                return
             self.refresh_all()
             QMessageBox.information(self, "Configuration envoyée", f"{result.packet_count} trames envoyées vers {result.output_port}.\nÉtat local : {saved}\nSHA-256 : {result.sha256}")
+
+        def closeEvent(self, event) -> None:
+            capture_active = self.capture_thread is not None and self.capture_thread.isRunning()
+            if not self._close_confirmed and (capture_active or self._has_staged_changes()):
+                details = []
+                if capture_active:
+                    details.append("l’écoute DDTi en cours sera annulée")
+                if self._has_staged_changes():
+                    details.append("les changements non envoyés seront perdus")
+                answer = QMessageBox.question(
+                    self,
+                    "Fermer DDTi Editor ?",
+                    "Fermer maintenant : " + " et ".join(details) + ". Continuer ?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    event.ignore()
+                    return
+                self._close_confirmed = True
+            if capture_active:
+                self._close_after_capture = True
+                self.capture_worker.cancel()
+                self.synchronize_button.setEnabled(False)
+                self.device_status.setText("● Annulation avant fermeture…")
+                event.ignore()
+                return
+            event.accept()
 
     application = QApplication.instance() or QApplication([])
     application.setStyleSheet(_STYLE)

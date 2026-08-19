@@ -10,10 +10,10 @@ DDTI_SOURCE = Path(__file__).resolve().parents[2] / "apps" / "ddti" / "src"
 if str(DDTI_SOURCE) not in sys.path:
     sys.path.insert(0, str(DDTI_SOURCE))
 
-from ddti.capture import CaptureResult, _WINDOWS_SYSEX_BUFFER_COUNT, _receive_mido_sysex, capture_dump, capture_series
+from ddti.capture import CaptureCancelled, CaptureResult, _WINDOWS_SYSEX_BUFFER_COUNT, _receive_mido_sysex, capture_dump, capture_series
 from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
-from ddti.models import decode_configuration, encode_configuration
+from ddti.models import VELOCITY_CURVE_LABELS, decode_configuration, encode_configuration
 from ddti.mappings import apply_role_template
 from ddti.presets import load_document
 from ddti.protocol import decode_dump
@@ -53,6 +53,16 @@ class _OutputPort:
 
 
 class DDTiTests(unittest.TestCase):
+    def test_documented_velocity_curve_codes_are_named(self) -> None:
+        self.assertEqual(
+            VELOCITY_CURVE_LABELS,
+            {
+                0: "Cst", 1: "OFF", 2: "E1", 3: "E2", 4: "E3", 5: "E4",
+                6: "Lin", 7: "LG1", 8: "LG2", 9: "LG3", 10: "LG4",
+                11: "SPL1", 12: "SPL2", 13: "SPL3", 14: "SPL4",
+            },
+        )
+
     def test_sysex_parser_preserves_complete_concatenated_frames(self) -> None:
         raw = bytes.fromhex("F0 01 02 F7 F0 7F F7")
         messages = parse_stream(raw)
@@ -110,8 +120,26 @@ class DDTiTests(unittest.TestCase):
                  patch("ddti.capture._receive_mido_sysex", return_value=(SysExMessage(bytes.fromhex("F0 01 F7")),)) as receiver, \
                  patch("ddti.capture._receive_windows_sysex") as windows_receiver:
                 capture_dump("TriggerIO", stem, seconds=1, idle_seconds=1, receiver="mido")
-        receiver.assert_called_once_with("TriggerIO 30", seconds=1, idle_seconds=1)
+        receiver.assert_called_once_with("TriggerIO 30", seconds=1, idle_seconds=1, cancelled=None)
         windows_receiver.assert_not_called()
+
+    def test_capture_cancellation_publishes_no_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            stem = Path(temporary) / "cancelled"
+            with patch("ddti.capture._resolve_input", return_value="TriggerIO 30"), \
+                 patch("ddti.capture.platform.system", return_value="not-windows"), \
+                 patch("ddti.capture._receive_mido_sysex", return_value=[]):
+                with self.assertRaises(CaptureCancelled):
+                    capture_dump(
+                        "TriggerIO",
+                        stem,
+                        seconds=1,
+                        idle_seconds=1,
+                        cancelled=lambda: True,
+                    )
+            self.assertFalse(stem.with_suffix(".syx").exists())
+            self.assertFalse(stem.with_suffix(".hex").exists())
+            self.assertFalse(stem.with_suffix(".json").exists())
 
     def test_windows_receiver_has_capacity_for_the_observed_full_dump(self) -> None:
         self.assertGreaterEqual(_WINDOWS_SYSEX_BUFFER_COUNT, 42)
@@ -288,8 +316,10 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(staged.global_trigger_records[2].label, "Input 2 Tip")
         self.assertEqual(staged.global_trigger_records[2].settings["retrigger"], 15)
         preset = staged.to_configuration_preset()
+        preset["global_triggers"][2]["trigger_type_raw"] = 99
         round_tripped = source.with_configuration_preset(preset)
         self.assertEqual(round_tripped.raw, staged.canonicalize_disabled_program_changes().raw)
+        self.assertEqual(round_tripped.global_trigger_records[2].trigger_type_raw, 0)
 
         with tempfile.TemporaryDirectory() as temporary:
             store = DDTiStateStore(Path(temporary))
