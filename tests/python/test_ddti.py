@@ -80,6 +80,17 @@ class DDTiTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 capture_dump("TriggerIO", stem, seconds=1, idle_seconds=1)
 
+    def test_capture_can_force_the_independent_mido_receiver_on_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            stem = Path(temporary) / "mido_check"
+            with patch("ddti.capture._resolve_input", return_value="TriggerIO 30"), \
+                 patch("ddti.capture.platform.system", return_value="Windows"), \
+                 patch("ddti.capture._receive_mido_sysex", return_value=(SysExMessage(bytes.fromhex("F0 01 F7")),)) as receiver, \
+                 patch("ddti.capture._receive_windows_sysex") as windows_receiver:
+                capture_dump("TriggerIO", stem, seconds=1, idle_seconds=1, receiver="mido")
+        receiver.assert_called_once_with("TriggerIO 30", seconds=1, idle_seconds=1)
+        windows_receiver.assert_not_called()
+
     def test_capture_series_uses_new_numbered_stems_without_reopening_a_cli(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

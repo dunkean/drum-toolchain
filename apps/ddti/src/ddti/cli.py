@@ -28,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     dump.add_argument("--listen", action="store_true", help="required acknowledgement that this command only waits for a manual panel dump")
     dump.add_argument("--seconds", type=float, default=90)
     dump.add_argument("--idle-seconds", type=float, default=5)
+    dump.add_argument("--receiver", choices=("auto", "mido"), default="auto", help="auto uses Windows long-message capture; mido is an independent diagnostic receiver")
     session = commands.add_parser("session", help="capture several manual panel dumps in one receive-only session")
     session.add_argument("directory", type=Path, help="new capture artifact directory")
     session.add_argument("--input", required=True, help="unique DDTi MIDI input name or substring")
@@ -78,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             "this command never opens a MIDI output",
             flush=True,
         )
-        result = capture_dump(args.input, args.stem, seconds=args.seconds, idle_seconds=args.idle_seconds)
+        result = capture_dump(args.input, args.stem, seconds=args.seconds, idle_seconds=args.idle_seconds, receiver=args.receiver)
         print(json.dumps({"syx": str(result.syx_path), "hex": str(result.hex_path), "metadata": str(result.metadata_path), "sha256": result.sha256, "messages": result.message_count}, indent=2))
     elif args.command == "session":
         if not args.listen:

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import platform
 import time
-from typing import Callable
+from typing import Callable, Literal
 
 from .sysex import SysExMessage, parse_stream, render_hex
 
@@ -39,18 +39,28 @@ def _resolve_input(query: str) -> str:
     return matches[0]
 
 
-def capture_dump(port_query: str, stem: Path, *, seconds: float, idle_seconds: float) -> CaptureResult:
+def capture_dump(
+    port_query: str,
+    stem: Path,
+    *,
+    seconds: float,
+    idle_seconds: float,
+    receiver: Literal["auto", "mido"] = "auto",
+) -> CaptureResult:
     """Listen only; write received complete SysEx frames to three new files."""
     if seconds <= 0 or idle_seconds <= 0:
         raise ValueError("seconds and idle_seconds must be positive")
+    if receiver not in {"auto", "mido"}:
+        raise ValueError("receiver must be 'auto' or 'mido'")
     paths = tuple(stem.with_suffix(suffix) for suffix in (".syx", ".hex", ".json"))
     existing = [path for path in paths if path.exists()]
     if existing:
         raise FileExistsError(f"refusing to overwrite capture artifact(s): {', '.join(map(str, existing))}")
     name = _resolve_input(port_query)
+    use_windows_receiver = receiver == "auto" and platform.system() == "Windows"
     messages = (
         _receive_windows_sysex(name, seconds=seconds, idle_seconds=idle_seconds)
-        if platform.system() == "Windows"
+        if use_windows_receiver
         else _receive_mido_sysex(name, seconds=seconds, idle_seconds=idle_seconds)
     )
     if not messages:

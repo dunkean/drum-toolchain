@@ -47,6 +47,19 @@ identified MIDI input (`TriggerIO 30`) and never opens `TriggerIO 10`.
 facts subsequently confirmed in the documentation, but do not publish a
 personal factory dump unless it is intentionally reviewed.
 
+### Independent receiver cross-check
+
+On Windows, `ddti dump` normally uses large native long-message buffers. To
+verify a capture with an independent receive path, repeat a panel-initiated
+dump to a **new** filename with the portable `python-rtmidi` receiver:
+
+```powershell
+ddti dump captures/receiver_crosscheck --input TriggerIO --listen --receiver mido --seconds 90 --idle-seconds 5
+```
+
+This remains receive-only. `--receiver mido` exists solely to compare the raw
+stream with the native Windows receiver; it never opens an output MIDI port.
+
 ## Compact differential session
 
 Use one long-running CLI process when collecting several controlled panel
