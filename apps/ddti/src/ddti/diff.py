@@ -67,7 +67,7 @@ def _observed_position_label(difference: ByteDifference) -> str | None:
         position = f"manufacturer ID byte {byte}"
     elif byte in (6, 7):
         position = f"observed address/reserved byte {byte - 5}"
-    elif byte == 77 or byte == 17:  # known observed packet lengths; a generic end check follows below
+    elif (difference.observed_packet_family == 0x01 and byte == 77) or (difference.observed_packet_family == 0x02 and byte == 17):
         position = "SysEx end"
     else:
         position = labels.get(byte, f"opaque body byte +0x{byte - 11:02X}" if byte >= 11 else f"packet byte 0x{byte:02X}")

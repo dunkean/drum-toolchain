@@ -63,6 +63,9 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(change.offset, 11)
             self.assertEqual(change.observed_packet_family, 1)
             self.assertIn("family 0x01", render_diff((change,)))
+            before.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 01 F7"))
+            after.write_bytes(bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 00 00 00 00 00 00 02 F7"))
+            self.assertIn("opaque body byte +0x06", render_diff(diff_files(before, after)))
 
     def test_capture_writes_hashed_triad_without_overwriting(self) -> None:
         import mido
