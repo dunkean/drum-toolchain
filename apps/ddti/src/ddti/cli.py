@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .capture import capture_dump
+from .capture import capture_dump, capture_series
 from .diff import diff_files, render_diff
 from .discovery import discover_devices
 from .monitor import monitor
@@ -28,6 +28,14 @@ def build_parser() -> argparse.ArgumentParser:
     dump.add_argument("--listen", action="store_true", help="required acknowledgement that this command only waits for a manual panel dump")
     dump.add_argument("--seconds", type=float, default=90)
     dump.add_argument("--idle-seconds", type=float, default=5)
+    session = commands.add_parser("session", help="capture several manual panel dumps in one receive-only session")
+    session.add_argument("directory", type=Path, help="new capture artifact directory")
+    session.add_argument("--input", required=True, help="unique DDTi MIDI input name or substring")
+    session.add_argument("--listen", action="store_true", help="required acknowledgement that every snapshot waits for a manual panel dump")
+    session.add_argument("--label", default="snapshot", help="safe output prefix for sequential captures")
+    session.add_argument("--snapshots", type=int, required=True, help="number of manual dumps to collect")
+    session.add_argument("--seconds-per-snapshot", type=float, default=300)
+    session.add_argument("--idle-seconds", type=float, default=5)
     comparison = commands.add_parser("diff", help="offline byte-level diff of two complete .syx streams")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -58,6 +66,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         result = capture_dump(args.input, args.stem, seconds=args.seconds, idle_seconds=args.idle_seconds)
         print(json.dumps({"syx": str(result.syx_path), "hex": str(result.hex_path), "metadata": str(result.metadata_path), "sha256": result.sha256, "messages": result.message_count}, indent=2))
+    elif args.command == "session":
+        if not args.listen:
+            raise ValueError("session is receive-only; pass --listen after preparing the panel dump sequence")
+        def announce(number: int, stem: Path) -> None:
+            print(
+                f"snapshot {number}/{args.snapshots}: listening on {args.input!r} for a panel-initiated dump; "
+                "this command never opens a MIDI output",
+                flush=True,
+            )
+        results = capture_series(
+            args.input,
+            args.directory,
+            label=args.label,
+            snapshots=args.snapshots,
+            seconds_per_snapshot=args.seconds_per_snapshot,
+            idle_seconds=args.idle_seconds,
+            on_listening=announce,
+        )
+        print(json.dumps([
+            {"syx": str(result.syx_path), "sha256": result.sha256, "messages": result.message_count}
+            for result in results
+        ], indent=2))
     elif args.command == "diff":
         print(render_diff(diff_files(args.before, args.after)), end="")
     else:

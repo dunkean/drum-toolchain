@@ -47,6 +47,23 @@ identified MIDI input (`TriggerIO 30`) and never opens `TriggerIO 10`.
 facts subsequently confirmed in the documentation, but do not publish a
 personal factory dump unless it is intentionally reviewed.
 
+## Compact differential session
+
+Use one long-running CLI process when collecting several controlled panel
+changes. It does not send MIDI: each numbered snapshot opens the same
+receive-only capture path, saves its own hash, then automatically waits for
+the next manual dump.
+
+```powershell
+ddti session captures/channel-test --input TriggerIO --listen --label channel --snapshots 3 --seconds-per-snapshot 300
+```
+
+For every announced snapshot, perform **exactly one** documented panel edit,
+return to `Kit` to save where required, then press `FUNCTION UP + VALUE UP` to
+dump. Do not make a second edit until the next `snapshot n/m: listening` line.
+At the end of a short experiment series, a factory reset followed by one final
+capture is the quickest way to re-establish the known baseline.
+
 ## Controlled differential experiment (after the golden copy)
 
 For the first comparison, change only **Kit 0, Input 1 Tip MIDI Note: 35 to

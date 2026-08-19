@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import platform
 import time
+from typing import Callable
 
 from .sysex import SysExMessage, parse_stream, render_hex
 
@@ -83,6 +84,35 @@ def capture_dump(port_query: str, stem: Path, *, seconds: float, idle_seconds: f
     }
     metadata_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return result
+
+
+def capture_series(
+    port_query: str,
+    directory: Path,
+    *,
+    label: str,
+    snapshots: int,
+    seconds_per_snapshot: float,
+    idle_seconds: float,
+    on_listening: Callable[[int, Path], None] | None = None,
+) -> tuple[CaptureResult, ...]:
+    """Capture several user-initiated dumps without restarting the CLI process.
+
+    Each snapshot still opens a fresh receive-only endpoint and waits for one
+    complete dump.  This preserves the proven native Windows long-message path
+    while letting the operator perform a compact sequence of panel edits.
+    """
+    if snapshots <= 0:
+        raise ValueError("snapshots must be positive")
+    if not label or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in label):
+        raise ValueError("label may contain only letters, numbers, _ and -")
+    results = []
+    for number in range(1, snapshots + 1):
+        stem = directory / f"{label}_{number:03d}"
+        if on_listening:
+            on_listening(number, stem)
+        results.append(capture_dump(port_query, stem, seconds=seconds_per_snapshot, idle_seconds=idle_seconds))
+    return tuple(results)
 
 
 def _receive_mido_sysex(name: str, *, seconds: float, idle_seconds: float) -> list[SysExMessage]:

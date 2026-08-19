@@ -9,7 +9,7 @@ DDTI_SOURCE = Path(__file__).resolve().parents[2] / "apps" / "ddti" / "src"
 if str(DDTI_SOURCE) not in sys.path:
     sys.path.insert(0, str(DDTI_SOURCE))
 
-from ddti.capture import _receive_mido_sysex, capture_dump
+from ddti.capture import CaptureResult, _receive_mido_sysex, capture_dump, capture_series
 from ddti.device import DDTi, ProtocolNotValidatedError
 from ddti.cli import main
 from ddti.models import decode_configuration, encode_configuration
@@ -78,6 +78,22 @@ class DDTiTests(unittest.TestCase):
             self.assertIn(result.sha256, result.metadata_path.read_text(encoding="utf-8"))
             with self.assertRaises(FileExistsError):
                 capture_dump("TriggerIO", stem, seconds=1, idle_seconds=1)
+
+    def test_capture_series_uses_new_numbered_stems_without_reopening_a_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = []
+            def fake_capture(port: str, stem: Path, *, seconds: float, idle_seconds: float):
+                results.append((port, stem, seconds, idle_seconds))
+                return CaptureResult(port, "now", 1, 1, 3, "a" * 64, stem.with_suffix(".syx"), stem.with_suffix(".hex"), stem.with_suffix(".json"))
+            announcements = []
+            with patch("ddti.capture.capture_dump", side_effect=fake_capture):
+                captured = capture_series("TriggerIO", root, label="notes", snapshots=2, seconds_per_snapshot=30, idle_seconds=2, on_listening=lambda number, stem: announcements.append((number, stem)))
+            self.assertEqual([item[1].name for item in results], ["notes_001", "notes_002"])
+            self.assertEqual([item[0] for item in announcements], [1, 2])
+            self.assertEqual(len(captured), 2)
+            with self.assertRaisesRegex(ValueError, "label"):
+                capture_series("TriggerIO", root, label="bad label", snapshots=1, seconds_per_snapshot=1, idle_seconds=1)
 
     def test_portable_receiver_filters_non_sysex_events(self) -> None:
         import mido
