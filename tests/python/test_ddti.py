@@ -96,6 +96,25 @@ class DDTiTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "label"):
                 capture_series("TriggerIO", root, label="bad label", snapshots=1, seconds_per_snapshot=1, idle_seconds=1)
 
+    def test_session_cli_runs_offline_diffs_against_an_explicit_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline = root / "golden.syx"
+            snapshot = root / "snapshot.syx"
+            result = CaptureResult("TriggerIO 30", "now", 32, 32, 1836, "a" * 64, snapshot, root / "snapshot.hex", root / "snapshot.json")
+            with patch("ddti.cli.capture_series", return_value=(result,)) as capture, \
+                 patch("ddti.cli.diff_files", return_value=()) as comparison, \
+                 patch("sys.stdout") as stdout:
+                self.assertEqual(main([
+                    "session", str(root / "session"), "--input", "TriggerIO", "--listen", "--snapshots", "1",
+                    "--compare-to", str(baseline),
+                ]), 0)
+        capture.assert_called_once()
+        comparison.assert_called_once_with(baseline, snapshot)
+        output = "".join(str(call.args[0]) for call in stdout.write.call_args_list)
+        self.assertIn("offline comparisons", output)
+        self.assertIn("No byte differences", output)
+
     def test_portable_receiver_filters_non_sysex_events(self) -> None:
         import mido
         messages = [mido.Message("note_on", note=36, velocity=100), mido.Message("sysex", data=(1,))]

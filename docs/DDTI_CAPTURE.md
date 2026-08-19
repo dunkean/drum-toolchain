@@ -55,7 +55,7 @@ receive-only capture path, saves its own hash, then automatically waits for
 the next manual dump.
 
 ```powershell
-ddti session captures/channel-test --input TriggerIO --listen --label channel --snapshots 3 --seconds-per-snapshot 300
+ddti session captures/channel-test --input TriggerIO --listen --label channel --snapshots 3 --seconds-per-snapshot 300 --compare-to captures/factory_dump_001.golden.syx
 ```
 
 For every announced snapshot, perform **exactly one** documented panel edit,
@@ -63,6 +63,28 @@ return to `Kit` to save where required, then press `FUNCTION UP + VALUE UP` to
 dump. Do not make a second edit until the next `snapshot n/m: listening` line.
 At the end of a short experiment series, a factory reset followed by one final
 capture is the quickest way to re-establish the known baseline.
+
+`--compare-to` is offline-only: after the final snapshot it prints the
+structural byte diff of every capture against the supplied golden dump. It
+never opens an output MIDI port or sends a request to the DDTi.
+
+### Minimum Gain / Threshold campaign
+
+With the verified factory dump as baseline, three panel dumps are enough for
+an initial attribution while retaining a final recovery proof. Start this
+single listener and wait for each numbered prompt:
+
+```powershell
+ddti session captures/gain-threshold-test --input TriggerIO --listen --label gain_threshold --snapshots 3 --seconds-per-snapshot 300 --compare-to captures/factory_dump_001.golden.syx
+```
+
+1. At snapshot 1, change only Kit 0 / Input 1 Gain from `15` to `16`, save as
+   required by the panel, then press **FUNCTION UP + VALUE UP**.
+2. At snapshot 2, restore Gain to `15`, change only Threshold from `5` to `6`,
+   save, then dump. Its comparison with the golden dump proves whether the
+   gain restoration was exact before interpreting the Threshold change.
+3. At snapshot 3, factory reset using the documented power-on panel action,
+   then dump. It must have no byte differences from the golden dump.
 
 The 2026-08-19 final-reset verification was byte-identical to
 `factory_dump_001.golden.syx` (1,836 bytes, SHA-256

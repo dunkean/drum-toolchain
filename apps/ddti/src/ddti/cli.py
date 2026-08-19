@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     session.add_argument("--snapshots", type=int, required=True, help="number of manual dumps to collect")
     session.add_argument("--seconds-per-snapshot", type=float, default=300)
     session.add_argument("--idle-seconds", type=float, default=5)
+    session.add_argument("--compare-to", type=Path, help="known baseline .syx; print an offline structural diff for every snapshot")
     comparison = commands.add_parser("diff", help="offline byte-level diff of two complete .syx streams")
     comparison.add_argument("before", type=Path)
     comparison.add_argument("after", type=Path)
@@ -97,10 +98,17 @@ def main(argv: list[str] | None = None) -> int:
             idle_seconds=args.idle_seconds,
             on_listening=announce,
         )
-        print(json.dumps([
+        summary = [
             {"syx": str(result.syx_path), "sha256": result.sha256, "messages": result.message_count}
             for result in results
-        ], indent=2))
+        ]
+        print(json.dumps(summary, indent=2))
+        if args.compare_to:
+            print(f"offline comparisons against {args.compare_to}:")
+            for number, result in enumerate(results, start=1):
+                differences = diff_files(args.compare_to, result.syx_path)
+                print(f"\nsnapshot {number}: {result.syx_path}")
+                print(render_diff(differences), end="")
     elif args.command == "diff":
         print(render_diff(diff_files(args.before, args.after)), end="")
     elif args.command == "decode":
