@@ -11,7 +11,7 @@ from .discovery import discover_devices
 from .monitor import monitor
 from .models import decode_configuration
 from .protocol import decode_file
-from .transfer import build_transfer_plan_from_file
+from .transfer import build_transfer_plan_from_file, send_reviewed_transfer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply_preset.add_argument("output", type=Path, help="new .syx file; existing files are refused")
     transfer_plan = commands.add_parser("transfer-plan", help="validate and review a complete dump for a future hardware transfer; never sends MIDI")
     transfer_plan.add_argument("dump", type=Path)
+    transfer = commands.add_parser("transfer", help="write one reviewed complete dump to the DDTi after explicit confirmation")
+    transfer.add_argument("dump", type=Path)
+    transfer.add_argument("--output", required=True, help="unique DDTi MIDI output name or substring")
+    transfer.add_argument("--expected-sha256", required=True, help="must match the reviewed transfer-plan SHA-256")
+    transfer.add_argument("--confirm", required=True, help="must be I_UNDERSTAND_DDTI_WRITE")
+    transfer.add_argument("--inter-message-ms", type=float, default=10)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -137,6 +143,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled"}, indent=2))
     elif args.command == "transfer-plan":
         print(json.dumps(build_transfer_plan_from_file(args.dump).to_document(), indent=2, sort_keys=True))
+    elif args.command == "transfer":
+        plan = build_transfer_plan_from_file(args.dump)
+        print(json.dumps({"about_to_write": plan.to_document(), "output_query": args.output}, indent=2, sort_keys=True), flush=True)
+        result = send_reviewed_transfer(
+            plan,
+            args.output,
+            expected_sha256=args.expected_sha256,
+            confirmation=args.confirm,
+            inter_message_ms=args.inter_message_ms,
+        )
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
     elif args.command == "serve":
         from .api import create_app
         try:

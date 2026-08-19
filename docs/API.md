@@ -71,6 +71,17 @@ hardware `write` command yet.
 review state. It is deliberately output-free; it is the gate that a future
 explicitly confirmed hardware transfer will use.
 
+The explicit CLI transfer is protected by the plan hash and a confirmation
+phrase. It sends only the reviewed complete dump, frame by frame, with a
+conservative 10 ms interval:
+
+```powershell
+ddti transfer captures/factory_dump_002_full.golden.syx --output TriggerIO --expected-sha256 <reviewed-sha256> --confirm I_UNDERSTAND_DDTI_WRITE
+```
+
+It must always be followed by a panel-initiated `ddti dump` and byte-level
+comparison before the transfer path is considered validated for edits.
+
 ## Local REST API
 
 Install `ddti[api]`, then run:

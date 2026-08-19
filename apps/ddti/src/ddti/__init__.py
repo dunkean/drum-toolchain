@@ -8,9 +8,9 @@ from .device import DDTi, ProtocolNotValidatedError
 from .discovery import DeviceInfo, discover_devices
 from .models import DDTiConfiguration, DDTiGlobalTriggerRecord, DDTiInput, DDTiKit, DDTiZone, decode_configuration, encode_configuration
 from .protocol import DDTiDump, DDTiPacket, decode_dump
-from .transfer import DDTiTransferPlan, build_transfer_plan
+from .transfer import DDTiTransferPlan, DDTiTransferResult, build_transfer_plan, send_reviewed_transfer
 
 __all__ = [
     "DDTi", "DDTiConfiguration", "DDTiDump", "DDTiGlobalTriggerRecord", "DDTiInput", "DDTiKit", "DDTiPacket", "DDTiZone", "DeviceInfo",
-    "ProtocolNotValidatedError", "DDTiTransferPlan", "build_transfer_plan", "decode_configuration", "decode_dump", "discover_devices", "encode_configuration",
+    "ProtocolNotValidatedError", "DDTiTransferPlan", "DDTiTransferResult", "build_transfer_plan", "send_reviewed_transfer", "decode_configuration", "decode_dump", "discover_devices", "encode_configuration",
 ]

@@ -17,7 +17,7 @@ from ddti.models import decode_configuration, encode_configuration
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
-from ddti.transfer import build_transfer_plan
+from ddti.transfer import build_transfer_plan, send_reviewed_transfer
 
 
 class _InputPort:
@@ -33,6 +33,20 @@ class _InputPort:
     def iter_pending(self):
         messages, self.messages = self.messages, []
         return messages
+
+
+class _OutputPort:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def send(self, message) -> None:
+        self.messages.append(message)
 
 
 class DDTiTests(unittest.TestCase):
@@ -249,6 +263,27 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(plan.to_document()["hardware_write"], "not implemented")
         with self.assertRaisesRegex(ValueError, "requires all 21"):
             build_transfer_plan(kits)
+
+    def test_reviewed_transfer_requires_exact_hash_and_confirmation_before_opening_output(self) -> None:
+        kits = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + (bytes((9, 35, 3)) * 20) + bytes(6) + bytes((0xF7,))
+            for index in range(21)
+        )
+        globals_ = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
+        plan = build_transfer_plan(kits + globals_)
+        with self.assertRaisesRegex(ValueError, "confirmation"):
+            send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="no")
+        output = _OutputPort()
+        with patch("ddti.transfer._resolve_output", return_value="TriggerIO 10"), \
+             patch("mido.open_output", return_value=output), \
+             patch("ddti.transfer.time.sleep"):
+            result = send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_UNDERSTAND_DDTI_WRITE")
+        self.assertEqual(result.packet_count, 42)
+        self.assertEqual(len(output.messages), 42)
+        self.assertEqual(bytes(output.messages[0].bytes()), kits[:78])
 
     def test_preset_cli_exports_and_applies_to_a_new_staged_file(self) -> None:
         body = bytearray()

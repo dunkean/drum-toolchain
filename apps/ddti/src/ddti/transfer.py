@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 from .protocol import DDTiDump, decode_dump
+from .sysex import parse_stream
 
 
 _COMPLETE_FAMILIES = {1: tuple(range(21)), 2: tuple(range(21))}
@@ -41,6 +43,14 @@ class DDTiTransferPlan:
         }
 
 
+@dataclass(frozen=True)
+class DDTiTransferResult:
+    output_port: str
+    packet_count: int
+    byte_count: int
+    sha256: str
+
+
 def build_transfer_plan(raw: bytes) -> DDTiTransferPlan:
     """Validate a complete 42-frame DDTi dump for offline transfer review."""
     dump = decode_dump(raw)
@@ -51,3 +61,46 @@ def build_transfer_plan(raw: bytes) -> DDTiTransferPlan:
 
 def build_transfer_plan_from_file(path: Path) -> DDTiTransferPlan:
     return build_transfer_plan(path.read_bytes())
+
+
+def _resolve_output(query: str) -> str:
+    import mido
+
+    names = list(mido.get_output_names())
+    exact = [name for name in names if name.casefold() == query.casefold()]
+    matches = exact or [name for name in names if query.casefold() in name.casefold()]
+    if len(matches) != 1:
+        raise ValueError(f"expected exactly one MIDI output matching {query!r}; found {matches}")
+    return matches[0]
+
+
+def send_reviewed_transfer(
+    plan: DDTiTransferPlan,
+    output_query: str,
+    *,
+    expected_sha256: str,
+    confirmation: str,
+    inter_message_ms: float = 10,
+) -> DDTiTransferResult:
+    """Transmit a previously reviewed complete dump after explicit confirmation.
+
+    The caller must supply the exact plan SHA-256 and confirmation phrase. This
+    is deliberately a separate operation from plan construction so a GUI/API
+    cannot transmit merely by staging an edit.
+    """
+    if expected_sha256.casefold() != plan.sha256:
+        raise ValueError("expected SHA-256 does not match the reviewed transfer plan")
+    if confirmation != "I_UNDERSTAND_DDTI_WRITE":
+        raise ValueError("explicit confirmation phrase is required")
+    if inter_message_ms < 0:
+        raise ValueError("inter_message_ms must be non-negative")
+    import mido
+
+    name = _resolve_output(output_query)
+    frames = parse_stream(plan.raw)
+    with mido.open_output(name) as output:
+        for frame in frames:
+            output.send(mido.Message("sysex", data=frame.data))
+            if inter_message_ms:
+                time.sleep(inter_message_ms / 1000)
+    return DDTiTransferResult(name, len(frames), len(plan.raw), plan.sha256)
