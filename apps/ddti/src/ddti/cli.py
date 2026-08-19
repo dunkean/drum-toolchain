@@ -10,6 +10,7 @@ from .diff import diff_files, render_diff
 from .discovery import discover_devices
 from .monitor import monitor
 from .models import decode_configuration
+from .presets import load_document, write_document
 from .protocol import decode_file
 from .transfer import build_transfer_plan_from_file
 
@@ -51,6 +52,14 @@ def build_parser() -> argparse.ArgumentParser:
     apply_preset.add_argument("dump", type=Path)
     apply_preset.add_argument("preset", type=Path)
     apply_preset.add_argument("output", type=Path, help="new .syx file; existing files are refused")
+    export_configuration = commands.add_parser("export-config", help="export all proven editable values to a new YAML or JSON offline preset")
+    export_configuration.add_argument("dump", type=Path)
+    export_configuration.add_argument("output", type=Path, help="new .yaml, .yml, or .json file; existing files are refused")
+    export_configuration.add_argument("--name", help="optional human-readable mapping name")
+    apply_configuration = commands.add_parser("apply-config", help="apply a YAML or JSON offline configuration preset to a new staged SysEx file")
+    apply_configuration.add_argument("dump", type=Path)
+    apply_configuration.add_argument("preset", type=Path)
+    apply_configuration.add_argument("output", type=Path, help="new .syx file; existing files are refused")
     transfer_plan = commands.add_parser("transfer-plan", help="validate and review a complete dump for a future hardware transfer; never sends MIDI")
     transfer_plan.add_argument("dump", type=Path)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
@@ -133,6 +142,16 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(document, dict):
             raise ValueError("preset root must be an object")
         configuration = decode_configuration(decode_file(args.dump)).with_note_preset(document)
+        args.output.write_bytes(configuration.raw)
+        print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled"}, indent=2))
+    elif args.command == "export-config":
+        configuration = decode_configuration(decode_file(args.dump))
+        write_document(args.output, configuration.to_configuration_preset(name=args.name))
+        print(json.dumps({"preset": str(args.output), "format": "ddti-configuration-preset/v1", "hardware_write": "disabled"}, indent=2))
+    elif args.command == "apply-config":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite existing file: {args.output}")
+        configuration = decode_configuration(decode_file(args.dump)).with_configuration_preset(load_document(args.preset))
         args.output.write_bytes(configuration.raw)
         print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled"}, indent=2))
     elif args.command == "transfer-plan":

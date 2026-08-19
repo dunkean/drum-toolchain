@@ -205,6 +205,7 @@ class DDTiTests(unittest.TestCase):
             body.extend((9, 35 + zone, 3))
         body.extend(b"\x00" * 6)
         raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        raw += bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
         configuration = decode_configuration(decode_dump(raw))
         self.assertEqual(configuration.kits[0].inputs[0].tip.note, 35)
         self.assertEqual(configuration.kits[0].inputs[0].ring.note, 36)
@@ -248,6 +249,25 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(len(configuration.global_trigger_records), 21)
         self.assertEqual(configuration.global_trigger_records[0].values, (0, 6, 5, 1, 10, 0))
         self.assertEqual(configuration.global_trigger_records[20].raw_offsets[0], len(kit) + 20 * 18 + 11)
+
+    def test_configuration_preset_stages_only_confirmed_notes_and_gain(self) -> None:
+        kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
+        kit = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
+        global_record = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
+        configuration = decode_configuration(decode_dump(kit + global_record))
+        self.assertEqual(configuration.input_1_tip_gain, 15)
+        preset = configuration.to_configuration_preset(name="My SD3 mapping")
+        self.assertEqual(preset["format"], "ddti-configuration-preset/v1")
+        self.assertEqual(preset["name"], "My SD3 mapping")
+        staged = configuration.with_configuration_preset({
+            "format": "ddti-configuration-preset/v1",
+            "notes": [{"kit": 0, "inputs": [{"input": 1, "tip_note": 36}]}],
+            "confirmed_global_trigger": {"input_1_tip_gain": 16},
+        })
+        differences = diff_bytes(configuration.raw, staged.raw)
+        self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(12, 35, 36), (89, 15, 16)])
+        with self.assertRaisesRegex(ValueError, "Gain"):
+            configuration.with_input_1_tip_gain(128)
 
     def test_transfer_plan_accepts_only_a_complete_observed_dump(self) -> None:
         kits = b"".join(
@@ -308,6 +328,25 @@ class DDTiTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 main(["apply-preset", str(source), str(preset), str(staged)])
 
+    def test_configuration_cli_round_trips_a_yaml_preset_offline(self) -> None:
+        kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
+        kit = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
+        global_record = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.syx"
+            preset = root / "mapping.yaml"
+            staged = root / "staged.syx"
+            source.write_bytes(kit + global_record)
+            self.assertEqual(main(["export-config", str(source), str(preset), "--name", "SD3"]), 0)
+            text = preset.read_text(encoding="utf-8")
+            self.assertIn("format: ddti-configuration-preset/v1", text)
+            document = __import__("yaml").safe_load(text)
+            document["confirmed_global_trigger"]["input_1_tip_gain"] = 16
+            preset.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
+            self.assertEqual(main(["apply-config", str(source), str(preset), str(staged)]), 0)
+            self.assertEqual(decode_configuration(decode_dump(staged.read_bytes())).input_1_tip_gain, 16)
+
     def test_optional_fastapi_stages_notes_without_hardware_output(self) -> None:
         try:
             from fastapi.testclient import TestClient
@@ -319,6 +358,7 @@ class DDTiTests(unittest.TestCase):
             body.extend((9, 35 + zone, 3))
         body.extend(b"\x00" * 6)
         raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        raw += bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "fixture.syx"
             source.write_bytes(raw)
@@ -337,6 +377,12 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.json()["staged_only"])
             self.assertEqual(client.get("/kits/0/inputs/1").json()["ring"]["note"], 61)
+            response = client.patch("/global-trigger/input-1/tip", json={"gain": 16})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["confirmed_global_trigger"]["input_1_tip_gain"], 16)
+            configuration_preset = client.get("/configuration-preset")
+            self.assertEqual(configuration_preset.status_code, 200)
+            self.assertEqual(configuration_preset.json()["confirmed_global_trigger"]["input_1_tip_gain"], 16)
 
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:

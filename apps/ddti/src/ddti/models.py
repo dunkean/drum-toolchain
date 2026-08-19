@@ -1,8 +1,8 @@
-"""Validated read model for the note fields of observed legacy DDTi dumps.
+"""Validated offline model for fields observed in legacy DDTi dumps.
 
-Only Kit/Input/Tip-or-Ring MIDI note locations are semantic fields here.  The
-other two bytes stored alongside every zone remain raw observations, and no
-configuration produced by this module may be sent to hardware yet.
+Kit/Input/Tip-or-Ring MIDI notes and Input 1 Tip Gain are the only semantic
+fields here. The other bytes remain raw observations, and no configuration
+produced by this module may be sent to hardware yet.
 """
 from __future__ import annotations
 
@@ -16,6 +16,9 @@ _ZONE_COUNT = 20
 _ZONE_BYTES = 3
 _ZONE_START_IN_PACKET = 11
 NOTE_PRESET_FORMAT = "ddti-note-preset/v1"
+CONFIGURATION_PRESET_FORMAT = "ddti-configuration-preset/v1"
+_INPUT_1_TIP_GAIN_RECORD = 0
+_INPUT_1_TIP_GAIN_VALUE_INDEX = 0
 
 
 @dataclass(frozen=True)
@@ -84,7 +87,7 @@ class DDTiGlobalTriggerRecord:
 
 @dataclass(frozen=True)
 class DDTiConfiguration:
-    """Lossless configuration view with validated note fields only."""
+    """Lossless offline configuration view with only proven semantic edits."""
 
     dump: DDTiDump
     kits: tuple[DDTiKit, ...]
@@ -109,6 +112,30 @@ class DDTiConfiguration:
             raise ValueError("zone must be 'tip' or 'ring'")
         raw = bytearray(self.raw)
         raw[selected_zone.raw_note_offset] = note
+        return decode_configuration(decode_dump(bytes(raw)))
+
+    @property
+    def input_1_tip_gain(self) -> int:
+        """Return the one gain byte confirmed by a controlled panel change.
+
+        Its byte location is confirmed for Input 1 Tip. The valid panel range
+        has not been fully mapped, so offline edits accept the complete uint7
+        storage range and still cannot be sent to a DDTi.
+        """
+        record = next((record for record in self.global_trigger_records if record.index == _INPUT_1_TIP_GAIN_RECORD), None)
+        if record is None:
+            raise ValueError("dump contains no global-trigger record 0 for Input 1 Tip Gain")
+        return record.values[_INPUT_1_TIP_GAIN_VALUE_INDEX]
+
+    def with_input_1_tip_gain(self, gain: int) -> "DDTiConfiguration":
+        """Stage the confirmed Input 1 Tip Gain byte offline."""
+        if type(gain) is not int or not 0 <= gain <= 127:
+            raise ValueError("Input 1 Tip Gain must be an integer in 0..127")
+        record = next((record for record in self.global_trigger_records if record.index == _INPUT_1_TIP_GAIN_RECORD), None)
+        if record is None:
+            raise ValueError("dump contains no global-trigger record 0 for Input 1 Tip Gain")
+        raw = bytearray(self.raw)
+        raw[record.raw_offsets[_INPUT_1_TIP_GAIN_VALUE_INDEX]] = gain
         return decode_configuration(decode_dump(bytes(raw)))
 
     def to_note_preset(self) -> dict[str, object]:
@@ -181,10 +208,42 @@ class DDTiConfiguration:
                     raw[zone.raw_note_offset] = note
         return decode_configuration(decode_dump(bytes(raw)))
 
+    def to_configuration_preset(self, *, name: str | None = None) -> dict[str, object]:
+        """Export all currently proven editable values as a portable preset.
+
+        This intentionally is a subset of the raw dump. Unknown trigger bytes
+        stay in the source dump and are neither serialised as semantics nor
+        modified by applying this document.
+        """
+        document: dict[str, object] = {
+            "format": CONFIGURATION_PRESET_FORMAT,
+            "notes": self.to_note_preset()["kits"],
+            "confirmed_global_trigger": {"input_1_tip_gain": self.input_1_tip_gain},
+        }
+        if name:
+            document["name"] = name
+        return document
+
+    def with_configuration_preset(self, preset: Mapping[str, object]) -> "DDTiConfiguration":
+        """Stage a YAML/JSON configuration preset without opening MIDI."""
+        if preset.get("format") != CONFIGURATION_PRESET_FORMAT:
+            raise ValueError(f"preset format must be {CONFIGURATION_PRESET_FORMAT!r}")
+        notes = preset.get("notes", [])
+        if not isinstance(notes, Sequence) or isinstance(notes, (str, bytes)):
+            raise ValueError("configuration preset notes must be a list")
+        configuration = self.with_note_preset({"format": NOTE_PRESET_FORMAT, "kits": notes})
+        trigger = preset.get("confirmed_global_trigger", {})
+        if not isinstance(trigger, Mapping):
+            raise ValueError("configuration preset confirmed_global_trigger must be an object")
+        if "input_1_tip_gain" in trigger:
+            configuration = configuration.with_input_1_tip_gain(trigger["input_1_tip_gain"])
+        return configuration
+
     def to_document(self) -> dict[str, object]:
         return {
-            "semantic_decoding": "MIDI notes confirmed; companion bytes remain raw/uninterpreted",
+            "semantic_decoding": "MIDI notes and Input 1 Tip Gain confirmed; remaining bytes stay raw/uninterpreted",
             "kits": [kit.to_document() for kit in self.kits],
+            "confirmed_global_trigger": {"input_1_tip_gain": self.input_1_tip_gain} if self.global_trigger_records else {},
             "global_trigger_records": [record.to_document() for record in self.global_trigger_records],
         }
 

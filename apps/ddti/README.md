@@ -32,6 +32,8 @@ python -m ddti monitor --input TriggerIO --output captures/monitor.jsonl
 python -m ddti decode captures/factory_dump_001.syx
 python -m ddti export-preset captures/factory_dump_001.syx presets/factory-notes.json
 python -m ddti apply-preset captures/factory_dump_001.syx presets/factory-notes.json captures/factory-notes-staged.syx
+python -m ddti export-config captures/factory_dump_002_full.golden.syx presets/my-sd3.yaml --name "My SD3 mapping"
+python -m ddti apply-config captures/factory_dump_002_full.golden.syx presets/my-sd3.yaml captures/my-sd3-staged.syx
 python -m ddti transfer-plan captures/factory_dump_002_full.golden.syx
 ```
 
@@ -60,11 +62,13 @@ See [`docs/DDTI_CAPTURE.md`](../../docs/DDTI_CAPTURE.md) for the exact safe
 workflow and the hardware evidence currently known.
 
 The FastAPI service and PySide6 editor both edit only an offline, staged dump.
-They cover the 21 observed kits, expose confirmed MIDI notes and observed
-channel bytes, and can export/import portable `ddti-note-preset/v1` JSON
-presets. Channel and companion bytes remain read-only because their meaning is
-not proven. No hardware-write path exists until the remaining protocol fields
-are experimentally validated.
+They cover the 21 observed kits, expose confirmed MIDI notes, the confirmed
+Input 1 Tip Gain byte, and observed raw channel bytes. They can export/import
+portable `ddti-note-preset/v1` JSON and complete
+`ddti-configuration-preset/v1` YAML/JSON presets. Channel, Trigger Type,
+Threshold, and companion bytes remain read-only because their meaning or scope
+is not proven. No hardware-write path exists until the remaining protocol
+fields are experimentally validated.
 
 `ddti transfer-plan` is an offline review gate for a possible future transfer
 path. It accepts only a complete 42-packet dump and displays its SHA-256; it

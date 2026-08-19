@@ -28,6 +28,12 @@ class NotePatch(BaseModel):
     ring_note: int | None = None
 
 
+class Input1TipGainPatch(BaseModel):
+    """The only trigger-setting field confirmed by controlled panel evidence."""
+
+    gain: int
+
+
 def create_app(dump_path: Path):
     """Create a local API backed by one explicit, already-captured dump."""
     try:
@@ -59,6 +65,14 @@ def create_app(dump_path: Path):
     def preset() -> dict[str, object]:
         """Return all confirmed notes as a portable offline preset."""
         return current().to_note_preset()
+
+    @app.get("/configuration-preset")
+    def configuration_preset() -> dict[str, object]:
+        """Return every proven editable setting as a portable preset document."""
+        try:
+            return current().to_configuration_preset()
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     @app.get("/transfer/plan")
     def transfer_plan() -> dict[str, object]:
@@ -104,6 +118,21 @@ def create_app(dump_path: Path):
             "input": updated.kits[kit].inputs[input_number - 1].to_document(),
         }
 
+    @app.patch("/global-trigger/input-1/tip")
+    def patch_input_1_tip_gain(patch: Input1TipGainPatch) -> dict[str, object]:
+        """Stage the controlled-evidence Gain field; never sends MIDI."""
+        with lock:
+            try:
+                updated = state["configuration"].with_input_1_tip_gain(patch.gain)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+            state["configuration"] = updated
+        return {
+            "staged_only": True,
+            "hardware_write": "disabled",
+            "confirmed_global_trigger": {"input_1_tip_gain": updated.input_1_tip_gain},
+        }
+
     @app.put("/preset")
     def replace_preset(preset: dict[str, object]) -> dict[str, object]:
         """Stage a portable note preset; no MIDI output is opened or used."""
@@ -113,5 +142,15 @@ def create_app(dump_path: Path):
             except ValueError as error:
                 raise HTTPException(422, str(error)) from error
         return {"staged_only": True, "hardware_write": "disabled", "preset": current().to_note_preset()}
+
+    @app.put("/configuration-preset")
+    def replace_configuration_preset(preset: dict[str, object]) -> dict[str, object]:
+        """Stage a proven-field YAML/JSON preset provided as JSON over HTTP."""
+        with lock:
+            try:
+                state["configuration"] = state["configuration"].with_configuration_preset(preset)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        return {"staged_only": True, "hardware_write": "disabled", "preset": current().to_configuration_preset()}
 
     return app

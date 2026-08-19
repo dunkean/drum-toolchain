@@ -5,10 +5,10 @@ write control is disabled because no hardware-safe DDTi writer exists yet.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from .models import DDTiConfiguration, decode_configuration, encode_configuration
+from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, decode_configuration, encode_configuration
+from .presets import load_document, write_document
 from .protocol import decode_file
 
 
@@ -27,7 +27,7 @@ def launch(dump_path: Path) -> int:
             self.setWindowTitle(f"DDTi offline editor — {source.name}")
             root = QWidget(self)
             layout = QVBoxLayout(root)
-            layout.addWidget(QLabel("Confirmed MIDI notes only — staged offline; hardware Write is disabled"))
+            layout.addWidget(QLabel("Confirmed MIDI notes and Input 1 Tip Gain — staged offline; hardware Write is disabled"))
             kit_row = QHBoxLayout()
             kit_row.addWidget(QLabel("Kit:"))
             self.kit_selector = QComboBox()
@@ -37,6 +37,20 @@ def launch(dump_path: Path) -> int:
             kit_row.addWidget(self.kit_selector)
             kit_row.addStretch()
             layout.addLayout(kit_row)
+            gain_row = QHBoxLayout()
+            gain_row.addWidget(QLabel("Input 1 Tip Gain (global, confirmed):"))
+            self.gain = QSpinBox()
+            self.gain.setRange(0, 127)
+            if self.configuration.global_trigger_records:
+                self.gain.setValue(self.configuration.input_1_tip_gain)
+                self.gain.valueChanged.connect(self.set_input_1_tip_gain)
+                self.gain.setToolTip("Only the byte location is confirmed; this remains an offline staged edit.")
+            else:
+                self.gain.setEnabled(False)
+                self.gain.setToolTip("The opened dump has no global-trigger record 0.")
+            gain_row.addWidget(self.gain)
+            gain_row.addStretch()
+            layout.addLayout(gain_row)
             self.table = QTableWidget(10, 5)
             self.table.setHorizontalHeaderLabels(("Input", "Tip note", "Tip channel (raw+1)", "Ring note", "Ring channel (raw+1)"))
             layout.addWidget(self.table)
@@ -47,6 +61,9 @@ def launch(dump_path: Path) -> int:
             export_preset = QPushButton("Export note preset")
             export_preset.clicked.connect(self.export_preset)
             buttons.addWidget(export_preset)
+            export_configuration = QPushButton("Export config preset")
+            export_configuration.clicked.connect(self.export_configuration_preset)
+            buttons.addWidget(export_configuration)
             import_preset = QPushButton("Import note preset")
             import_preset.clicked.connect(self.import_preset)
             buttons.addWidget(import_preset)
@@ -62,6 +79,10 @@ def launch(dump_path: Path) -> int:
 
         def refresh(self, _index: int | None = None) -> None:
             self.table.blockSignals(True)
+            if self.configuration.global_trigger_records:
+                self.gain.blockSignals(True)
+                self.gain.setValue(self.configuration.input_1_tip_gain)
+                self.gain.blockSignals(False)
             kit = self.configuration.kits[self.selected_kit_number()]
             for row, input_ in enumerate(kit.inputs):
                 number = QTableWidgetItem(str(input_.number))
@@ -81,6 +102,10 @@ def launch(dump_path: Path) -> int:
 
         def set_note(self, input_number: int, zone: str, value: int) -> None:
             self.configuration = self.configuration.with_note(self.selected_kit_number(), input_number, zone, value)
+
+        def set_input_1_tip_gain(self, value: int) -> None:
+            if self.configuration.global_trigger_records:
+                self.configuration = self.configuration.with_input_1_tip_gain(value)
 
         def choose_new_path(self, title: str, suggestion: Path, file_filter: str) -> Path | None:
             destination, _ = QFileDialog.getSaveFileName(self, title, str(suggestion), file_filter)
@@ -103,23 +128,35 @@ def launch(dump_path: Path) -> int:
             path = self.choose_new_path("Export DDTi note preset", self.source.with_stem(self.source.stem + "-notes"), "JSON (*.json)")
             if path is None:
                 return
-            path.write_text(json.dumps(self.configuration.to_note_preset(), indent=2) + "\n", encoding="utf-8")
+            write_document(path, self.configuration.to_note_preset())
             QMessageBox.information(self, "Saved", f"Portable note preset saved locally:\n{path}\n\nIt was not sent to the DDTi.")
 
+        def export_configuration_preset(self) -> None:
+            path = self.choose_new_path("Export DDTi configuration preset", self.source.with_stem(self.source.stem + "-config").with_suffix(".yaml"), "YAML (*.yaml *.yml);;JSON (*.json)")
+            if path is None:
+                return
+            try:
+                write_document(path, self.configuration.to_configuration_preset(name=self.source.stem))
+            except ValueError as error:
+                QMessageBox.warning(self, "Preset not exported", str(error))
+                return
+            QMessageBox.information(self, "Saved", f"Portable configuration preset saved locally:\n{path}\n\nIt was not sent to the DDTi.")
+
         def import_preset(self) -> None:
-            filename, _ = QFileDialog.getOpenFileName(self, "Import DDTi note preset", "", "JSON (*.json)")
+            filename, _ = QFileDialog.getOpenFileName(self, "Import DDTi preset", "", "Preset (*.yaml *.yml *.json)")
             if not filename:
                 return
             try:
-                document = json.loads(Path(filename).read_text(encoding="utf-8"))
-                if not isinstance(document, dict):
-                    raise ValueError("preset root must be an object")
-                self.configuration = self.configuration.with_note_preset(document)
-            except (OSError, ValueError, json.JSONDecodeError) as error:
+                document = load_document(Path(filename))
+                if document.get("format") == CONFIGURATION_PRESET_FORMAT:
+                    self.configuration = self.configuration.with_configuration_preset(document)
+                else:
+                    self.configuration = self.configuration.with_note_preset(document)
+            except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Preset not imported", str(error))
                 return
             self.refresh()
-            QMessageBox.information(self, "Imported", "Notes staged in memory only. Export a new SysEx file to retain them.")
+            QMessageBox.information(self, "Imported", "Settings staged in memory only. Export a new SysEx file to retain them.")
 
     application = QApplication.instance() or QApplication([])
     editor = Editor(dump_path)
