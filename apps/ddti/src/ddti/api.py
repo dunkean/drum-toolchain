@@ -1,7 +1,8 @@
 """Optional local FastAPI surface over the read-only DDTi library.
 
-This service only edits an in-memory/offline staging configuration.  It has no
-MIDI-output dependency and no endpoint capable of writing to a DDTi.
+This service stages configuration in memory. Hardware output is available only
+through the confirmed-fields validator, exact candidate hash review, and an
+explicit confirmation token.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from .diff import diff_ddti_bytes, render_diff
 from .models import DDTiConfiguration, decode_configuration
 from .mappings import apply_role_template
 from .protocol import decode_file
-from .transfer import build_transfer_plan
+from .transfer import build_safe_write_plan, build_transfer_plan, send_safe_configuration
 
 
 def _configuration(path: Path) -> DDTiConfiguration:
@@ -49,6 +50,12 @@ class RoleTemplateApply(BaseModel):
     layout: dict[str, object]
 
 
+class ConfirmedWriteRequest(BaseModel):
+    output: str = "TriggerIO"
+    expected_sha256: str
+    confirmation: str
+
+
 def create_app(dump_path: Path):
     """Create a local API backed by one explicit, already-captured dump."""
     try:
@@ -71,7 +78,7 @@ def create_app(dump_path: Path):
 
     @app.get("/device/status")
     def status() -> dict[str, object]:
-        return {"connected_candidates": len(discover_devices()), "hardware_write": "disabled"}
+        return {"connected_candidates": len(discover_devices()), "hardware_write": "confirmed_fields_only"}
 
     @app.get("/configuration")
     def configuration() -> dict[str, object]:
@@ -114,8 +121,41 @@ def create_app(dump_path: Path):
 
     @app.get("/transfer/plan")
     def transfer_plan() -> dict[str, object]:
-        """Review the staged complete dump; no endpoint sends to hardware."""
+        """Review raw structural completeness; this endpoint sends nothing."""
         return build_transfer_plan(current().raw).to_document()
+
+    @app.get("/write-plan")
+    def write_plan() -> dict[str, object]:
+        plan = build_safe_write_plan(state["source_raw"], current().raw)
+        document = plan.to_document()
+        document["rendered_diff"] = render_diff(plan.differences)
+        return document
+
+    @app.post("/write")
+    def write(request: ConfirmedWriteRequest) -> dict[str, object]:
+        """Write only confirmed fields after exact hash and token validation."""
+        with lock:
+            try:
+                plan = build_safe_write_plan(state["source_raw"], state["configuration"].raw)
+                result = send_safe_configuration(
+                    state["source_raw"],
+                    state["configuration"].raw,
+                    request.output,
+                    expected_sha256=request.expected_sha256,
+                    confirmation=request.confirmation,
+                    inter_message_ms=50,
+                )
+            except (ValueError, RuntimeError) as error:
+                raise HTTPException(422, str(error)) from error
+            state["source_raw"] = plan.raw
+            state["configuration"] = decode_configuration(plan.transfer.dump)
+        return {
+            "hardware_write": "completed",
+            "output_port": result.output_port,
+            "packet_count": result.packet_count,
+            "byte_count": result.byte_count,
+            "sha256": result.sha256,
+        }
 
     @app.get("/kits")
     def kits() -> list[dict[str, object]]:

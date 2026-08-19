@@ -1,9 +1,8 @@
 # DDTi Python API
 
-The DDTi API is intentionally read-first. The local REST API and desktop GUI
-operate on an explicit, already-captured dump; they never open a MIDI output or
-write to the module. They call the central library rather than duplicate its
-protocol decoding.
+The DDTi API remains read-first and operates on an explicit captured source
+dump. The REST API and desktop GUI stage changes before output, then call the
+central confirmed-fields validator rather than duplicating protocol logic.
 
 ```python
 from ddti import DDTi, discover_devices
@@ -13,9 +12,11 @@ device = DDTi.connect()
 info = device.get_info()
 ```
 
-`DDTi.read_configuration()` and `DDTi.write_configuration(...)` raise
-`ProtocolNotValidatedError`.  This is an intentional safety boundary: neither
-method opens an output port or sends any bytes.
+`DDTi.read_configuration()` still raises `ProtocolNotValidatedError` because
+the dump is initiated from the panel. `DDTi.write_configuration(...)` accepts
+an explicit source dump, reviewed candidate hash and confirmation token; it
+rejects every mutation outside the confirmed-field allowlist before opening
+MIDI.
 
 Offline interfaces:
 
@@ -40,8 +41,9 @@ print(dump.family_indexes())  # {1: (0, ..., 20), 2: (0, ..., 10)}
 
 The validated offline model exposes Kit/Input/Tip-or-Ring notes, per-kit
 Program Change, plus the controlled-evidence Input 1 Tip Gain field. `with_note`,
-`with_program_change`, `with_input_1_tip_gain`, and `encode_configuration` are useful for previews
-and tests only; their result is not accepted by `DDTi.write_configuration`.
+`with_program_change`, `with_input_1_tip_gain`, and `encode_configuration` are
+used for staging. Hardware output additionally requires source-relative field
+validation, candidate-hash review and explicit confirmation.
 
 ```python
 from ddti import decode_configuration, encode_configuration
@@ -70,8 +72,8 @@ ddti apply-config captures/factory_dump_002_full.golden.syx presets/my-sd3.yaml 
 `export-preset` writes all confirmed Tip/Ring MIDI notes in the portable
 `ddti-note-preset/v1` JSON format. `apply-preset` accepts a full or partial
 preset and creates a *new* staged `.syx` file; it refuses to overwrite files
-and never opens a MIDI output. There is deliberately no `set`, `restore`, or
-hardware `write` command yet.
+and never opens a MIDI output. Hardware writing uses the separate `write-plan`
+and `write-config` review flow described below.
 
 `export-config` creates a human-editable `ddti-configuration-preset/v1` YAML
 (or JSON) file containing every proven editable field: all kit notes and Input
@@ -96,15 +98,20 @@ The layout selects exact kit numbers and uses bindings such as
 unknown roles, and unknown kits are rejected. This protects against silently
 using a generic SD3 template with a guessed physical layout.
 
-`ddti transfer-plan complete-dump.syx` validates that a file contains the full
-21-kit plus 21-global-record transfer and prints its hash, packet count and
-review state. It is deliberately output-free; it is the gate that a future
-explicitly confirmed hardware transfer will use.
+`ddti transfer-plan complete-dump.syx` validates raw structural completeness
+only and remains output-free. It is not sufficient to authorise hardware
+output; `write-plan` performs the required source-relative field validation.
 
-There is deliberately no CLI hardware transfer. The one authorised exact
-golden-dump round trip changed an unknown Family-01 field; the review plan and
-the public device facade are therefore hard-disabled for output until that
-normalisation is understood.
+The safe CLI writer is a two-step review flow:
+
+```powershell
+ddti write-plan source.syx candidate.syx
+ddti write-config source.syx candidate.syx --output TriggerIO --expected-sha256 <hash-from-plan> --confirm I_AUTHORIZE_DDTI_CONFIRMED_FIELDS
+```
+
+Only confirmed kit notes, Program Change, and Input 1 Tip Gain values 15/16
+may differ. The transfer uses at least 50 ms between frames. Unrestricted raw
+SysEx replay remains unavailable.
 
 ## Local REST API
 
@@ -130,6 +137,8 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | PUT | `/preset` | stage a full or partial note-preset document in memory only |
 | GET/PUT | `/configuration-preset` | export/stage all proven editable values in `ddti-configuration-preset/v1` form |
 | POST | `/role-template` | stage a `ddti-note-role-template/v1` plus explicit `ddti-input-layout/v1` binding document |
+| GET | `/write-plan` | validate changed offsets and return candidate hash plus diff |
+| POST | `/write` | send only the validated candidate with exact hash and confirmation token |
 | GET | `/transfer/plan` | validate and review the complete staged transfer; sends nothing |
 
 The PATCH response explicitly states `hardware_write: disabled`. Restarting
@@ -145,5 +154,6 @@ The PySide6 editor provides a Kit selector for every decoded kit, a compact
 10-input Tip/Ring note table, the confirmed Input 1 Tip Gain control, and
 non-overwriting export of either the staged SysEx, a note preset, or a YAML
 configuration preset. It can import either preset form into memory. Its
-**Review staged diff** control shows the exact byte-level changes before an
-export; **Write to DDTi** remains disabled by design.
+**Review staged diff** shows the exact byte-level changes. **Write confirmed
+fields to DDTi** re-runs the allowlist validation, presents the hash and diff,
+and requires an explicit confirmation before sending 42 frames.

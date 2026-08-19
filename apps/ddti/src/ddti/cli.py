@@ -13,7 +13,7 @@ from .models import decode_configuration
 from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
-from .transfer import build_note_write_validation_plan, build_transfer_plan_from_file, send_note_write_validation
+from .transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan_from_file, send_note_write_validation, send_safe_configuration, send_settings_write_validation
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,6 +77,25 @@ def build_parser() -> argparse.ArgumentParser:
     note_write.add_argument("--expected-sha256", required=True)
     note_write.add_argument("--confirm", required=True, help="must be I_AUTHORIZE_DDTI_NOTE_35_TO_36")
     note_write.add_argument("--inter-message-ms", type=float, default=50)
+    settings_plan = commands.add_parser("prepare-settings-write-test", help="prepare fixed Program Change 0 / Gain 16 validation payload offline")
+    settings_plan.add_argument("golden", type=Path)
+    settings_plan.add_argument("output", type=Path, help="new staged .syx file; existing files are refused")
+    settings_write = commands.add_parser("run-settings-write-test", help="send only the fixed Program Change 0 / Gain 16 validation payload")
+    settings_write.add_argument("golden", type=Path)
+    settings_write.add_argument("--output", required=True)
+    settings_write.add_argument("--expected-sha256", required=True)
+    settings_write.add_argument("--confirm", required=True, help="must be I_AUTHORIZE_DDTI_PROGRAM_0_GAIN_16")
+    settings_write.add_argument("--inter-message-ms", type=float, default=50)
+    safe_plan = commands.add_parser("write-plan", help="validate a staged dump against its source and review confirmed-field changes offline")
+    safe_plan.add_argument("source", type=Path)
+    safe_plan.add_argument("candidate", type=Path)
+    safe_write = commands.add_parser("write-config", help="write a hash-reviewed candidate containing only confirmed fields")
+    safe_write.add_argument("source", type=Path)
+    safe_write.add_argument("candidate", type=Path)
+    safe_write.add_argument("--output", required=True)
+    safe_write.add_argument("--expected-sha256", required=True)
+    safe_write.add_argument("--confirm", required=True, help="must be I_AUTHORIZE_DDTI_CONFIRMED_FIELDS")
+    safe_write.add_argument("--inter-message-ms", type=float, default=50)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -191,6 +210,36 @@ def main(argv: list[str] | None = None) -> int:
         plan = build_transfer_plan_from_file(args.staged)
         result = send_note_write_validation(
             plan,
+            args.output,
+            expected_sha256=args.expected_sha256,
+            confirmation=args.confirm,
+            inter_message_ms=args.inter_message_ms,
+        )
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+    elif args.command == "prepare-settings-write-test":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite existing file: {args.output}")
+        plan = build_settings_write_validation_plan(args.golden.read_bytes())
+        args.output.write_bytes(plan.raw)
+        print(json.dumps({"staged_syx": str(args.output), "sha256": plan.sha256, "packet_count": len(plan.dump.packets), "hardware_write": "disabled"}, indent=2))
+    elif args.command == "run-settings-write-test":
+        result = send_settings_write_validation(
+            args.golden.read_bytes(),
+            args.output,
+            expected_sha256=args.expected_sha256,
+            confirmation=args.confirm,
+            inter_message_ms=args.inter_message_ms,
+        )
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+    elif args.command == "write-plan":
+        plan = build_safe_write_plan(args.source.read_bytes(), args.candidate.read_bytes())
+        document = plan.to_document()
+        document["diff"] = render_diff(plan.differences)
+        print(json.dumps(document, indent=2, sort_keys=True))
+    elif args.command == "write-config":
+        result = send_safe_configuration(
+            args.source.read_bytes(),
+            args.candidate.read_bytes(),
             args.output,
             expected_sha256=args.expected_sha256,
             confirmation=args.confirm,

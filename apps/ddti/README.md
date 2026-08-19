@@ -2,10 +2,10 @@
 
 `ddti` is the DDTi-specific, read-first application in the Drum Toolchain
 monorepo.  It supports USB/MIDI discovery, traffic monitoring, raw SysEx
-capture, integrity metadata, and offline binary diffs.  It deliberately has
-no implemented configuration writer until the legacy DDTi protocol has been
-confirmed from controlled dumps. An exact full-dump round-trip was tested once
-and changed an unexplained field, so hardware writing is explicitly disabled.
+capture, integrity metadata, offline binary diffs, and a confirmed-fields-only
+configuration writer. Controlled transfers were returned byte-identically for
+MIDI Note, Program Change, and Input 1 Tip Gain. Unrestricted raw writes remain
+disabled.
 
 Install it for the `ddti` command:
 
@@ -41,7 +41,7 @@ python -m ddti transfer-plan captures/factory_dump_002_full.golden.syx
 
 ## First safe capture
 
-No command sends MIDI or SysEx.  Start the listener first, then press
+The `dump` command never sends MIDI or SysEx. Start the listener first, then press
 **FUNCTION UP** and **VALUE UP** simultaneously on the DDTi.  The legacy DDTi
 owner's manual documents this as a transfer of all presets to the connected
 SysEx application over USB or MIDI.  Do not use a firmware updater or send a
@@ -69,8 +69,7 @@ Change (`---` or `0..127`), the confirmed Input 1 Tip Gain byte, and observed ra
 portable `ddti-note-preset/v1` JSON and complete
 `ddti-configuration-preset/v1` YAML/JSON presets. Channel, Trigger Type,
 Threshold, and companion bytes remain read-only because their meaning or scope
-is not proven. No hardware-write path exists until the remaining protocol
-fields are experimentally validated.
+is not proven. The writer accepts only the confirmed editable subset.
 
 The repository’s named `presets/gm.yaml` and `presets/sd3.yaml` are musical
 role templates, not assumptions about cable wiring. Copy and fill
@@ -85,8 +84,8 @@ review at `GET /staged-diff` and permits an integration to download the staged
 file at `GET /staged-sysex`; those endpoints are output-free and explicitly
 report `hardware_write: disabled`.
 
-`ddti transfer-plan` is an offline review gate for a possible future transfer
-path. It accepts only a complete 42-packet dump and displays its SHA-256; it
-does not open a MIDI output or send any bytes. There is deliberately no
-`ddti transfer` command while the observed round-trip mutation remains
-unexplained.
+`ddti write-plan SOURCE CANDIDATE` validates that every changed byte belongs to
+a confirmed field and prints the canonical candidate SHA-256 and semantic
+diff. `ddti write-config` requires that exact hash, the token
+`I_AUTHORIZE_DDTI_CONFIRMED_FIELDS`, and a minimum 50 ms frame interval. Any
+unknown field mutation is rejected before a MIDI output is opened.

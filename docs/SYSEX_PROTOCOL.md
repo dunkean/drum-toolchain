@@ -98,7 +98,12 @@ Input 1 Tip Note from `35` to `36`. It was sent at 50 ms per frame. The next
 panel dump was byte-identical to the sent stream (2,016 bytes, SHA-256
 `c14e5136f3db716d3ad85986c9d1b5c6b72346d976132c537b0abfa323ee1cdb`).
 This is a strict write PASS for confirmed MIDI-note fields. It does not by
-itself validate writes to remaining raw trigger fields.
+itself validate writes to remaining raw trigger fields. A second controlled
+transfer enabled Kit 0 Program Change `0` and changed Input 1 Tip Gain
+`15→16`; its returned dump was also byte-identical (SHA-256
+`b9d7d859589b01e107898f71593afb8d1ba427b445c006d883fe103ba20a0967`).
+Together these tests validate the writer for every field currently editable by
+the application. Unknown trigger fields remain blocked by offset allowlisting.
 
 ## Unknown protocol fields
 

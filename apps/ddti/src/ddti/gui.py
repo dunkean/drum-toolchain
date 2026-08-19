@@ -1,8 +1,4 @@
-"""Optional PySide6 offline DDTi note editor.
-
-It edits a staged dump in memory and can save that staged file.  The prominent
-write control is disabled because no hardware-safe DDTi writer exists yet.
-"""
+"""Optional PySide6 DDTi editor with confirmed-fields-only hardware writes."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,6 +8,7 @@ from .models import CONFIGURATION_PRESET_FORMAT, DDTiConfiguration, decode_confi
 from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
+from .transfer import build_safe_write_plan, send_safe_configuration
 
 
 def launch(dump_path: Path) -> int:
@@ -30,7 +27,7 @@ def launch(dump_path: Path) -> int:
             self.setWindowTitle(f"DDTi offline editor — {source.name}")
             root = QWidget(self)
             layout = QVBoxLayout(root)
-            layout.addWidget(QLabel("Confirmed MIDI notes and Input 1 Tip Gain — staged offline; hardware Write is disabled"))
+            layout.addWidget(QLabel("Confirmed fields only — every hardware write is diffed, hash-reviewed and validated"))
             kit_row = QHBoxLayout()
             kit_row.addWidget(QLabel("Kit:"))
             self.kit_selector = QComboBox()
@@ -50,10 +47,10 @@ def launch(dump_path: Path) -> int:
             gain_row.addWidget(QLabel("Input 1 Tip Gain (global, confirmed):"))
             self.gain = QSpinBox()
             self.gain.setRange(0, 127)
+            self.gain.setToolTip("Offline range is 0..127; hardware writes are currently validated only for 15 and 16.")
             if self.configuration.global_trigger_records:
                 self.gain.setValue(self.configuration.input_1_tip_gain)
                 self.gain.valueChanged.connect(self.set_input_1_tip_gain)
-                self.gain.setToolTip("Only the byte location is confirmed; this remains an offline staged edit.")
             else:
                 self.gain.setEnabled(False)
                 self.gain.setToolTip("The opened dump has no global-trigger record 0.")
@@ -82,8 +79,8 @@ def launch(dump_path: Path) -> int:
             review = QPushButton("Review staged diff")
             review.clicked.connect(self.review_staged_diff)
             buttons.addWidget(review)
-            write = QPushButton("Write to DDTi (disabled)")
-            write.setEnabled(False)
+            write = QPushButton("Write confirmed fields to DDTi")
+            write.clicked.connect(self.write_to_ddti)
             buttons.addWidget(write)
             layout.addLayout(buttons)
             self.setCentralWidget(root)
@@ -208,6 +205,46 @@ def launch(dump_path: Path) -> int:
             dialog.setText(f"{len(differences)} changed byte(s) relative to {self.source.name}.\n\nNothing will be sent to the DDTi.")
             dialog.setDetailedText(render_diff(differences))
             dialog.exec()
+
+        def write_to_ddti(self) -> None:
+            try:
+                plan = build_safe_write_plan(self.source_raw, encode_configuration(self.configuration))
+            except (ValueError, RuntimeError) as error:
+                QMessageBox.warning(self, "Write refused", str(error))
+                return
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Confirm DDTi write")
+            dialog.setIcon(QMessageBox.Warning)
+            dialog.setText(
+                f"Write {len(plan.differences)} validated byte change(s) to the DDTi?\n\n"
+                f"Candidate SHA-256:\n{plan.sha256}\n\n"
+                "Only confirmed MIDI notes, Program Change and validated Gain values are allowed."
+            )
+            dialog.setDetailedText(render_diff(plan.differences))
+            dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            dialog.setDefaultButton(QMessageBox.No)
+            if dialog.exec() != QMessageBox.Yes:
+                return
+            try:
+                result = send_safe_configuration(
+                    self.source_raw,
+                    encode_configuration(self.configuration),
+                    "TriggerIO",
+                    expected_sha256=plan.sha256,
+                    confirmation="I_AUTHORIZE_DDTI_CONFIRMED_FIELDS",
+                    inter_message_ms=50,
+                )
+            except (ValueError, RuntimeError) as error:
+                QMessageBox.warning(self, "Write failed", str(error))
+                return
+            self.source_raw = plan.raw
+            self.configuration = decode_configuration(plan.transfer.dump)
+            self.refresh()
+            QMessageBox.information(
+                self,
+                "Write completed",
+                f"Sent {result.packet_count} frames to {result.output_port}.\nSHA-256: {result.sha256}",
+            )
 
     application = QApplication.instance() or QApplication([])
     editor = Editor(dump_path)

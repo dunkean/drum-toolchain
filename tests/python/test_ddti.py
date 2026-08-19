@@ -19,7 +19,7 @@ from ddti.presets import load_document
 from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
-from ddti.transfer import build_note_write_validation_plan, build_transfer_plan, send_note_write_validation, send_reviewed_transfer
+from ddti.transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan, send_note_write_validation, send_reviewed_transfer, send_safe_configuration
 
 
 class _InputPort:
@@ -207,8 +207,14 @@ class DDTiTests(unittest.TestCase):
         for zone in range(20):
             body.extend((9, 35 + zone, 3))
         body.extend(b"\x00" * 6)
-        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
-        raw += bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
+        raw = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + bytes(body) + bytes((0xF7,))
+            for index in range(21)
+        )
+        raw += b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
         configuration = decode_configuration(decode_dump(raw))
         self.assertEqual(configuration.kits[0].inputs[0].tip.note, 35)
         self.assertEqual(configuration.kits[0].inputs[0].ring.note, 36)
@@ -293,6 +299,8 @@ class DDTiTests(unittest.TestCase):
         self.assertIn("Program Change value (CONFIRMED", render_diff(diff_ddti_bytes(disabled.raw, canonical.raw)))
         with self.assertRaisesRegex(ValueError, "requires all 21|factory golden"):
             build_note_write_validation_plan(disabled.raw)
+        with self.assertRaisesRegex(ValueError, "requires all 21|factory golden"):
+            build_settings_write_validation_plan(disabled.raw)
 
     def test_role_templates_require_an_explicit_physical_input_layout(self) -> None:
         kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
@@ -340,7 +348,7 @@ class DDTiTests(unittest.TestCase):
         )
         plan = build_transfer_plan(kits + globals_)
         self.assertEqual(plan.to_document()["packet_count"], 42)
-        self.assertEqual(plan.to_document()["hardware_write"], "not implemented")
+        self.assertEqual(plan.to_document()["hardware_write"], "unrestricted_raw_disabled")
         with self.assertRaisesRegex(ValueError, "requires all 21"):
             build_transfer_plan(kits)
 
@@ -356,7 +364,7 @@ class DDTiTests(unittest.TestCase):
         plan = build_transfer_plan(kits + globals_)
         output = _OutputPort()
         with patch("mido.open_output", return_value=output) as open_output:
-            with self.assertRaisesRegex(ProtocolNotValidatedError, "round trip changed"):
+            with self.assertRaisesRegex(ProtocolNotValidatedError, "unrestricted raw"):
                 send_reviewed_transfer(plan, "TriggerIO", expected_sha256=plan.sha256, confirmation="I_UNDERSTAND_DDTI_WRITE")
         open_output.assert_not_called()
         self.assertEqual(output.messages, [])
@@ -381,6 +389,43 @@ class DDTiTests(unittest.TestCase):
                     confirmation="I_AUTHORIZE_DDTI_NOTE_35_TO_36",
                 )
         open_output.assert_not_called()
+
+    def test_safe_writer_allows_only_confirmed_fields_and_reviewed_hash(self) -> None:
+        kits = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index))
+            + (bytes((9, 35, 3)) * 20)
+            + bytes((9, 44, 3, 42, 1, 127, 0xF7))
+            for index in range(21)
+        )
+        globals_ = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
+        source = decode_configuration(decode_dump(kits + globals_))
+        candidate = source.with_note(0, 1, "tip", 36).with_program_change(0, 0).with_input_1_tip_gain(16)
+        plan = build_safe_write_plan(source.raw, candidate.raw)
+        self.assertEqual(plan.transfer.dump.family_indexes(), {1: tuple(range(21)), 2: tuple(range(21))})
+        self.assertEqual(decode_configuration(plan.transfer.dump).kits[0].inputs[0].tip.note, 36)
+        output = _OutputPort()
+        with patch("ddti.transfer._resolve_output", return_value="TriggerIO 10"), \
+             patch("mido.open_output", return_value=output), \
+             patch("ddti.transfer.time.sleep"):
+            result = send_safe_configuration(
+                source.raw,
+                candidate.raw,
+                "TriggerIO",
+                expected_sha256=plan.sha256,
+                confirmation="I_AUTHORIZE_DDTI_CONFIRMED_FIELDS",
+            )
+        self.assertEqual(result.packet_count, 42)
+        self.assertEqual(len(output.messages), 42)
+
+        forbidden = bytearray(candidate.raw)
+        forbidden[13] = 4  # confirmed note companion byte remains unvalidated
+        with self.assertRaisesRegex(ProtocolNotValidatedError, "unvalidated"):
+            build_safe_write_plan(source.raw, bytes(forbidden))
+        with self.assertRaisesRegex(ValueError, "15 and 16"):
+            build_safe_write_plan(source.raw, source.with_input_1_tip_gain(17).raw)
 
     def test_cli_has_no_hardware_transfer_command(self) -> None:
         with self.assertRaises(SystemExit) as error:
@@ -438,8 +483,14 @@ class DDTiTests(unittest.TestCase):
         for zone in range(20):
             body.extend((9, 35 + zone, 3))
         body.extend(b"\x00" * 6)
-        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
-        raw += bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, 0, 15, 6, 5, 1, 10, 0, 0xF7))
+        raw = b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + bytes(body) + bytes((0xF7,))
+            for index in range(21)
+        )
+        raw += b"".join(
+            bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x0A, 2, index, 15, 6, 5, 1, 10, 0, 0xF7))
+            for index in range(21)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "fixture.syx"
             source.write_bytes(raw)
@@ -482,6 +533,21 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(staged_sysex.headers["x-ddti-hardware-write"], "disabled")
             self.assertNotEqual(staged_sysex.content, raw)
             self.assertEqual(decode_configuration(decode_dump(staged_sysex.content)).kits[0].inputs[0].tip.note, 36)
+            write_plan = client.get("/write-plan")
+            self.assertEqual(write_plan.status_code, 200)
+            output = _OutputPort()
+            with patch("ddti.transfer._resolve_output", return_value="TriggerIO 10"), \
+                 patch("mido.open_output", return_value=output), \
+                 patch("ddti.transfer.time.sleep"):
+                written = client.post("/write", json={
+                    "output": "TriggerIO",
+                    "expected_sha256": write_plan.json()["candidate_sha256"],
+                    "confirmation": "I_AUTHORIZE_DDTI_CONFIRMED_FIELDS",
+                })
+            self.assertEqual(written.status_code, 200)
+            self.assertEqual(written.json()["packet_count"], 42)
+            self.assertEqual(len(output.messages), 42)
+            self.assertEqual(client.get("/staged-diff").json()["changed_bytes"], 0)
 
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:

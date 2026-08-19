@@ -4,11 +4,11 @@ This module intentionally does not import MIDI libraries or open output ports.
 It establishes the invariant a hardware sender will require: only a complete,
 lossless legacy DDTi dump can ever be considered for transfer.
 
-An exact golden-dump round trip was attempted on 2026-08-19.  The DDTi
-normalised one still-unexplained byte in each of the first twenty kit frames.
-Consequently the sender is deliberately hard-disabled until that field and
-the device's acceptance rules are understood.  A review plan remains useful
-for offline configuration work and future validation.
+An exact golden-dump round trip initially normalised one byte in each of the
+first twenty kit frames. Controlled panel tests proved it is the ignored value
+of a disabled Program Change. Subsequent Note and Program/Gain transfers were
+returned byte-identically. The safe writer therefore permits only confirmed
+field offsets and keeps unrestricted raw replay hard-disabled.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import time
 
+from .diff import ByteDifference, diff_ddti_bytes
 from .protocol import DDTiDump, decode_dump
 from .device import ProtocolNotValidatedError
 from .models import decode_configuration
@@ -44,7 +45,7 @@ class DDTiTransferPlan:
     def to_document(self) -> dict[str, object]:
         return {
             "kind": "ddti-legacy-transfer-plan",
-            "hardware_write": "not implemented",
+            "hardware_write": "unrestricted_raw_disabled",
             "byte_count": len(self.raw),
             "packet_count": len(self.dump.packets),
             "sha256": self.sha256,
@@ -61,6 +62,35 @@ class DDTiTransferResult:
     sha256: str
 
 
+@dataclass(frozen=True)
+class DDTiSafeWritePlan:
+    """A candidate proven to differ only in hardware-validated fields."""
+
+    source_sha256: str
+    transfer: DDTiTransferPlan
+    differences: tuple[ByteDifference, ...]
+
+    @property
+    def raw(self) -> bytes:
+        return self.transfer.raw
+
+    @property
+    def sha256(self) -> str:
+        return self.transfer.sha256
+
+    def to_document(self) -> dict[str, object]:
+        return {
+            "kind": "ddti-confirmed-fields-write-plan",
+            "source_sha256": self.source_sha256,
+            "candidate_sha256": self.sha256,
+            "byte_count": len(self.raw),
+            "packet_count": len(self.transfer.dump.packets),
+            "changed_bytes": len(self.differences),
+            "allowed_fields": ["kit MIDI notes", "kit Program Change", "Input 1 Tip Gain 15/16"],
+            "hardware_write": "requires explicit confirmation",
+        }
+
+
 def build_transfer_plan(raw: bytes) -> DDTiTransferPlan:
     """Validate a complete 42-frame DDTi dump for offline transfer review."""
     dump = decode_dump(raw)
@@ -71,6 +101,45 @@ def build_transfer_plan(raw: bytes) -> DDTiTransferPlan:
 
 def build_transfer_plan_from_file(path: Path) -> DDTiTransferPlan:
     return build_transfer_plan(path.read_bytes())
+
+
+def build_safe_write_plan(source_raw: bytes, candidate_raw: bytes) -> DDTiSafeWritePlan:
+    """Reject every candidate mutation outside experimentally proven fields."""
+    source_plan = build_transfer_plan(source_raw)
+    candidate_plan = build_transfer_plan(candidate_raw)
+    source = decode_configuration(source_plan.dump)
+    candidate = decode_configuration(candidate_plan.dump)
+
+    # The device canonicalises the unused Program Change value while disabled.
+    candidate = candidate.canonicalize_disabled_program_changes()
+    candidate_plan = build_transfer_plan(candidate.raw)
+
+    allowed_offsets = {
+        zone.raw_note_offset
+        for kit in source.kits
+        for input_ in kit.inputs
+        for zone in (input_.tip, input_.ring)
+    }
+    for kit in source.kits:
+        allowed_offsets.add(kit.raw_program_change_disabled_offset)
+        allowed_offsets.add(kit.raw_program_change_value_offset)
+    gain_offset = source.global_trigger_records[0].raw_offsets[0]
+    allowed_offsets.add(gain_offset)
+
+    for kit in candidate.kits:
+        if kit.program_change_disabled_raw not in {0, 1}:
+            raise ValueError(f"Kit {kit.number} Program Change disabled flag must be 0 or 1")
+        if kit.program_change_disabled_raw == 1 and candidate.raw[kit.raw_program_change_value_offset] != 0:
+            raise ValueError(f"Kit {kit.number} disabled Program Change must use canonical value 0")
+    if source.input_1_tip_gain != candidate.input_1_tip_gain and candidate.input_1_tip_gain not in {15, 16}:
+        raise ValueError("Input 1 Tip Gain writes are currently validated only for values 15 and 16")
+
+    differences = diff_ddti_bytes(source.raw, candidate.raw)
+    forbidden = [difference for difference in differences if difference.offset not in allowed_offsets]
+    if forbidden:
+        offsets = ", ".join(f"0x{difference.offset:06X}" for difference in forbidden[:8])
+        raise ProtocolNotValidatedError(f"candidate changes unvalidated DDTi byte(s): {offsets}")
+    return DDTiSafeWritePlan(source_plan.sha256, candidate_plan, differences)
 
 
 def build_note_write_validation_plan(raw: bytes) -> DDTiTransferPlan:
@@ -88,6 +157,24 @@ def build_note_write_validation_plan(raw: bytes) -> DDTiTransferPlan:
     if configuration.kits[0].inputs[0].tip.note != 35:
         raise ValueError("factory golden does not contain expected Kit 0 / Input 1 Tip note 35")
     staged = configuration.canonicalize_disabled_program_changes().with_note(0, 1, "tip", 36)
+    return build_transfer_plan(staged.raw)
+
+
+def build_settings_write_validation_plan(raw: bytes) -> DDTiTransferPlan:
+    """Build the fixed Program Change 0 plus Gain 15->16 validation payload."""
+    source = build_transfer_plan(raw)
+    if source.sha256 != FACTORY_GOLDEN_SHA256:
+        raise ValueError("settings-write validation requires the exact complete factory golden SHA-256")
+    configuration = decode_configuration(source.dump)
+    if configuration.kits[0].program_change is not None:
+        raise ValueError("factory golden does not contain expected disabled Kit 0 Program Change")
+    if configuration.input_1_tip_gain != 15:
+        raise ValueError("factory golden does not contain expected Input 1 Tip Gain 15")
+    staged = (
+        configuration.canonicalize_disabled_program_changes()
+        .with_program_change(0, 0)
+        .with_input_1_tip_gain(16)
+    )
     return build_transfer_plan(staged.raw)
 
 
@@ -136,6 +223,63 @@ def send_note_write_validation(
     return DDTiTransferResult(name, len(frames), len(plan.raw), plan.sha256)
 
 
+def send_settings_write_validation(
+    golden_raw: bytes,
+    output_query: str,
+    *,
+    expected_sha256: str,
+    confirmation: str,
+    inter_message_ms: float = 50,
+) -> DDTiTransferResult:
+    """Send only the payload deterministically built from the factory golden."""
+    plan = build_settings_write_validation_plan(golden_raw)
+    if expected_sha256.casefold() != plan.sha256:
+        raise ValueError("expected SHA-256 does not match the fixed settings validation stream")
+    if confirmation != "I_AUTHORIZE_DDTI_PROGRAM_0_GAIN_16":
+        raise ValueError("dedicated Program 0 / Gain 16 confirmation token is required")
+    if inter_message_ms < 50:
+        raise ValueError("validation transfer requires at least 50 ms between messages")
+
+    import mido
+
+    name = _resolve_output(output_query)
+    frames = parse_stream(plan.raw)
+    with mido.open_output(name) as output:
+        for frame in frames:
+            output.send(mido.Message("sysex", data=frame.data))
+            time.sleep(inter_message_ms / 1000)
+    return DDTiTransferResult(name, len(frames), len(plan.raw), plan.sha256)
+
+
+def send_safe_configuration(
+    source_raw: bytes,
+    candidate_raw: bytes,
+    output_query: str,
+    *,
+    expected_sha256: str,
+    confirmation: str,
+    inter_message_ms: float = 50,
+) -> DDTiTransferResult:
+    """Send a candidate only after safe-field validation and hash review."""
+    plan = build_safe_write_plan(source_raw, candidate_raw)
+    if expected_sha256.casefold() != plan.sha256:
+        raise ValueError("expected SHA-256 does not match the validated candidate")
+    if confirmation != "I_AUTHORIZE_DDTI_CONFIRMED_FIELDS":
+        raise ValueError("confirmed-fields write confirmation token is required")
+    if inter_message_ms < 50:
+        raise ValueError("DDTi writes require at least 50 ms between messages")
+
+    import mido
+
+    name = _resolve_output(output_query)
+    frames = parse_stream(plan.raw)
+    with mido.open_output(name) as output:
+        for frame in frames:
+            output.send(mido.Message("sysex", data=frame.data))
+            time.sleep(inter_message_ms / 1000)
+    return DDTiTransferResult(name, len(frames), len(plan.raw), plan.sha256)
+
+
 def send_reviewed_transfer(
     plan: DDTiTransferPlan,
     output_query: str,
@@ -148,12 +292,11 @@ def send_reviewed_transfer(
 
     Parameters are intentionally retained as an audit-friendly future API, but
     this function must not import ``mido``, resolve an output, or send a byte.
-    The exact full golden dump produced a repeatable ``0x7f -> 0x00`` change at
-    family-01 body offset ``+0x41`` for indexes 0--19.  It is not safe to infer
-    that this is cosmetic or that other staged fields can be restored.
+    Unrestricted raw replay stays unavailable even though the former
+    ``0x7f -> 0x00`` difference is now understood. Callers must use
+    :func:`send_safe_configuration`, which validates source-relative offsets.
     """
     del plan, output_query, expected_sha256, confirmation, inter_message_ms
     raise ProtocolNotValidatedError(
-        "DDTi writes are disabled: the 2026-08-19 full-dump round trip changed "
-        "family-01 body byte +0x41 in records 0--19"
+        "unrestricted raw DDTi writes are disabled; use the confirmed-fields safe writer"
     )
