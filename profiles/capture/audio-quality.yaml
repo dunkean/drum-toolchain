@@ -37,6 +37,9 @@ profiles:
     max_duration_seconds: 1.35
     force_mono: true
   ddrum4_snare_flagship:
+    # Keep the captured decay after onset even after it falls below the
+    # activity threshold. SNRE_950 proved that threshold-tail trimming makes
+    # the module audibly cut the snare after 0.13..0.74 seconds.
     target_sample_rate: 44100
     trim_threshold_db: -60
     normalize_dbfs: -1.5
@@ -46,6 +49,7 @@ profiles:
     lowpass_hz: 17500
     max_duration_seconds: 1.8
     force_mono: true
+    trim_tail: false
   ddrum4_drum:
     target_sample_rate: 44100
     trim_threshold_db: -50

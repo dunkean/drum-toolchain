@@ -62,6 +62,31 @@ class LegacyCompatibilityTests(unittest.TestCase):
             self.assertLess(result["frames"], 4410)
             self.assertGreater(np.max(np.abs(prepared)), 28000)
 
+    def test_tail_preserving_profile_only_trims_before_the_onset(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "raw.wav"
+            output = Path(temporary) / "prepared.wav"
+            signal = np.concatenate((
+                np.zeros(1000),
+                np.ones(1000) * 0.1,
+                np.zeros(6000),
+            )).astype(np.float32)
+            wavfile.write(source, 10000, signal)
+            result = process_wav(
+                source,
+                output,
+                QualityProfile(
+                    target_sample_rate=10000,
+                    trim_threshold_db=-40,
+                    normalize_dbfs=-1,
+                    fade_in_ms=0,
+                    fade_out_ms=0,
+                    max_duration_seconds=0.5,
+                    trim_tail=False,
+                ),
+            )
+            self.assertEqual(result["frames"], 5000)
+
     def test_existing_quality_profile_is_available(self) -> None:
         profile = load_quality_profile(ROOT / "profiles/capture/audio-quality.yaml", "compact")
         self.assertEqual(profile.lowpass_hz, 15000)

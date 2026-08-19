@@ -26,6 +26,7 @@ class QualityProfile:
     lowpass_hz: float | None = None
     max_duration_seconds: float | None = None
     force_mono: bool = False
+    trim_tail: bool = True
 
 
 def load_quality_profile(path: Path, name: str) -> QualityProfile:
@@ -37,7 +38,7 @@ def load_quality_profile(path: Path, name: str) -> QualityProfile:
     values = profiles.get(name)
     if not isinstance(values, dict):
         raise ValueError(f"quality profile {name!r} not found in {path}")
-    keys = {"target_sample_rate", "trim_threshold_db", "normalize_dbfs", "fade_in_ms", "fade_out_ms", "highpass_hz", "lowpass_hz", "max_duration_seconds", "force_mono"}
+    keys = {"target_sample_rate", "trim_threshold_db", "normalize_dbfs", "fade_in_ms", "fade_out_ms", "highpass_hz", "lowpass_hz", "max_duration_seconds", "force_mono", "trim_tail"}
     unknown = set(values) - keys
     if unknown:
         raise ValueError(f"unknown quality profile fields: {sorted(unknown)}")
@@ -137,7 +138,9 @@ def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str
     if active.size:
         # Preserve a tiny attack margin; cue-marker decisions remain manual.
         margin = round(rate * 0.003)
-        samples = samples[max(0, active[0] - margin):min(len(samples), active[-1] + margin + 1)]
+        start = max(0, active[0] - margin)
+        end = min(len(samples), active[-1] + margin + 1) if profile.trim_tail else len(samples)
+        samples = samples[start:end]
     for kind, cutoff in (("highpass", profile.highpass_hz), ("lowpass", profile.lowpass_hz)):
         if cutoff is not None:
             if not 10 < cutoff < rate / 2:
