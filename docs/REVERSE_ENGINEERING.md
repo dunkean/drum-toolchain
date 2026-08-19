@@ -43,6 +43,7 @@ Confidence levels:
 | 2026-08-19 | Kit 0/Input 2 Tip note 38→39 | `0x000012: 26→27`; Family `02` byte +`0x05`: `22→04` | second input confirms Tip/Ring record layout |
 | 2026-08-19 | Combined Input 1/2 channel, Gain and Threshold edits | two Tip channel bytes `09→0A`; Family `02` records `00`/`02` changed | channel encoding probable; global record semantics not yet assigned |
 | 2026-08-19 | Independent receiver cross-check | 42 packets / 2,016 bytes; saved Input 1 Tip Gain `15→16` changes `family 02/index 00/+0x00: 0F→10` | Windows reader truncation found; full factory baseline must be recaptured after restoration |
+| 2026-08-19 | Factory reset / full baseline recapture | `factory_dump_002_full`: 42 packets / 2,016 bytes / SHA-256 `43c64c48…1f84c70f`; its 1,836-byte prefix equals the original factory prefix | full factory golden established; Input 1 Tip note `35` and Gain `15` restored |
 
 Do not record a semantic field interpretation here without linking it to the
 two raw captures, their hashes, the exact single panel change, and restoration

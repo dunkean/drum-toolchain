@@ -10,10 +10,12 @@ The original 1,836-byte / 32-frame factory capture is retained as an immutable
 **partial prefix** only. An independent `python-rtmidi` capture revealed that
 the Windows native reader had queued only 32 buffers and omitted the final 11
 frames. A complete observed DDTi dump is **2,016 bytes in 42 SysEx frames**:
-21 kit frames followed by 21 global-trigger frames. The original SHA-256
-`504ebd7e…c42c33ce` must not be used as a full-configuration golden. The
-tooling accepts a capture only when it is a concatenation of complete standard
-MIDI SysEx frames:
+21 kit frames followed by 21 global-trigger frames. After a verified factory
+reset, `factory_dump_002_full` captured that complete stream (SHA-256
+`43c64c486f72ec349c5ebee4020ef9e176f5d64033118f95fb25f6f81f84c70f`).
+The original SHA-256 `504ebd7e…c42c33ce` must not be used as a
+full-configuration golden. The tooling accepts a capture only when it is a
+concatenation of complete standard MIDI SysEx frames:
 
 ```text
 F0  <zero or more 7-bit data bytes>  F7

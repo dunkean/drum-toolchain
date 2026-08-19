@@ -68,7 +68,7 @@ receive-only capture path, saves its own hash, then automatically waits for
 the next manual dump.
 
 ```powershell
-ddti session captures/channel-test --input TriggerIO --listen --label channel --snapshots 3 --seconds-per-snapshot 300 --compare-to captures/factory_dump_001.golden.syx
+ddti session captures/channel-test --input TriggerIO --listen --label channel --snapshots 3 --seconds-per-snapshot 300 --compare-to captures/factory_dump_002_full.golden.syx
 ```
 
 For every announced snapshot, perform **exactly one** documented panel edit,
@@ -88,7 +88,7 @@ an initial attribution while retaining a final recovery proof. Start this
 single listener and wait for each numbered prompt:
 
 ```powershell
-ddti session captures/gain-threshold-test --input TriggerIO --listen --label gain_threshold --snapshots 3 --seconds-per-snapshot 300 --compare-to captures/factory_dump_001.golden.syx
+ddti session captures/gain-threshold-test --input TriggerIO --listen --label gain_threshold --snapshots 3 --seconds-per-snapshot 300 --compare-to captures/factory_dump_002_full.golden.syx
 ```
 
 1. At snapshot 1, change only Kit 0 / Input 1 Gain from `15` to `16`, save as
