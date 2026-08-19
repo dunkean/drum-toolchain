@@ -10,6 +10,7 @@ import platform
 import time
 from typing import Callable, Literal
 
+from .protocol import decode_dump
 from .sysex import SysExMessage, parse_stream, render_hex
 
 
@@ -73,6 +74,7 @@ def capture_dump(
     parsed = parse_stream(raw)
     if parsed != tuple(messages):
         raise RuntimeError("captured SysEx framing changed during round-trip validation")
+    _require_complete_ddti_dump(raw)
     stem.parent.mkdir(parents=True, exist_ok=True)
     syx_path, hex_path, metadata_path = paths
     syx_path.write_bytes(raw)
@@ -97,6 +99,19 @@ def capture_dump(
     }
     metadata_path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     return result
+
+
+def _require_complete_ddti_dump(raw: bytes) -> None:
+    """Reject a recognised DDTi panel dump when any required frame is absent."""
+    if not raw.startswith(bytes((0xF0, 0x00, 0x00, 0x0E, 0x2C, 0x0D))):
+        return
+    dump = decode_dump(raw)
+    expected = tuple(range(21))
+    if dump.family_indexes() != {1: expected, 2: expected}:
+        raise ValueError(
+            "incomplete DDTi panel dump: expected 21 kit and 21 global-trigger packets; "
+            "no capture artifact was written"
+        )
 
 
 def capture_series(

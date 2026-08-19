@@ -60,6 +60,10 @@ ddti dump captures/receiver_crosscheck --input TriggerIO --listen --receiver mid
 This remains receive-only. `--receiver mido` exists solely to compare the raw
 stream with the native Windows receiver; it never opens an output MIDI port.
 
+A recognised DDTi dump is accepted only when it contains all 42 expected
+frames (21 kit frames and 21 global-trigger frames). A truncated stream is
+rejected before any `.syx`, `.hex`, or metadata artifact is written.
+
 ## Compact differential session
 
 Use one long-running CLI process when collecting several controlled panel

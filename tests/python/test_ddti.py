@@ -94,6 +94,17 @@ class DDTiTests(unittest.TestCase):
     def test_windows_receiver_has_capacity_for_the_observed_full_dump(self) -> None:
         self.assertGreaterEqual(_WINDOWS_SYSEX_BUFFER_COUNT, 42)
 
+    def test_capture_refuses_a_recognised_but_incomplete_ddti_dump(self) -> None:
+        raw = bytes.fromhex("F0 00 00 0E 2C 0D 00 00 0A 01 00 01 F7")
+        with tempfile.TemporaryDirectory() as temporary:
+            stem = Path(temporary) / "partial"
+            with patch("ddti.capture._resolve_input", return_value="TriggerIO 30"), \
+                 patch("ddti.capture.platform.system", return_value="not-windows"), \
+                 patch("ddti.capture._receive_mido_sysex", return_value=(SysExMessage(raw),)):
+                with self.assertRaisesRegex(ValueError, "incomplete DDTi"):
+                    capture_dump("TriggerIO", stem, seconds=1, idle_seconds=1)
+            self.assertFalse(stem.with_suffix(".syx").exists())
+
     def test_capture_series_uses_new_numbered_stems_without_reopening_a_cli(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
