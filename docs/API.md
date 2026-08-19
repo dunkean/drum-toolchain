@@ -52,8 +52,19 @@ assert encode_configuration(preview) != encode_configuration(config)
 ```
 
 The `ddti` command provides the corresponding `devices`, `info`, `monitor`,
-`dump`, `decode`, and `diff` commands.  There is deliberately no `set`,
-`restore`, or `write` command yet.
+`dump`, `session`, `decode`, and `diff` commands.  It also supports an
+offline-only note-preset exchange:
+
+```powershell
+ddti export-preset captures/factory_dump_001.syx presets/factory-notes.json
+ddti apply-preset captures/factory_dump_001.syx presets/factory-notes.json captures/factory-notes-staged.syx
+```
+
+`export-preset` writes all confirmed Tip/Ring MIDI notes in the portable
+`ddti-note-preset/v1` JSON format. `apply-preset` accepts a full or partial
+preset and creates a *new* staged `.syx` file; it refuses to overwrite files
+and never opens a MIDI output. There is deliberately no `set`, `restore`, or
+hardware `write` command yet.
 
 ## Local REST API
 
@@ -71,6 +82,8 @@ The service binds to `127.0.0.1:8765` by default and exposes:
 | GET | `/configuration`, `/kits`, `/kits/{kit}` | decoded captured configuration |
 | GET | `/kits/{kit}/inputs/{input}` | one decoded input |
 | PATCH | `/kits/{kit}/inputs/{input}` | stage `tip_note` / `ring_note` in memory only |
+| GET | `/preset` | export the current `ddti-note-preset/v1` document |
+| PUT | `/preset` | stage a full or partial note-preset document in memory only |
 
 The PATCH response explicitly states `hardware_write: disabled`. Restarting
 the service discards staged changes unless they have been exported through the
@@ -79,6 +92,7 @@ offline GUI.
 ## Desktop GUI
 
 Install `ddti[gui]`, then run `ddti gui captures/factory_dump_001.syx`.
-The PySide6 editor provides a compact 10-input Tip/Ring table for Kit 0, staged
-note editing, and a non-overwriting local file export. Its **Write to DDTi**
-control is disabled by design.
+The PySide6 editor provides a Kit selector for every decoded kit, a compact
+10-input Tip/Ring note table, and non-overwriting export of either the staged
+SysEx or a portable note preset. It can import that preset into memory. Its
+**Write to DDTi** control is disabled by design.

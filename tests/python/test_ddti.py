@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -152,6 +153,50 @@ class DDTiTests(unittest.TestCase):
         differences = diff_bytes(raw, encode_configuration(edited))
         self.assertEqual([(change.offset, change.before, change.after) for change in differences], [(18, 37, 50)])
 
+    def test_note_presets_are_portable_subset_edits_and_never_touch_companion_bytes(self) -> None:
+        packets = []
+        for kit in range(2):
+            body = bytearray()
+            for zone in range(20):
+                body.extend((9 + kit, 35 + zone + kit, 3))
+            body.extend(b"\x00" * 6)
+            packets.append(bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, kit)) + bytes(body) + bytes((0xF7,)))
+        configuration = decode_configuration(decode_dump(b"".join(packets)))
+        preset = configuration.to_note_preset()
+        self.assertEqual(preset["format"], "ddti-note-preset/v1")
+        self.assertEqual(len(preset["kits"]), 2)
+        staged = configuration.with_note_preset({
+            "format": "ddti-note-preset/v1",
+            "kits": [{"kit": 1, "inputs": [{"input": 10, "ring_note": 64}]}],
+        })
+        self.assertEqual(staged.kits[0].inputs[9].ring.note, configuration.kits[0].inputs[9].ring.note)
+        self.assertEqual(staged.kits[1].inputs[9].ring.note, 64)
+        self.assertEqual(staged.kits[1].inputs[9].ring.channel_raw, configuration.kits[1].inputs[9].ring.channel_raw)
+        with self.assertRaisesRegex(ValueError, "repeats kit"):
+            configuration.with_note_preset({"format": "ddti-note-preset/v1", "kits": [{"kit": 0, "inputs": []}, {"kit": 0, "inputs": []}]})
+
+    def test_preset_cli_exports_and_applies_to_a_new_staged_file(self) -> None:
+        body = bytearray()
+        for zone in range(20):
+            body.extend((9, 35 + zone, 3))
+        body.extend(b"\x00" * 6)
+        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + bytes(body) + bytes((0xF7,))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.syx"
+            preset = root / "notes.json"
+            staged = root / "staged.syx"
+            source.write_bytes(raw)
+            self.assertEqual(main(["export-preset", str(source), str(preset)]), 0)
+            document = json.loads(preset.read_text(encoding="utf-8"))
+            document["kits"][0]["inputs"][0]["tip_note"] = 60
+            preset.write_text(json.dumps(document), encoding="utf-8")
+            self.assertEqual(main(["apply-preset", str(source), str(preset), str(staged)]), 0)
+            result = decode_configuration(decode_dump(staged.read_bytes()))
+            self.assertEqual(result.kits[0].inputs[0].tip.note, 60)
+            with self.assertRaises(FileExistsError):
+                main(["apply-preset", str(source), str(preset), str(staged)])
+
     def test_optional_fastapi_stages_notes_without_hardware_output(self) -> None:
         try:
             from fastapi.testclient import TestClient
@@ -173,6 +218,14 @@ class DDTiTests(unittest.TestCase):
             self.assertTrue(response.json()["staged_only"])
             self.assertEqual(response.json()["hardware_write"], "disabled")
             self.assertEqual(client.get("/kits/0/inputs/1").json()["tip"]["note"], 36)
+            preset = client.get("/preset")
+            self.assertEqual(preset.status_code, 200)
+            preset_document = preset.json()
+            preset_document["kits"][0]["inputs"][0]["ring_note"] = 61
+            response = client.put("/preset", json=preset_document)
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["staged_only"])
+            self.assertEqual(client.get("/kits/0/inputs/1").json()["ring"]["note"], 61)
 
     def test_optional_pyside_editor_starts_offscreen(self) -> None:
         try:

@@ -6,6 +6,7 @@ configuration produced by this module may be sent to hardware yet.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from .protocol import DDTiDump, decode_dump
@@ -14,6 +15,7 @@ from .protocol import DDTiDump, decode_dump
 _ZONE_COUNT = 20
 _ZONE_BYTES = 3
 _ZONE_START_IN_PACKET = 11
+NOTE_PRESET_FORMAT = "ddti-note-preset/v1"
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,76 @@ class DDTiConfiguration:
             raise ValueError("zone must be 'tip' or 'ring'")
         raw = bytearray(self.raw)
         raw[selected_zone.raw_note_offset] = note
+        return decode_configuration(decode_dump(bytes(raw)))
+
+    def to_note_preset(self) -> dict[str, object]:
+        """Export every confirmed note field as a portable offline preset.
+
+        This deliberately excludes channels and companion bytes: their meaning
+        has not yet been validated from controlled hardware captures.
+        """
+        return {
+            "format": NOTE_PRESET_FORMAT,
+            "kits": [
+                {
+                    "kit": kit.number,
+                    "inputs": [
+                        {
+                            "input": input_.number,
+                            "tip_note": input_.tip.note,
+                            "ring_note": input_.ring.note,
+                        }
+                        for input_ in kit.inputs
+                    ],
+                }
+                for kit in self.kits
+            ],
+        }
+
+    def with_note_preset(self, preset: Mapping[str, object]) -> "DDTiConfiguration":
+        """Apply a validated portable note preset to an offline configuration.
+
+        The preset may contain any subset of the observed kits and inputs.  It
+        never opens a MIDI port and returns a new in-memory configuration.
+        """
+        if preset.get("format") != NOTE_PRESET_FORMAT:
+            raise ValueError(f"preset format must be {NOTE_PRESET_FORMAT!r}")
+        kit_entries = preset.get("kits")
+        if not isinstance(kit_entries, Sequence) or isinstance(kit_entries, (str, bytes)):
+            raise ValueError("preset kits must be a list")
+        by_kit = {kit.number: kit for kit in self.kits}
+        seen_kits: set[int] = set()
+        raw = bytearray(self.raw)
+        for kit_entry in kit_entries:
+            if not isinstance(kit_entry, Mapping):
+                raise ValueError("each preset kit must be an object")
+            kit_number = kit_entry.get("kit")
+            if type(kit_number) is not int or kit_number not in by_kit:
+                raise ValueError("preset contains an unknown kit")
+            if kit_number in seen_kits:
+                raise ValueError(f"preset repeats kit {kit_number}")
+            seen_kits.add(kit_number)
+            input_entries = kit_entry.get("inputs")
+            if not isinstance(input_entries, Sequence) or isinstance(input_entries, (str, bytes)):
+                raise ValueError("preset kit inputs must be a list")
+            seen_inputs: set[int] = set()
+            for input_entry in input_entries:
+                if not isinstance(input_entry, Mapping):
+                    raise ValueError("each preset input must be an object")
+                input_number = input_entry.get("input")
+                if type(input_number) is not int or not 1 <= input_number <= 10:
+                    raise ValueError("preset input must be 1..10")
+                if input_number in seen_inputs:
+                    raise ValueError(f"preset repeats input {input_number} in kit {kit_number}")
+                seen_inputs.add(input_number)
+                target = by_kit[kit_number].inputs[input_number - 1]
+                for field, zone in (("tip_note", target.tip), ("ring_note", target.ring)):
+                    if field not in input_entry:
+                        continue
+                    note = input_entry[field]
+                    if type(note) is not int or not 0 <= note <= 127:
+                        raise ValueError(f"{field} must be an integer in 0..127")
+                    raw[zone.raw_note_offset] = note
         return decode_configuration(decode_dump(bytes(raw)))
 
     def to_document(self) -> dict[str, object]:

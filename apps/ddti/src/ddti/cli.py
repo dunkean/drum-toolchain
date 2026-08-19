@@ -41,6 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
     comparison.add_argument("after", type=Path)
     decode = commands.add_parser("decode", help="inspect observed legacy DDTi packet structure offline")
     decode.add_argument("dump", type=Path)
+    export_preset = commands.add_parser("export-preset", help="export all confirmed MIDI notes to a new portable JSON preset")
+    export_preset.add_argument("dump", type=Path)
+    export_preset.add_argument("output", type=Path, help="new .json file; existing files are refused")
+    apply_preset = commands.add_parser("apply-preset", help="apply a note preset to a dump and write a new staged SysEx file")
+    apply_preset.add_argument("dump", type=Path)
+    apply_preset.add_argument("preset", type=Path)
+    apply_preset.add_argument("output", type=Path, help="new .syx file; existing files are refused")
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -101,6 +108,21 @@ def main(argv: list[str] | None = None) -> int:
         document = dump.to_document()
         document["configuration"] = decode_configuration(dump).to_document()
         print(json.dumps(document, indent=2, sort_keys=True))
+    elif args.command == "export-preset":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite existing file: {args.output}")
+        configuration = decode_configuration(decode_file(args.dump))
+        args.output.write_text(json.dumps(configuration.to_note_preset(), indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"preset": str(args.output), "hardware_write": "disabled"}, indent=2))
+    elif args.command == "apply-preset":
+        if args.output.exists():
+            raise FileExistsError(f"refusing to overwrite existing file: {args.output}")
+        document = json.loads(args.preset.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):
+            raise ValueError("preset root must be an object")
+        configuration = decode_configuration(decode_file(args.dump)).with_note_preset(document)
+        args.output.write_bytes(configuration.raw)
+        print(json.dumps({"staged_syx": str(args.output), "hardware_write": "disabled"}, indent=2))
     elif args.command == "serve":
         from .api import create_app
         try:

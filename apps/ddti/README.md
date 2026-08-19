@@ -29,6 +29,8 @@ $env:PYTHONPATH = 'apps/ddti/src'
 python -m ddti devices
 python -m ddti monitor --input TriggerIO --output captures/monitor.jsonl
 python -m ddti decode captures/factory_dump_001.syx
+python -m ddti export-preset captures/factory_dump_001.syx presets/factory-notes.json
+python -m ddti apply-preset captures/factory_dump_001.syx presets/factory-notes.json captures/factory-notes-staged.syx
 ```
 
 ## First safe capture
@@ -55,7 +57,9 @@ Copy-Item captures/factory_dump_001.json captures/factory_dump_001.golden.json
 See [`docs/DDTI_CAPTURE.md`](../../docs/DDTI_CAPTURE.md) for the exact safe
 workflow and the hardware evidence currently known.
 
-The FastAPI service and PySide6 table both edit only an offline, staged dump.
-They expose confirmed MIDI notes and observed channel bytes, but have no
-hardware-write path until the remaining protocol fields are experimentally
-validated.
+The FastAPI service and PySide6 editor both edit only an offline, staged dump.
+They cover the 21 observed kits, expose confirmed MIDI notes and observed
+channel bytes, and can export/import portable `ddti-note-preset/v1` JSON
+presets. Channel and companion bytes remain read-only because their meaning is
+not proven. No hardware-write path exists until the remaining protocol fields
+are experimentally validated.

@@ -54,6 +54,11 @@ def create_app(dump_path: Path):
     def configuration() -> dict[str, object]:
         return current().to_document()
 
+    @app.get("/preset")
+    def preset() -> dict[str, object]:
+        """Return all confirmed notes as a portable offline preset."""
+        return current().to_note_preset()
+
     @app.get("/kits")
     def kits() -> list[dict[str, object]]:
         return [kit.to_document() for kit in current().kits]
@@ -92,5 +97,15 @@ def create_app(dump_path: Path):
             "hardware_write": "disabled",
             "input": updated.kits[kit].inputs[input_number - 1].to_document(),
         }
+
+    @app.put("/preset")
+    def replace_preset(preset: dict[str, object]) -> dict[str, object]:
+        """Stage a portable note preset; no MIDI output is opened or used."""
+        with lock:
+            try:
+                state["configuration"] = state["configuration"].with_note_preset(preset)
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
+        return {"staged_only": True, "hardware_write": "disabled", "preset": current().to_note_preset()}
 
     return app
