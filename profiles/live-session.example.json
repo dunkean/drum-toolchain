@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "renderer": "sd3",
+  "converter": { "path": "C:/replace/ddrum4_converter.exe", "arguments": [] },
+  "sd3": { "path": "C:/replace/Superior Drummer 3.exe", "arguments": [] },
+  "runtime_profile": {
+    "path": "C:/replace/build/generated/greg-hybrid-mvp/runtime-profile.yaml",
+    "project_hash": "REPLACE_WITH_COMPILED_PROJECT_HASH"
+  },
+  "required_ports": ["REPLACE_WITH_UNIQUE_MIDI_PORT"],
+  "asio_buffer_confirmation": "REPLACE: confirmed manually in the UMC/ASIO driver",
+  "low_latency_power_scheme_guid": "REPLACE_WITH_EXPLICIT_POWERCFG_GUID"
+}

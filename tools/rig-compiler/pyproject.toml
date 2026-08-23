@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rig-compiler"
+version = "0.1.0"
+description = "Offline compiler for drum rig projects"
+requires-python = ">=3.12"
+dependencies = ["PyYAML>=6.0,<7"]
+
+[project.scripts]
+rig-compiler = "rig_compiler.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

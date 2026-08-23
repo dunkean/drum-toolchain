@@ -3,6 +3,9 @@
 #include "generated_mapping.h"
 #include "MidiDinAdapter.h"
 
+static_assert(!HIHAT_NOTE_P_SUPPORTED && !HIHAT_THREE_ZONE_SUPPORTED,
+              "unvalidated hi-hat Note-P/three-zone policies must stay disabled");
+
 #ifndef ROUTER_USE_SD
 #define ROUTER_USE_SD 0
 #endif
@@ -43,6 +46,10 @@ const BridgeConfig BRIDGE_CONFIG = {
   NOTE_ROUTES,
   NOTE_ROUTE_COUNT,
   false, // POC: never select a DDrum4 kit from incoming MIDI
+  nullptr, {EchoGuardMode::Disabled, 0, 0}, INITIAL_LOGICAL_STATE,
+  STATE_ROUTES, STATE_ROUTE_COUNT,
+  LOGICAL_CONTROLS,
+  NATIVE_CONTROLS, NATIVE_CONTROL_COUNT,
 };
 DdrumBridge bridge(BRIDGE_CONFIG);
 // CC119 on channel 16 selects nested / PC-clean / bypass without a cable swap.

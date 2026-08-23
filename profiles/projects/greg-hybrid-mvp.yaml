@@ -1,0 +1,108 @@
+# M1 fixture. Every numeric MIDI address marked below as a placeholder is
+# status: planned, not a measured address. Zero is used only because v1
+# requires a byte/channel; the endpoint sentinel prevents runtime use.
+schema_version: 1
+kind: rig-project
+project: greg-hybrid-mvp
+rig: profiles/physical/greg-hybrid-kit.yaml
+
+# Known topology: USB modules (including UMC404HD) reach the PC; DDrum4 OUT
+# reaches Arduino IN; UMC404HD OUT reaches DDrum4 IN. USB endpoint names are
+# deliberately unmeasured placeholders.
+sources:
+  edrumin:
+    endpoint: MEASURE_ME_EDRUMIN_USB_ENDPOINT
+    channel: 1 # placeholder, status: planned
+    primary: usb
+    connection_profile: LIVE_USB_PRIMARY
+  ddti:
+    endpoint: MEASURE_ME_DDTI_USB_ENDPOINT
+    channel: 1 # placeholder, status: planned
+    primary: usb
+    connection_profile: LIVE_USB_PRIMARY
+  ddrum4:
+    endpoint: MEASURE_ME_UMC404HD_MIDI_IN_ENDPOINT
+    channel: 1 # placeholder, status: planned; raw DDrum4 DIN copy at PC
+    primary: din
+    connection_profile: DIN_ONLY
+
+connection_profiles:
+  LIVE_USB_PRIMARY:
+    deduplicate_din_copies: true
+    usb_sources: true
+    din_sources: true
+  DIN_ONLY:
+    deduplicate_din_copies: false
+    usb_sources: false
+    din_sources: true
+
+# Note 0 is a schema-required placeholder (status: planned), never a claimed
+# measurement. It must be replaced together with its MEASURE_ME endpoint.
+source_decoders:
+  - match: {source: edrumin, type: note, note: 0}
+    emit: {physical: snare_main.head, expressions: [velocity, position]}
+  - match: {source: edrumin, type: note, note: 1}
+    emit: {physical: stack.bow, expressions: [velocity]}
+
+physical_events: [snare_main.head, stack.bow]
+
+state:
+  scenes: [metalcore, electronic-stack]
+  variables: [vp1_snare1, vp2_flex, vp3_family, vp4_variant]
+  defaults:
+    scene: metalcore
+    vp1_snare1: 0
+    vp2_flex: 0
+    vp3_family: 0
+    vp4_variant: 0
+
+# CC values 0..3 are schema-required placeholders (status: planned), not MIDI
+# assignments. Logical controls use the reserved CH14/15 namespace only.
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+  vp1_snare1: {channels: [14, 15], type: cc, cc: 0}
+  vp2_flex: {channels: [14, 15], type: cc, cc: 1}
+  vp3_family: {channels: [14, 15], type: cc, cc: 2}
+  vp4_variant: {channels: [14, 15], type: cc, cc: 3}
+
+logical_routes:
+  metalcore:
+    snare_main.head:
+      - logical_target: snare.electronic.head
+        when: {vp1_snare1: 1}
+      - logical_target: snare.metalcore.head
+    stack.bow: perc.metalcore.stack
+  electronic-stack:
+    snare_main.head: snare.electronic.head
+    stack.bow: perc.electronic.stack
+
+# Every renderer note below is note 0 placeholder (status: planned). Neither
+# DDrum4 allocation nor SD3 mega-kit mapping has been measured/confirmed.
+renderers:
+  ddrum4:
+    snare.metalcore.head: {note: 0}
+    perc.metalcore.stack: {note: 0}
+    snare.electronic.head: {note: 0}
+    perc.electronic.stack: {note: 0}
+  sd3:
+    snare.metalcore.head: {note: 0}
+    perc.metalcore.stack: {note: 0}
+    snare.electronic.head: {note: 0}
+    perc.electronic.stack: {note: 0}
+  drumgizmo:
+    snare.metalcore.head: {note: 0, instrument: snare_metalcore, articulation: head}
+    perc.metalcore.stack: {note: 0, instrument: perc_metalcore, articulation: stack}
+    snare.electronic.head: {note: 0, instrument: snare_electronic, articulation: head}
+    perc.electronic.stack: {note: 0, instrument: perc_electronic, articulation: stack}
+
+# No native DDrum4 control is declared until its channel/address is measured.
+native_control_map: {}
+
+policies:
+  echo: measured_only
+  unknown_message: drop_and_count
+
+# Operational limits (status: planned): Master Merger absent; DUAL is
+# forbidden until isolated DIN echo/hardware tests pass; SD3 mega kit remains
+# a manual mapping operation. UMC404HD MIDI OUT -> DDrum4 MIDI IN is known
+# physical topology but its PC endpoint label is MEASURE_ME above.

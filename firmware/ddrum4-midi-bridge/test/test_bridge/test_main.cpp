@@ -1,5 +1,12 @@
+#include <Arduino.h>
 #include <unity.h>
 #include "DdrumBridge.h"
+
+uint32_t millis() { return 0; }
+void pinMode(uint8_t, uint8_t) {}
+void digitalWrite(uint8_t, uint8_t) {}
+void setUp() {}
+void tearDown() {}
 
 static const NoteRoute routes[] = {
     {11, 42, 91, 1, 127, 1, 127}, // ZG H-12 bow -> ddrum HHAT position 2
@@ -36,6 +43,16 @@ void test_hihat_direct_cc4_is_scaled_without_arduino_filtering() {
   TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ControlChange, 11, 4, 0}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ControlChange, 11, 4, 127}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(127, output.data2);
+}
+
+void test_disabled_hihat_does_not_claim_cc4() {
+  static const BridgeConfig noHihat = {
+      10, programChannels, 3, {0, 0, 0, 0, 0, 0, 0, false, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), false,
+  };
+  DdrumBridge bridge(noHihat);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 11, 4, 64}, &output, 1));
 }
 
 void test_unmapped_events_are_not_blindly_forwarded() {
@@ -106,10 +123,139 @@ void test_bypass_preserves_release_wire_semantics() {
   TEST_ASSERT_EQUAL_UINT8(17, output.data1);
 }
 
+void test_logical_controls_update_reserved_channel_state() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 14, 8, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 15, 3, 5}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(8, bridge.logicalState().scene);
+  TEST_ASSERT_EQUAL_UINT8(5, bridge.logicalState().vp4);
+}
+
+void test_logical_controls_use_the_generated_cc_addresses() {
+  static const BridgeConfig remapped = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), false, nullptr,
+      {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
+      {20, 21, 22, 23},
+  };
+  DdrumBridge bridge(remapped);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 14, 22, 7}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(7, bridge.logicalState().vp3);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 14, 2, 9}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(7, bridge.logicalState().vp3);
+}
+
+void test_native_controls_update_state_without_rendering_a_hit() {
+  static const NativeControlRoute nativeControls[] = {
+      {12, NativeControlType::ProgramChange, 0, 0},
+      {12, NativeControlType::ControlChange, 74, 1},
+      {12, NativeControlType::NoteOn, 52, 2},
+  };
+  static const BridgeConfig nativeConfig = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), false, nullptr,
+      {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
+      {20, 21, 22, 23}, nativeControls, 3,
+  };
+  DdrumBridge bridge(nativeConfig);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 12, 3, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(3, bridge.logicalState().scene);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 12, 74, 9}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(9, bridge.logicalState().vp1);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOn, 12, 52, 11}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(11, bridge.logicalState().vp2);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOn, 12, 52, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(11, bridge.logicalState().vp2);
+}
+
+void test_route_emits_bounded_note_and_cc() {
+  static const RouteOutput sideEffects[] = {
+      {{MidiEventType::ControlChange, 0, 74, 0}, true},
+  };
+  static const NoteRoute multiRoutes[] = {
+      {11, 42, 91, 1, 127, 1, 127, sideEffects, 1},
+  };
+  static const BridgeConfig multiConfig = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, multiRoutes, 1,
+      false, nullptr, {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0},
+  };
+  DdrumBridge bridge(multiConfig);
+  MidiEvent output[DdrumBridge::MAX_OUTPUT_EVENTS];
+  TEST_ASSERT_EQUAL_UINT8(2, bridge.process({MidiEventType::NoteOn, 11, 42, 73}, output,
+                                             DdrumBridge::MAX_OUTPUT_EVENTS));
+  TEST_ASSERT_EQUAL(MidiEventType::NoteOn, output[0].type);
+  TEST_ASSERT_EQUAL(MidiEventType::ControlChange, output[1].type);
+  TEST_ASSERT_EQUAL_UINT8(74, output[1].data1);
+  TEST_ASSERT_EQUAL_UINT8(73, output[1].data2);
+}
+
+void test_guard_drops_only_emitted_future_echo() {
+  static const BridgeConfig guarded = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), true, nullptr, {EchoGuardMode::DualDdrum, 10, 10}, {0, 0, 0, 0, 0},
+  };
+  DdrumBridge bridge(guarded);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOn, 10, 91, 100}, &output, 1, 100));
+  TEST_ASSERT_EQUAL_UINT32(0, bridge.expectedEchoes());
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 11, 42, 100}, &output, 1, 100));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process(output, &output, 1, 105));
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.expectedEchoes());
+}
+
+void test_invalid_note_cannot_cross_an_index_row() {
+  static const NoteRoute indexedRoutes[] = {
+      {2, 0, 64, 1, 127, 1, 127},
+  };
+  int16_t routeIndex[16 * 128];
+  for (size_t i = 0; i < 16U * 128U; ++i) routeIndex[i] = -1;
+  // Row 1/note 0 is exactly where row 0/note 128 would land without the
+  // public-input bounds check.
+  routeIndex[128] = 0;
+  const BridgeConfig indexedConfig = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false},
+      indexedRoutes, 1, false, routeIndex,
+      {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0},
+  };
+  DdrumBridge bridge(indexedConfig);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(
+      0, bridge.process({MidiEventType::NoteOn, 1, 128, 100}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.ignoredMessages());
+}
+
+void test_zero_width_hihat_input_range_rejects_configuration() {
+  const BridgeConfig invalidConfig = {
+      10, programChannels, 3, {11, 4, 4, 64, 64, 0, 127, false},
+      routes, sizeof(routes) / sizeof(routes[0]), true,
+  };
+  DdrumBridge bridge(invalidConfig);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.invalidConfigurations());
+  TEST_ASSERT_EQUAL_UINT8(
+      0, bridge.process({MidiEventType::ControlChange, 11, 4, 64}, &output, 1));
+}
+
+void test_zero_output_capacity_is_counted_without_writing() {
+  DdrumBridge bridge(config);
+  MidiEvent output = {MidiEventType::ProgramChange, 16, 127, 127};
+  TEST_ASSERT_EQUAL_UINT8(
+      0, bridge.process({MidiEventType::NoteOn, 11, 42, 100}, &output, 0));
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.outputOverflows());
+  TEST_ASSERT_EQUAL(MidiEventType::ProgramChange, output.type);
+  TEST_ASSERT_EQUAL_UINT8(16, output.channel);
+  TEST_ASSERT_EQUAL_UINT8(127, output.data1);
+  TEST_ASSERT_EQUAL_UINT8(127, output.data2);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_zeitgeist_bow_maps_to_hihat_position_2);
   RUN_TEST(test_hihat_direct_cc4_is_scaled_without_arduino_filtering);
+  RUN_TEST(test_disabled_hihat_does_not_claim_cc4);
   RUN_TEST(test_unmapped_events_are_not_blindly_forwarded);
   RUN_TEST(test_pad_can_select_a_velocity_window_inside_one_sound);
   RUN_TEST(test_declared_third_source_can_change_kit);
@@ -117,5 +263,13 @@ int main(int, char**) {
   RUN_TEST(test_bypass_returns_raw_event);
   RUN_TEST(test_ddrum_one_shot_policy_drops_note_off_but_keeps_aftertouch);
   RUN_TEST(test_bypass_preserves_release_wire_semantics);
+  RUN_TEST(test_logical_controls_update_reserved_channel_state);
+  RUN_TEST(test_logical_controls_use_the_generated_cc_addresses);
+  RUN_TEST(test_native_controls_update_state_without_rendering_a_hit);
+  RUN_TEST(test_route_emits_bounded_note_and_cc);
+  RUN_TEST(test_guard_drops_only_emitted_future_echo);
+  RUN_TEST(test_invalid_note_cannot_cross_an_index_row);
+  RUN_TEST(test_zero_width_hihat_input_range_rejects_configuration);
+  RUN_TEST(test_zero_output_capacity_is_counted_without_writing);
   return UNITY_END();
 }

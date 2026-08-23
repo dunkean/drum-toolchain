@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "latency-matrix",
+  "runs": [
+    {
+      "run_id": "replace-ddrum4-direct-b0",
+      "source": "teensy-probe",
+      "renderer": "ddrum4",
+      "note": 23,
+      "count": 1000,
+      "interval_ms": 20,
+      "wiring": "REPLACE_WITH_MEASURED_WIRING",
+      "profile": "STANDALONE",
+      "sample_rate": 48000,
+      "buffer_frames": 64
+    },
+    {
+      "run_id": "replace-sd3-live-b0",
+      "source": "teensy-probe",
+      "renderer": "sd3",
+      "note": 23,
+      "count": 1000,
+      "interval_ms": 20,
+      "wiring": "REPLACE_WITH_MEASURED_WIRING",
+      "profile": "LIVE_USB_PRIMARY",
+      "sample_rate": 48000,
+      "buffer_frames": 64
+    }
+  ]
+}

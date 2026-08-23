@@ -27,8 +27,43 @@ void MidiDinAdapter::poll() {
   }
 }
 
+void MidiDinAdapter::clearMessageState() {
+  // MIDI 1.0 cancels channel-message running status at every SysEx or System
+  // Common boundary. Keeping it would let later data bytes complete a stale
+  // Note On and create a false hit.
+  runningStatus_ = 0;
+  count_ = 0;
+}
+
 void MidiDinAdapter::receive(uint8_t byte) {
-  if (byte >= 0xF8 || byte >= 0xF0) return; // system traffic is not whitelisted
+  // Real-Time bytes can occur anywhere, including in SysEx, and do not alter
+  // running status. They are intentionally not routed by this bridge.
+  if (byte >= 0xF8) return;
+
+  if (byte == 0xF0) {
+    clearMessageState();
+    inSysEx_ = true;
+    return;
+  }
+
+  if (inSysEx_) {
+    if (byte == 0xF7) {
+      inSysEx_ = false;
+      clearMessageState();
+      return;
+    }
+    if (!(byte & 0x80)) return; // SysEx payload is never channel data.
+    // A malformed SysEx must not hide a following valid channel status.
+    inSysEx_ = false;
+  }
+
+  // System Common (including a stray EOX) also cancels running status. Their
+  // data bytes are ignored because runningStatus_ is now zero.
+  if (byte >= 0xF0) {
+    clearMessageState();
+    return;
+  }
+
   if (byte & 0x80) { runningStatus_ = byte; count_ = 0; return; }
   if (!runningStatus_) return;
   uint8_t wanted = dataLength(runningStatus_);
@@ -60,8 +95,9 @@ void MidiDinAdapter::dispatch(uint8_t status, uint8_t data1, uint8_t data2) {
     bridge_.setMode(modeFromControlValue(input.data2));
     return;
   }
-  MidiEvent output;
-  if (bridge_.process(input, &output, 1, millis())) emit(output);
+  MidiEvent output[DdrumBridge::MAX_OUTPUT_EVENTS];
+  size_t count = bridge_.process(input, output, DdrumBridge::MAX_OUTPUT_EVENTS, millis());
+  for (size_t i = 0; i < count; ++i) emit(output[i]);
 }
 
 void MidiDinAdapter::emit(const MidiEvent& event) {
@@ -72,6 +108,14 @@ void MidiDinAdapter::emit(const MidiEvent& event) {
     case MidiEventType::ControlChange: status = 0xB0; break;
     case MidiEventType::PolyAftertouch: status = 0xA0; break;
     case MidiEventType::ProgramChange: status = 0xC0; break;
+  }
+  const uint8_t bytes = event.type == MidiEventType::ProgramChange ? 2 : 3;
+  // Stream::availableForWrite is supplied by Arduino's UART streams. Refuse a
+  // whole MIDI event when the bounded UART buffer cannot hold it, rather than
+  // writing a truncated wire message.
+  if (port_.availableForWrite() < bytes) {
+    ++uartOverflows_;
+    return;
   }
   port_.write(status | (event.channel - 1));
   port_.write(event.data1);

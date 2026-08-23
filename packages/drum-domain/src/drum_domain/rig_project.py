@@ -1,0 +1,267 @@
+"""Strict domain model for the versioned ``rig-project/v1`` contract."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Mapping
+
+import yaml
+
+from .validation import validate_document
+
+
+class RigProjectError(ValueError):
+    """Raised when a rig project is invalid or cannot be read."""
+
+
+def _schema_path() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "contracts" / "schemas" / "rig-project.schema.json"
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError("rig-project.schema.json is not available")
+
+
+@dataclass(frozen=True)
+class Source:
+    identifier: str
+    endpoint: str
+    channel: int
+    primary: str
+    connection_profile: str | None
+
+
+@dataclass(frozen=True)
+class SourceDecoder:
+    source: str
+    message_type: str
+    physical: str
+    match: Mapping[str, Any]
+    emit: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class LogicalRouteVariant:
+    """One logical target selected by an optional immutable state predicate."""
+
+    logical_target: str
+    predicates: Mapping[str, int]
+
+
+def logical_route_variants(value: object) -> tuple[LogicalRouteVariant, ...]:
+    """Normalise a legacy fixed route or its Scene/VP variant list."""
+    if isinstance(value, str):
+        return (LogicalRouteVariant(value, {}),)
+    if not isinstance(value, list):
+        _fail("logical route must be a target id or a list of variants")
+    variants: list[LogicalRouteVariant] = []
+    for item in value:
+        if not isinstance(item, Mapping) or not isinstance(item.get("logical_target"), str):
+            _fail("logical route variant needs logical_target")
+        when = item.get("when", {})
+        if not isinstance(when, Mapping):
+            _fail("logical route variant when must be a mapping")
+        variants.append(LogicalRouteVariant(item["logical_target"], dict(when)))
+    return tuple(variants)
+
+
+@dataclass(frozen=True)
+class RigProject:
+    path: Path
+    raw: Mapping[str, Any]
+    project: str
+    rig: str
+    sources: Mapping[str, Source]
+    connection_profiles: Mapping[str, Mapping[str, Any]]
+    source_decoders: tuple[SourceDecoder, ...]
+    physical_events: tuple[str, ...]
+    scenes: tuple[str, ...]
+    variables: tuple[str, ...]
+    defaults: Mapping[str, Any]
+    logical_control_protocol: Mapping[str, Mapping[str, Any]]
+    logical_routes: Mapping[str, Mapping[str, Any]]
+    renderers: Mapping[str, Mapping[str, Mapping[str, Any]]]
+    native_control_map: Mapping[str, Mapping[str, Any]]
+    policies: Mapping[str, Any]
+
+
+def _fail(message: str) -> None:
+    raise RigProjectError(message)
+
+
+def _validate_semantics(document: Mapping[str, Any]) -> None:
+    sources = document["sources"]
+    profiles = document["connection_profiles"]
+    source_addresses: set[tuple[str, int]] = set()
+    for identifier, source in sources.items():
+        profile = source.get("connection_profile")
+        if profile is not None and profile not in profiles:
+            _fail(f"source {identifier}: unknown connection profile {profile!r}")
+        address = (source["endpoint"], source["channel"])
+        if address in source_addresses:
+            _fail(f"source {identifier}: ambiguous source endpoint/channel")
+        source_addresses.add(address)
+
+    physical_events = set(document["physical_events"])
+    decoder_keys: set[tuple[Any, ...]] = set()
+    note_intervals: dict[str, list[tuple[int, int]]] = {}
+    poly_aftertouch_sources: set[str] = set()
+    emitted: set[str] = set()
+    for index, decoder in enumerate(document["source_decoders"]):
+        match = decoder["match"]
+        emit = decoder["emit"]
+        source = match["source"]
+        message_type = match["type"]
+        if source not in sources:
+            _fail(f"source_decoders[{index}]: unknown source {source!r}")
+        if message_type == "note" and set(match) != {"source", "type", "note"}:
+            _fail(f"source_decoders[{index}]: note requires exactly match.note")
+        if message_type == "note_range":
+            if set(match) != {"source", "type", "note_range"}:
+                _fail(f"source_decoders[{index}]: note_range requires exactly match.note_range")
+            if match["note_range"][0] > match["note_range"][1]:
+                _fail(f"source_decoders[{index}]: note_range must be ascending")
+        if message_type == "cc" and set(match) != {"source", "type", "cc"}:
+            _fail(f"source_decoders[{index}]: cc requires exactly match.cc")
+        if message_type == "poly_aftertouch" and not set(match).issubset({"source", "type", "note", "active_note"}):
+            _fail(f"source_decoders[{index}]: invalid poly_aftertouch matcher")
+        if message_type in {"note", "note_range"}:
+            interval = (match["note"], match["note"]) if message_type == "note" else tuple(match["note_range"])
+            for low, high in note_intervals.setdefault(source, []):
+                if interval[0] <= high and low <= interval[1]:
+                    _fail(f"source_decoders[{index}]: overlapping note decoder")
+            note_intervals[source].append(interval)
+        if message_type == "poly_aftertouch":
+            if source in poly_aftertouch_sources:
+                _fail(f"source_decoders[{index}]: ambiguous poly_aftertouch decoder")
+            poly_aftertouch_sources.add(source)
+        if emit["physical"] not in physical_events:
+            _fail(f"source_decoders[{index}]: unknown physical event {emit['physical']!r}")
+        expressions = set(emit.get("expressions", []))
+        if message_type == "cc" and ("velocity" in expressions or emit.get("normalize") != "cc7"):
+            _fail(f"source_decoders[{index}]: cc must use normalize: cc7 and cannot emit velocity")
+        if message_type == "poly_aftertouch" and "velocity" in expressions:
+            _fail(f"source_decoders[{index}]: poly_aftertouch cannot emit velocity")
+        key = (source, message_type, tuple(sorted((key, repr(value)) for key, value in match.items() if key != "source")))
+        if key in decoder_keys:
+            _fail(f"source_decoders[{index}]: ambiguous duplicate decoder")
+        decoder_keys.add(key)
+        emitted.add(emit["physical"])
+    missing = physical_events - emitted
+    if missing:
+        _fail(f"physical events without decoder: {', '.join(sorted(missing))}")
+
+    state = document["state"]
+    scenes, variables, defaults = set(state["scenes"]), set(state["variables"]), state["defaults"]
+    if defaults.get("scene") not in scenes:
+        _fail("state.defaults.scene must name a declared scene")
+    if set(defaults) != {"scene", *variables}:
+        _fail("state.defaults must define scene and every variable, with no extras")
+
+    protocol = document["logical_control_protocol"]
+    if set(protocol) != {"scene", *variables}:
+        _fail("logical_control_protocol must cover scene and every state variable")
+    if protocol["scene"]["type"] != "program_change" or "cc" in protocol["scene"]:
+        _fail("scene control must be program_change without cc")
+    cc_numbers: set[int] = set()
+    for name in variables:
+        control = protocol[name]
+        if control["type"] != "cc" or "cc" not in control:
+            _fail(f"state variable {name} must use a CC control")
+        if control["cc"] in cc_numbers:
+            _fail("logical state variables use duplicate CC numbers")
+        cc_numbers.add(control["cc"])
+
+    routes = document["logical_routes"]
+    if set(routes) != scenes:
+        _fail("logical_routes must cover every declared scene and no others")
+    logical_sounds: set[str] = set()
+    for scene, mappings in routes.items():
+        missing = physical_events - set(mappings)
+        if missing:
+            _fail(f"scene {scene}: physical events without route: {', '.join(sorted(missing))}")
+        for physical, value in mappings.items():
+            variants = logical_route_variants(value)
+            fallback_count = sum(not variant.predicates for variant in variants)
+            if fallback_count != 1:
+                _fail(f"scene {scene} physical event {physical}: route variants need exactly one fallback")
+            conditional = [variant for variant in variants if variant.predicates]
+            for variant in conditional:
+                unknown = set(variant.predicates) - variables
+                if unknown:
+                    _fail(f"scene {scene} physical event {physical}: unknown state predicate {sorted(unknown)[0]!r}")
+            for index, left in enumerate(conditional):
+                for right in conditional[index + 1:]:
+                    common = set(left.predicates) & set(right.predicates)
+                    if all(left.predicates[name] == right.predicates[name] for name in common):
+                        _fail(f"scene {scene} physical event {physical}: overlapping route state predicates")
+            logical_sounds.update(variant.logical_target for variant in variants)
+    for renderer_name in ("ddrum4", "sd3", "drumgizmo"):
+        renderer = document["renderers"][renderer_name]
+        missing = logical_sounds - set(renderer)
+        if missing:
+            _fail(f"renderer {renderer_name}: logical sounds without renderer: {', '.join(sorted(missing))}")
+
+    # A DrumGizmo midimap is one MIDI-note address per logical sound. The
+    # all-zero M1 fixture is explicitly unresolved and therefore exempt until
+    # measured values replace the endpoint placeholders.
+    unresolved = any("MEASURE_ME" in source["endpoint"] for source in sources.values())
+    if not unresolved:
+        notes: dict[int, str] = {}
+        for logical, renderer in document["renderers"]["drumgizmo"].items():
+            note = renderer["note"]
+            if note in notes:
+                _fail(f"drumgizmo renderer: note {note} maps both {notes[note]!r} and {logical!r}")
+            notes[note] = logical
+
+    control_targets = {"scene", *variables}
+    native_keys: list[tuple[str | None, int, str, int | None]] = []
+    for name, native in document["native_control_map"].items():
+        if native["decode_to"] not in control_targets:
+            _fail(f"native control {name}: unknown state target {native['decode_to']!r}")
+        if native.get("channel") in (14, 15):
+            _fail(f"native control {name}: channels 14 and 15 are reserved for logical control")
+        native_type = native["type"]
+        if native_type == "cc" and "cc" not in native:
+            _fail(f"native control {name}: CC control requires cc")
+        if native_type == "note" and "note" not in native:
+            _fail(f"native control {name}: note control requires note")
+        if native_type == "program_change" and ("cc" in native or "note" in native):
+            _fail(f"native control {name}: program_change cannot declare cc or note")
+        if native_type == "cc" and "note" in native:
+            _fail(f"native control {name}: CC control cannot declare note")
+        if native_type == "note" and "cc" in native:
+            _fail(f"native control {name}: note control cannot declare cc")
+        source = native.get("source")
+        if source is not None:
+            if source not in sources:
+                _fail(f"native control {name}: unknown source {source!r}")
+            if native["channel"] != sources[source]["channel"]:
+                _fail(f"native control {name}: channel must match source {source!r}")
+        address = native.get("cc") if native_type == "cc" else native.get("note") if native_type == "note" else None
+        key = (source, native["channel"], native_type, address)
+        for existing_source, channel, existing_type, existing_address in native_keys:
+            if (channel, existing_type, existing_address) == key[1:] and (source is None or existing_source is None or source == existing_source):
+                _fail(f"native control {name}: overlaps another native control")
+        native_keys.append(key)
+
+
+def load_rig_project(path: Path) -> RigProject:
+    """Load and strictly validate a ``rig-project/v1`` YAML document."""
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise RigProjectError(f"cannot read {path}: {error}") from error
+    except yaml.YAMLError as error:
+        raise RigProjectError(f"invalid YAML in {path}: {error}") from error
+    try:
+        validate_document(document, _schema_path())
+    except ValueError as error:
+        raise RigProjectError(str(error)) from error
+    if not isinstance(document, dict):  # Kept explicit for static typing and future schema changes.
+        _fail("rig project root must be a mapping")
+    _validate_semantics(document)
+    state = document["state"]
+    source_objects = {name: Source(name, value["endpoint"], value["channel"], value["primary"], value.get("connection_profile")) for name, value in document["sources"].items()}
+    decoders = tuple(SourceDecoder(item["match"]["source"], item["match"]["type"], item["emit"]["physical"], item["match"], item["emit"]) for item in document["source_decoders"])
+    return RigProject(path, document, document["project"], document["rig"], source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], document["policies"])

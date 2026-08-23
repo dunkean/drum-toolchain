@@ -1,0 +1,21 @@
+# Read-only input for the Control Center DDrum4 matrix.
+# Copy this outside Git for a real bank. This file never triggers a build,
+# MIDI port access, SysEx transfer, or DDrum4 upload.
+bank:
+  sounds:
+    - sound_id: KICK_001
+      source: kick_main
+      status: planned
+      provenance: neutral-library/metalcore-v1
+      layers:
+        - wav: samples/kick_main_v090.wav
+          source: kick_main/head/v090
+          status: prepared
+    - sound_id: SNARE_001
+      source: snare_main
+      status: planned
+      layers: []
+# Slots not declared above are deliberately displayed as "missing".
+# `encoded_blocks` may come from an offline ddrum4edit build report.
+# `mem_left_delta_blocks` must only come from an isolated before/after
+# module measurement; the matrix displays "unknown" until then.

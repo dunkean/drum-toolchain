@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 from .ddrum4edit_backend import Ddrum4EditBackend
-from .ddrum4ui import discover
+from .ddrum4ui import discover, launch_ui
 from .backup import inspect_settings_backup, validate_settings_backup
 from .transport import receive_midi_dump
 from .plan import compare_plan, render_comparison
@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     discover_parser = subparsers.add_parser("discover", help="locate ddrum4UI and ddrum4edit")
     discover_parser.add_argument("--root", type=Path, help="optional directory to search first")
+    launch = subparsers.add_parser("launch-ddrum4ui", help="open ddrum4UI; no mouse/keyboard automation is performed")
+    launch.add_argument("--ddrum4ui", type=Path, help="explicit ddrum4UI executable path")
     for command, help_text in (("inspect", "print ddrum4edit metadata for a sound"), ("blocks", "print encoded block count for a sound")):
         subparser = subparsers.add_parser(command, help=help_text)
         subparser.add_argument("sound", type=Path)
@@ -146,6 +148,13 @@ def main(argv: list[str] | None = None) -> int:
         tools = discover(args.root)
         print(json.dumps({"ddrum4ui": str(tools.ddrum4ui) if tools.ddrum4ui else None, "ddrum4edit": str(tools.ddrum4edit) if tools.ddrum4edit else None}, indent=2))
         return 0 if tools.ddrum4edit else 2
+    if args.command == "launch-ddrum4ui":
+        executable = args.ddrum4ui or discover().ddrum4ui
+        if executable is None:
+            raise RuntimeError("ddrum4UI was not found; pass --ddrum4ui PATH")
+        launch_ui(executable)
+        print(f"launched {executable}")
+        return 0
     if args.command == "receive-settings-backup":
         if not args.confirm_listening:
             raise ValueError("this opens a live MIDI input; pass --confirm-listening after starting a module/UI dump")

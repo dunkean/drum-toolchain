@@ -7,6 +7,7 @@ hardware module.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .library import library_from_plan
@@ -14,6 +15,10 @@ from .recorder import capture_pending, library_from_captures
 from .exporters import export_drumgizmo
 from .library import SampleLibrary
 from .session import CaptureRequest, CaptureSessionPlan
+from .quality import CaptureQualityPolicy, audit_library
+from .audio import load_quality_profile
+from .offline import (drumgizmo_note_overrides, export_report, merge_library_files,
+                      prepare_selected_takes, run_offline_recipe, verify_drumgizmo_kit)
 
 
 def _request(value: str) -> CaptureRequest:
@@ -57,6 +62,29 @@ def build_parser() -> argparse.ArgumentParser:
     drumgizmo.add_argument("--output-directory", required=True, type=Path)
     drumgizmo.add_argument("--title")
     drumgizmo.add_argument("--reference-audio", action="store_true", help="reference source WAV paths instead of copying them into the kit")
+    drumgizmo.add_argument("--note-map", type=Path, help="generated drumgizmo-midimap.json artifact")
+    drumgizmo.add_argument("--report", type=Path, help="write an offline export report")
+    verify_drumgizmo = subparsers.add_parser("verify-drumgizmo", help="validate a kit XML and record DrumGizmo version/backend without starting audio")
+    verify_drumgizmo.add_argument("--kit-directory", required=True, type=Path)
+    verify_drumgizmo.add_argument("--report", required=True, type=Path)
+    verify_drumgizmo.add_argument("--drumgizmo", default="drumgizmo", help="DrumGizmo executable")
+    verify_drumgizmo.add_argument("--backend", default="jackmidi", help="declared MIDI backend for the future live load")
+    prepare = subparsers.add_parser("prepare-offline", help="non-destructively prepare existing raw takes")
+    prepare.add_argument("--library", required=True, type=Path); prepare.add_argument("--audio-root", required=True, type=Path)
+    prepare.add_argument("--output-root", required=True, type=Path); prepare.add_argument("--profile", required=True, type=Path)
+    prepare.add_argument("--profile-name", required=True); prepare.add_argument("--output-library", required=True, type=Path)
+    merge = subparsers.add_parser("merge-libraries", help="merge offline library manifests")
+    merge.add_argument("--id", required=True); merge.add_argument("--source", required=True, action="append", help="library.json:relative-prefix")
+    merge.add_argument("--output", required=True, type=Path)
+    recipe = subparsers.add_parser("offline-recipe", help="write a resumable offline export report")
+    recipe.add_argument("--recipe", required=True, type=Path); recipe.add_argument("--report", required=True, type=Path)
+    audit = subparsers.add_parser("audit-quality", help="classify captured WAVs without changing them")
+    audit.add_argument("--library", required=True, type=Path)
+    audit.add_argument("--audio-root", required=True, type=Path)
+    audit.add_argument("--output", required=True, type=Path)
+    audit.add_argument("--minimum-duration-ms", type=int, default=80)
+    audit.add_argument("--silence-rms-dbfs", type=float, default=-75.0)
+    audit.add_argument("--allow-clipped", action="store_true")
     return parser
 
 
@@ -70,8 +98,38 @@ def main(argv: list[str] | None = None) -> int:
         session = CaptureSessionPlan(args.midi_output, args.audio_input, channels, tuple(args.request))
     else:
         if args.command == "export-drumgizmo":
-            export = export_drumgizmo(SampleLibrary.read(args.library), audio_root=args.audio_root, output_directory=args.output_directory, title=args.title, copy_audio=not args.reference_audio)
+            library = SampleLibrary.read(args.library)
+            overrides = drumgizmo_note_overrides(args.note_map) if args.note_map else {}
+            export = export_drumgizmo(library, audio_root=args.audio_root, output_directory=args.output_directory, title=args.title, copy_audio=not args.reference_audio, midi_notes=overrides)
+            if args.report:
+                args.report.parent.mkdir(parents=True, exist_ok=True)
+                args.report.write_text(json.dumps(export_report(library, overrides=overrides, output_directory=args.output_directory), indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(f"wrote DrumGizmo kit {export.drumkit} with {len(export.instruments)} instruments")
+            return 0
+        if args.command == "verify-drumgizmo":
+            report = verify_drumgizmo_kit(args.kit_directory, args.report, executable=args.drumgizmo,
+                                           backend=args.backend)
+            print(f"verified DrumGizmo {report['drumgizmo']['version']} for {report['backend']}")
+            return 0
+        if args.command == "prepare-offline":
+            prepared = prepare_selected_takes(SampleLibrary.read(args.library), audio_root=args.audio_root, output_root=args.output_root,
+                                              profile=load_quality_profile(args.profile, args.profile_name))
+            prepared.write(args.output_library); print(f"wrote prepared library {args.output_library}"); return 0
+        if args.command == "merge-libraries":
+            sources = []
+            for value in args.source:
+                path, separator, prefix = value.rpartition(":")
+                if not separator: raise ValueError("--source must be library.json:relative-prefix")
+                sources.append((Path(path), prefix))
+            merge_library_files(args.id, tuple(sources)).write(args.output); print(f"wrote merged library {args.output}"); return 0
+        if args.command == "offline-recipe":
+            run_offline_recipe(args.recipe, args.report); print(f"wrote offline recipe report {args.report}"); return 0
+        if args.command == "audit-quality":
+            policy = CaptureQualityPolicy(args.minimum_duration_ms, args.silence_rms_dbfs, not args.allow_clipped)
+            report = audit_library(SampleLibrary.read(args.library), args.audio_root, policy)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            print(f"wrote quality report {args.output}: {report['summary']}")
             return 0
         if not args.confirm_capture:
             raise ValueError("capture sends MIDI and records audio; pass --confirm-capture after checking the session")

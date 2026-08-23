@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+import json
 from pathlib import Path
 import sys
 
@@ -24,12 +25,156 @@ def integer(value, label, minimum, maximum):
     return value
 
 
+def project_mapping_header(document, output_channel):
+    """Lower a ready rig-compiler firmware plan to fixed Arduino tables."""
+    if document.get("format") != "ddrum4-firmware-project-mapping-plan/v1":
+        raise ValueError("expected ddrum4-firmware-project-mapping-plan/v1")
+    if document.get("status") != "ready":
+        raise ValueError("firmware project mapping is unresolved/planned")
+    output_channel = integer(output_channel, "output channel", 1, 16)
+    state = document.get("state")
+    controls = document.get("logical_control_protocol")
+    records = document.get("records")
+    native_control_map = document.get("native_control_map", {})
+    if (not isinstance(state, dict) or not isinstance(controls, dict) or not isinstance(records, list)
+            or not isinstance(native_control_map, dict)):
+        raise ValueError("firmware project mapping needs state, logical_control_protocol, native_control_map, and records")
+    scenes = state.get("scenes")
+    variables = state.get("variables")
+    defaults = state.get("defaults")
+    if (not isinstance(scenes, list) or not scenes or not all(isinstance(item, str) for item in scenes) or
+            not isinstance(variables, list) or len(variables) > 4 or not all(isinstance(item, str) for item in variables) or
+            not isinstance(defaults, dict) or defaults.get("scene") not in scenes):
+        raise ValueError("firmware project state must declare scenes, at most four VP variables, and a default scene")
+    control_values = []
+    for variable in variables:
+        control = controls.get(variable)
+        if not isinstance(control, dict) or control.get("type") != "cc":
+            raise ValueError(f"firmware state variable {variable!r} needs a CC logical control")
+        control_values.append(integer(control.get("cc"), f"logical control {variable}", 0, 127))
+    if len(control_values) != len(set(control_values)):
+        raise ValueError("firmware logical VP controls must use distinct CCs")
+    control_values.extend([255] * (4 - len(control_values)))
+    initial_values = [integer(defaults.get(variable), f"default {variable}", 0, 127) for variable in variables]
+    initial_values.extend([0] * (4 - len(initial_values)))
+    state_routes = []
+    relay_channels = set()
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"record {index} must be an object")
+        source, match, renderers = record.get("source"), record.get("match"), record.get("renderers")
+        if not isinstance(source, dict) or not isinstance(match, dict) or not isinstance(renderers, dict):
+            raise ValueError(f"record {index} is incomplete")
+        if match.get("type") != "note":
+            raise ValueError(f"record {index}: firmware generation supports only exact note decoders")
+        channel = integer(source.get("channel"), f"record {index} source channel", 1, 16)
+        note = integer(match.get("note"), f"record {index} source note", 0, 127)
+        renderer = renderers.get("ddrum4")
+        if not isinstance(renderer, dict):
+            raise ValueError(f"record {index}: ddrum4 renderer is required")
+        output_note = integer(renderer.get("note"), f"record {index} ddrum4 note", 0, 127)
+        scene = record.get("scene")
+        if scene not in scenes:
+            raise ValueError(f"record {index}: unknown scene")
+        predicates = record.get("state_predicates", {})
+        if not isinstance(predicates, dict):
+            raise ValueError(f"record {index}: state_predicates must be an object")
+        values = [255, 255, 255, 255]
+        for name, value in predicates.items():
+            if name not in variables:
+                raise ValueError(f"record {index}: unknown firmware VP predicate {name!r}")
+            values[variables.index(name)] = integer(value, f"record {index} predicate {name}", 0, 127)
+        state_routes.append((channel, note, scenes.index(scene), *values, output_note))
+        relay_channels.add(channel)
+    if not state_routes:
+        raise ValueError("firmware project mapping has no state routes")
+    native_type = {"program_change": "ProgramChange", "cc": "ControlChange", "note": "NoteOn"}
+    native_routes = []
+    for name, control in sorted(native_control_map.items()):
+        if not isinstance(control, dict):
+            raise ValueError(f"native control {name!r} must be an object")
+        kind = control.get("type")
+        if kind not in native_type:
+            raise ValueError(f"native control {name!r} has unsupported type")
+        target_name = control.get("decode_to")
+        if target_name == "scene":
+            target = 0
+        elif target_name in variables:
+            target = variables.index(target_name) + 1
+        else:
+            raise ValueError(f"native control {name!r} has unknown state target")
+        channel = integer(control.get("channel"), f"native control {name} channel", 1, 16)
+        address = 0 if kind == "program_change" else integer(
+            control.get("cc" if kind == "cc" else "note"), f"native control {name} address", 0, 127)
+        native_routes.append((channel, native_type[kind], address, target))
+    if len({route[:3] for route in native_routes}) != len(native_routes):
+        raise ValueError("duplicate firmware native control")
+    source_hash = document.get("source_sha256")
+    if not isinstance(source_hash, str) or not source_hash:
+        raise ValueError("firmware project mapping needs source_sha256")
+    # Conditional rows precede their scene-local fallback, matching DdrumBridge::findNoteRoute.
+    state_routes.sort(key=lambda item: (item[0], item[1], item[2], sum(value != 255 for value in item[3:7]) == 0, item[3:7]))
+    lines = [
+        "// Generated from rig-compiler firmware-project-mapping.json; do not edit manually.",
+        f"// Rig project SHA-256: {source_hash}",
+        "#pragma once",
+        "#include \"DdrumBridge.h\"",
+        "",
+        f"constexpr uint8_t DDRUM_OUTPUT_CHANNEL = {output_channel};",
+        "const uint8_t RELAY_PROGRAM_CHANNELS[] = {" + ", ".join(str(item) for item in sorted(relay_channels)) + "};",
+        "constexpr size_t RELAY_PROGRAM_CHANNEL_COUNT = sizeof(RELAY_PROGRAM_CHANNELS) / sizeof(RELAY_PROGRAM_CHANNELS[0]);",
+        "",
+        "const NoteRoute NOTE_ROUTES[] = {{0, 0, 0, 1, 127, 1, 127}}; // State routes own every generated note.",
+        "constexpr size_t NOTE_ROUTE_COUNT = 0;",
+        "",
+        "const StateRoute STATE_ROUTES[] PROGMEM = {",
+    ]
+    lines.extend("  {" + ", ".join(str(value) for value in (*route, 1, 127, 1, 127)) + "}," for route in state_routes)
+    lines.extend([
+        "};",
+        "constexpr size_t STATE_ROUTE_COUNT = sizeof(STATE_ROUTES) / sizeof(STATE_ROUTES[0]);",
+        "",
+        "const NativeControlRoute NATIVE_CONTROLS[] PROGMEM = {",
+    ])
+    if native_routes:
+        lines.extend(f"  {{{channel}, NativeControlType::{kind}, {address}, {target}}},"
+                     for channel, kind, address, target in native_routes)
+    else:
+        lines.append("  {1, NativeControlType::ProgramChange, 0, 0}, // empty sentinel")
+    lines.extend([
+        "};",
+        f"constexpr size_t NATIVE_CONTROL_COUNT = {len(native_routes)};",
+        "",
+        "constexpr LogicalControlConfig LOGICAL_CONTROLS = {" + ", ".join(str(value) for value in control_values) + "};",
+        "constexpr LogicalState INITIAL_LOGICAL_STATE = {" + ", ".join(str(value) for value in (scenes.index(defaults["scene"]), *initial_values)) + "};",
+        "",
+        "// No CC4 policy is emitted until a measured project explicitly models one.",
+        "constexpr HihatDirectCc4Config HIHAT_CC4 = {0, 0, 0, 0, 0, 0, 0, false, false};",
+        "constexpr bool HIHAT_NOTE_P_SUPPORTED = false;",
+        "constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("manifest", nargs="?", type=Path)
+    parser.add_argument("--project-mapping", type=Path, help="ready firmware-project-mapping.json emitted by rig-compiler")
+    parser.add_argument("--output-channel", type=int, help="measured DDrum4 MIDI input channel, 1..16; required with --project-mapping")
     parser.add_argument("--output", type=Path, default=Path("include/generated_mapping.h"))
     args = parser.parse_args()
     try:
+        if bool(args.manifest) == bool(args.project_mapping):
+            raise ValueError("provide exactly one manifest or --project-mapping")
+        if args.project_mapping:
+            if args.output_channel is None:
+                raise ValueError("--output-channel is required with --project-mapping")
+            document = json.loads(args.project_mapping.read_text(encoding="utf-8"))
+            output = project_mapping_header(document, args.output_channel)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(output, encoding="utf-8")
+            return 0
         manifest_bytes = args.manifest.read_bytes()
         document = yaml.safe_load(manifest_bytes.decode("utf-8"))
         manifest_hash = sha256(manifest_bytes).hexdigest()
@@ -106,6 +251,13 @@ def main() -> int:
         lines.extend([
             "};",
             "constexpr size_t NOTE_ROUTE_COUNT = sizeof(NOTE_ROUTES) / sizeof(NOTE_ROUTES[0]);",
+            "// No measured Scene/VP state routes in this contract. Future generated",
+            "// entries must be declared `const StateRoute ... PROGMEM`.",
+            "constexpr const StateRoute* STATE_ROUTES = nullptr;",
+            "constexpr size_t STATE_ROUTE_COUNT = 0;",
+            "",
+            "constexpr LogicalControlConfig LOGICAL_CONTROLS = {0, 1, 2, 3};",
+            "constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};",
             "",
             "constexpr HihatDirectCc4Config HIHAT_CC4 = {",
             f"  {source_channels[hihat_source]}, {integer(hihat['input_cc'], 'input_cc', 0, 127)}, {integer(hihat['output_cc'], 'output_cc', 0, 127)},",
@@ -113,6 +265,9 @@ def main() -> int:
             f"  {integer(hihat['output_closed'], 'output_closed', 0, 127)}, {integer(hihat['output_open'], 'output_open', 0, 127)},",
             f"  {'true' if hihat.get('invert', False) else 'false'}",
             "};",
+            "// Deliberately unsupported until hardware captures validate them.",
+            "constexpr bool HIHAT_NOTE_P_SUPPORTED = false;",
+            "constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;",
             "",
         ])
         args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -27,6 +27,15 @@ int main() {
   count=overflow.process({MidiType::NoteOn,10,40,100,200},out); assert(count==3 && out[0].type==MidiType::NoteOff && out[0].data1==6 && overflow.ledgerOverflows()==1);
   assert(overflow.process({MidiType::NoteOff,10,40,0,201},out)==0); // consumes the real Off of the evicted Core hit
   count=overflow.process({MidiType::NoteOff,10,40,0,202},out); assert(count==1 && out[0].data1==14); // next FIFO hit remains Metal
-  const auto loaded=loadProfile("../config/ddrum4-template.yaml"); assert(loaded.initialKitIndex==0 && loaded.programSourceChannel==10 && loaded.kits.size()==3);
+  Profile empty; empty.unknownProgram=UnknownProgramPolicy::Forward; empty.forwardProgramChange=true;
+  Converter emptyConverter{empty};
+  assert(emptyConverter.process({MidiType::ProgramChange,10,1,0,203},out)==0);
+  assert(emptyConverter.process({MidiType::ControlChange,10,4,64,204},out)==0);
+  Profile malformed; malformed.programs={{1,99}};
+  malformed.kits={{"invalid","Invalid",10,{Route{"bad-channel",RouteType::NoteMap,0,40,1,40,10},Route{"bad-range",RouteType::NoteMap,10,127,8,40,10}}}};
+  Converter guarded{malformed};
+  assert(guarded.process({MidiType::ProgramChange,10,1,0,205},out)==0);
+  assert(guarded.process({MidiType::NoteOn,10,40,100,206},out)==0);
+  const auto loaded=loadProfile(std::filesystem::path(DDRUM4_TEST_CONFIG_DIR) / "ddrum4-template.yaml"); assert(loaded.initialKitIndex==0 && loaded.programSourceChannel==10 && loaded.kits.size()==3);
   std::cout << "converter tests passed\n";
 }

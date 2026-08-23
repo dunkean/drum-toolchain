@@ -13,20 +13,24 @@ struct MidiModeControl {
 
 class MidiDinAdapter {
  public:
-  MidiDinAdapter(Stream& port, DdrumBridge& bridge, MidiModeControl modeControl)
+  MidiDinAdapter(HardwareSerial& port, DdrumBridge& bridge, MidiModeControl modeControl)
       : port_(port), bridge_(bridge), modeControl_(modeControl) {}
   void begin();
   void poll();
+  uint32_t uartOverflows() const { return uartOverflows_; }
 
  private:
-  Stream& port_;
+  HardwareSerial& port_;
   DdrumBridge& bridge_;
   MidiModeControl modeControl_;
   uint8_t runningStatus_ = 0;
   uint8_t data_[2] = {0, 0};
   uint8_t count_ = 0;
+  bool inSysEx_ = false;
   uint32_t ledUntil_ = 0;
+  uint32_t uartOverflows_ = 0;
   void receive(uint8_t byte);
+  void clearMessageState();
   void dispatch(uint8_t status, uint8_t data1, uint8_t data2);
   void emit(const MidiEvent& event);
   static uint8_t dataLength(uint8_t status);

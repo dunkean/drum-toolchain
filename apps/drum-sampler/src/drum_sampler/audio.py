@@ -10,7 +10,6 @@ from hashlib import sha256
 
 import mido
 import numpy as np
-import sounddevice as sd
 from scipy.io import wavfile
 from scipy.signal import butter, resample_poly, sosfiltfilt
 import yaml
@@ -30,6 +29,15 @@ class QualityProfile:
     trim_tail: bool = True
 
 
+def _sounddevice():
+    """Import PortAudio bindings only for operations that actually need them."""
+    try:
+        import sounddevice as sd
+    except OSError as error:
+        raise RuntimeError("PortAudio is required for live audio device access") from error
+    return sd
+
+
 def load_quality_profile(path: Path, name: str) -> QualityProfile:
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -47,11 +55,13 @@ def load_quality_profile(path: Path, name: str) -> QualityProfile:
 
 
 def devices() -> list[str]:
+    sd = _sounddevice()
     return [f"{index}: {item['name']} ({item['max_input_channels']} in / {item['max_output_channels']} out)"
             for index, item in enumerate(sd.query_devices())]
 
 
 def resolve_device(query: str) -> int | str:
+    sd = _sounddevice()
     if query.split(":", 1)[0].isdigit():
         return int(query.split(":", 1)[0])
     matches = [index for index, item in enumerate(sd.query_devices()) if query.lower() in item["name"].lower()]
@@ -87,6 +97,7 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
             controllers=controllers, frames=frames, duration=duration, gate=gate,
             preroll=preroll, sample_rate=sample_rate, channels=channels,
         )
+    sd = _sounddevice()
     recording = sd.rec(frames, samplerate=sample_rate, channels=channels, dtype="float32",
                        device=resolve_device(audio_input))
     time.sleep(preroll)

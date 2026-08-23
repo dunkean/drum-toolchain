@@ -127,4 +127,7 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
         ET.SubElement(midi, "map", {"note": str(note), "instr": _identifier(f"{instrument}__{articulation}")})
     midimap_path = output_directory / "midimap.xml"
     _write_xml(midimap_path, midi)
+    # Catch cross-file reference errors before treating an export as usable.
+    from ..offline import validate_drumgizmo_kit
+    validate_drumgizmo_kit(output_directory)
     return DrumGizmoExport(drumkit_path, midimap_path, tuple(instruments), tuple(copied))

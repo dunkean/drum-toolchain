@@ -1,0 +1,35 @@
+format: rig-runtime-profile/v1
+status: ready
+state:
+  scenes: [metal, electronic]
+  defaults: {scene: metal, vp1: 0}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+  vp1: {channels: [14, 15], type: cc, cc: 20}
+native_control_map:
+  module_program: {decode_to: scene, source: edrumin, channel: 1, type: program_change}
+  module_vp1: {decode_to: vp1, source: edrumin, channel: 1, type: cc, cc: 21}
+policies: {echo: measured_only}
+records:
+  - scene: metal
+    state_predicates: {vp1: 1}
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb, deduplicate_din_copies: true}
+    match: {source: edrumin, type: note, note: 40}
+    emit: {physical: snare.head, expressions: [velocity]}
+    physical: snare.head
+    logical_target: snare.electronic
+    renderers: {sd3: {note: 40, channel: 10}, drumgizmo: {note: 50, channel: 10, instrument: snare, articulation: electronic}}
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb, deduplicate_din_copies: true}
+    match: {source: edrumin, type: note, note: 40}
+    emit: {physical: snare.head, expressions: [velocity]}
+    physical: snare.head
+    logical_target: snare.metal
+    renderers: {sd3: {note: 38, channel: 10}, drumgizmo: {note: 48, channel: 10, instrument: snare, articulation: metal}}
+  - scene: electronic
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb, deduplicate_din_copies: true}
+    match: {source: edrumin, type: note, note: 40}
+    emit: {physical: snare.head, expressions: [velocity]}
+    physical: snare.head
+    logical_target: snare.electronic
+    renderers: {sd3: {note: 40, channel: 10}, drumgizmo: {note: 50, channel: 10, instrument: snare, articulation: electronic}}

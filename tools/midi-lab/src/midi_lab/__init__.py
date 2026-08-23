@@ -3,8 +3,12 @@
 from .ports import resolve_unique_port
 from .traces import MidiTrace, TraceEvent
 from .ddrum4_programs import decode_ddrum4_program, program_for_kit, program_for_palette
+from .latency import analyze_latency_run, prepared_run, validate_latency_run
+from .sd3_reverse import compare_set, diff_files, scan_binary
 
 __all__ = [
     "MidiTrace", "TraceEvent", "resolve_unique_port",
     "decode_ddrum4_program", "program_for_kit", "program_for_palette",
+    "analyze_latency_run", "prepared_run", "validate_latency_run",
+    "scan_binary", "diff_files", "compare_set",
 ]

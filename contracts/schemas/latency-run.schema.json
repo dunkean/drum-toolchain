@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "kind", "run_id", "status", "stimulus", "path", "wiring", "environment", "observations"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "latency-run"},
+    "run_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["prepared", "measured"]},
+    "stimulus": {"type": "object", "required": ["note", "count", "interval_ms"], "additionalProperties": false, "properties": {"note": {"type": "integer", "minimum": 0, "maximum": 127}, "count": {"type": "integer", "minimum": 1}, "interval_ms": {"type": "integer", "minimum": 1}}},
+    "path": {"type": "object", "required": ["source", "renderer"], "additionalProperties": false, "properties": {"source": {"type": "string", "minLength": 1}, "renderer": {"type": "string", "minLength": 1}}},
+    "wiring": {"type": "string", "minLength": 1},
+    "environment": {"type": "object"},
+    "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}}
+  },
+  "allOf": [{"if": {"properties": {"status": {"const": "prepared"}}}, "then": {"properties": {"observations": {"maxItems": 0}}}}],
+  "$defs": {
+    "milestone_names": {"enum": ["t0_wire", "t1_wire", "t1_ready", "t2", "t3_enqueue", "t3_wire", "t4_ready", "t5", "t6"]},
+    "observation": {
+      "type": "object",
+      "required": ["sequence", "timestamps_us", "clock_domains"],
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 0},
+        "timestamps_us": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/milestone_names"}, "additionalProperties": {"type": "integer", "minimum": 0}},
+        "clock_domains": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/milestone_names"}, "additionalProperties": {"type": "string", "minLength": 1}}
+      },
+      "allOf": [
+        {"if": {"properties": {"timestamps_us": {"required": ["t0_wire"]}}}, "then": {"properties": {"clock_domains": {"required": ["t0_wire"]}}}}, {"if": {"properties": {"timestamps_us": {"required": ["t1_wire"]}}}, "then": {"properties": {"clock_domains": {"required": ["t1_wire"]}}}}, {"if": {"properties": {"timestamps_us": {"required": ["t1_ready"]}}}, "then": {"properties": {"clock_domains": {"required": ["t1_ready"]}}}},
+        {"if": {"properties": {"timestamps_us": {"required": ["t2"]}}}, "then": {"properties": {"clock_domains": {"required": ["t2"]}}}}, {"if": {"properties": {"timestamps_us": {"required": ["t3_enqueue"]}}}, "then": {"properties": {"clock_domains": {"required": ["t3_enqueue"]}}}}, {"if": {"properties": {"timestamps_us": {"required": ["t3_wire"]}}}, "then": {"properties": {"clock_domains": {"required": ["t3_wire"]}}}},
+        {"if": {"properties": {"timestamps_us": {"required": ["t4_ready"]}}}, "then": {"properties": {"clock_domains": {"required": ["t4_ready"]}}}}, {"if": {"properties": {"timestamps_us": {"required": ["t5"]}}}, "then": {"properties": {"clock_domains": {"required": ["t5"]}}}}, {"if": {"properties": {"timestamps_us": {"required": ["t6"]}}}, "then": {"properties": {"clock_domains": {"required": ["t6"]}}}},
+        {"if": {"properties": {"clock_domains": {"required": ["t0_wire"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t0_wire"]}}}}, {"if": {"properties": {"clock_domains": {"required": ["t1_wire"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t1_wire"]}}}}, {"if": {"properties": {"clock_domains": {"required": ["t1_ready"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t1_ready"]}}}},
+        {"if": {"properties": {"clock_domains": {"required": ["t2"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t2"]}}}}, {"if": {"properties": {"clock_domains": {"required": ["t3_enqueue"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t3_enqueue"]}}}}, {"if": {"properties": {"clock_domains": {"required": ["t3_wire"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t3_wire"]}}}},
+        {"if": {"properties": {"clock_domains": {"required": ["t4_ready"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t4_ready"]}}}}, {"if": {"properties": {"clock_domains": {"required": ["t5"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t5"]}}}}, {"if": {"properties": {"clock_domains": {"required": ["t6"]}}}, "then": {"properties": {"timestamps_us": {"required": ["t6"]}}}}
+      ]
+    }
+  }
+}

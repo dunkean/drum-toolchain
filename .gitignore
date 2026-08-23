@@ -55,3 +55,9 @@ public/
 Thumbs.db
 .vscode/
 .idea/
+
+# Credentials and Windows alternate data streams
+*.ppk
+github_*_SSH_*
+token_*
+*:Zone.Identifier

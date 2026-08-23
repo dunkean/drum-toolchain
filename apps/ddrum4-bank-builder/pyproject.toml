@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ddrum4-bank-builder"
+version = "0.1.0"
+description = "Safe offline planning and controlled transfer workflow for ddrum4 Sounds"
+requires-python = ">=3.12"
+dependencies = [
+  "PyYAML>=6.0,<7",
+  "mido>=1.3,<2",
+  "python-rtmidi>=1.5,<2",
+]
+
+[project.scripts]
+ddrum4-bank-builder = "ddrum4_bank.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

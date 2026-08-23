@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 import time
 
 from .ports import resolve_unique_port
 from .traces import MidiTrace, TraceEvent
 from .ddrum4_programs import decode_ddrum4_program
+from .latency import analyze_latency_run, prepared_run, read_latency_run, validate_latency_run, write_json_new
+from .sd3_reverse import compare_set, diff_files, scan_binary, write_json
 
 
 def _trace_event(message, timestamp_ms: int) -> TraceEvent:
@@ -97,13 +100,49 @@ def build_parser() -> argparse.ArgumentParser:
     bridge.add_argument("--output-b", required=True, help="destination for input B")
     bridge.add_argument("--seconds", required=True, type=float, help="positive bounded relay duration")
     bridge.add_argument("--send", action="store_true", help="required: actually send MIDI to both outputs")
+    latency_prepare = subparsers.add_parser("latency-prepare", help="write a declaration-only latency run; never opens MIDI or audio hardware")
+    latency_prepare.add_argument("--output", required=True, type=Path)
+    latency_prepare.add_argument("--run-id", required=True)
+    latency_prepare.add_argument("--source", required=True)
+    latency_prepare.add_argument("--renderer", required=True)
+    latency_prepare.add_argument("--note", required=True, type=int)
+    latency_prepare.add_argument("--count", type=int, default=1000)
+    latency_prepare.add_argument("--interval-ms", type=int, default=20)
+    latency_prepare.add_argument("--wiring", required=True, help="documented wiring identifier or description")
+    latency_prepare.add_argument("--profile")
+    latency_prepare.add_argument("--sample-rate", type=int)
+    latency_prepare.add_argument("--buffer-frames", type=int)
+    latency_validate = subparsers.add_parser("latency-validate", help="validate a latency run offline")
+    latency_validate.add_argument("run", type=Path)
+    latency_analyze = subparsers.add_parser("latency-analyze", help="compute latency statistics offline from a run")
+    latency_analyze.add_argument("run", type=Path)
+    latency_analyze.add_argument("--output", type=Path, help="write analysis JSON; refuses overwrite")
+    sd3_scan = subparsers.add_parser("sd3-scan", help="offline binary scan for one SD3 save-like file")
+    sd3_scan.add_argument("file", type=Path)
+    sd3_scan.add_argument("--output", type=Path, help="write JSON summary to this file")
+    sd3_diff = subparsers.add_parser("sd3-diff", help="offline binary diff between base and variant files")
+    sd3_diff.add_argument("base", type=Path)
+    sd3_diff.add_argument("variant", type=Path)
+    sd3_diff.add_argument("--output", type=Path, help="write JSON diff to this file")
+    sd3_diffset = subparsers.add_parser("sd3-diffset", help="compare a baseline file against all matching files in a directory")
+    sd3_diffset.add_argument("base", type=Path)
+    sd3_diffset.add_argument("directory", type=Path)
+    sd3_diffset.add_argument("--pattern", default="*", help="glob pattern used inside directory")
+    sd3_diffset.add_argument("--bin-size", type=int, default=256)
+    sd3_diffset.add_argument("--top-bins", type=int, default=20)
+    sd3_diffset.add_argument("--output", type=Path, help="write JSON summary to this file")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "list":
-        print("\n".join(_port_names(args.direction)))
+        try:
+            names = _port_names(args.direction)
+        except Exception as error:  # Runtime backends can fail without ALSA/JACK access under WSL.
+            print(f"MIDI discovery unavailable: {error}", file=sys.stderr)
+            return 2
+        print("\n".join(names))
     elif args.command == "match":
         print(resolve_unique_port(args.names, args.query))
     elif args.command == "trace-info":
@@ -115,6 +154,50 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "describe-ddrum4-program":
         decoded = decode_ddrum4_program(args.program)
         print(f"PC {decoded.program}: {decoded.label}")
+    elif args.command == "latency-prepare":
+        run = prepared_run(args.run_id, args.source, args.renderer, args.note, args.count,
+                           args.interval_ms, args.wiring, args.profile, args.sample_rate,
+                           args.buffer_frames)
+        write_json_new(args.output, run)
+        print(f"prepared offline latency run {args.run_id} at {args.output}; no MIDI or audio hardware was opened")
+    elif args.command == "latency-validate":
+        validate_latency_run(read_latency_run(args.run))
+        print(f"valid latency run: {args.run}")
+    elif args.command == "latency-analyze":
+        analysis = analyze_latency_run(read_latency_run(args.run))
+        if args.output:
+            write_json_new(args.output, analysis)
+            print(f"wrote offline latency analysis to {args.output}")
+        else:
+            import json
+            print(json.dumps(analysis, indent=2, sort_keys=True))
+    elif args.command == "sd3-scan":
+        summary = scan_binary(args.file)
+        if args.output:
+            write_json(args.output, summary)
+            print(f"wrote SD3 scan summary to {args.output}")
+        else:
+            import json
+            print(json.dumps(summary, indent=2, sort_keys=True))
+    elif args.command == "sd3-diff":
+        diff = diff_files(args.base, args.variant)
+        if args.output:
+            write_json(args.output, diff)
+            print(f"wrote SD3 binary diff to {args.output}")
+        else:
+            import json
+            print(json.dumps(diff, indent=2, sort_keys=True))
+    elif args.command == "sd3-diffset":
+        files = sorted(path for path in args.directory.glob(args.pattern) if path.is_file() and path.resolve() != args.base.resolve())
+        if not files:
+            raise ValueError("no candidate files matched --pattern in the target directory")
+        report = compare_set(args.base, files, bin_size=args.bin_size, top_bins=args.top_bins)
+        if args.output:
+            write_json(args.output, report)
+            print(f"wrote SD3 diffset summary to {args.output}")
+        else:
+            import json
+            print(json.dumps(report, indent=2, sort_keys=True))
     elif args.command == "send-ddrum4-program":
         if not args.send:
             raise ValueError("sending a Program Change is a MIDI write; pass --send after checking the output")

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "renderer": "drumgizmo",
+  "converter": {
+    "path": "/replace/with/ddrum4_converter",
+    "arguments": []
+  },
+  "runtime_profile": {
+    "path": "/replace/with/build/generated/greg-hybrid-mvp/runtime-profile.yaml"
+  },
+  "midi_bridge": {
+    "path": "a2jmidid",
+    "arguments": ["-e"]
+  },
+  "drumgizmo": {
+    "path": "drumgizmo",
+    "kit_directory": "/replace/with/generated-drumgizmo-kit",
+    "input_engine": "jackmidi",
+    "output_engine": "jackaudio",
+    "arguments": ["--streaming"]
+  },
+  "jack_connections": [
+    {
+      "source": "REPLACE_WITH_A2JMIDID_CONVERTER_MIDI_OUT",
+      "destination": "REPLACE_WITH_DRUMGIZMO_JACK_MIDI_IN"
+    },
+    {
+      "source": "REPLACE_WITH_DRUMGIZMO_JACK_AUDIO_OUT",
+      "destination": "REPLACE_WITH_AUDIO_INTERFACE_JACK_INPUT"
+    }
+  ]
+}

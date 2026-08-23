@@ -18,5 +18,14 @@ dependencies = [
   "jsonschema>=4.25,<5",
 ]
 
+# This distribution defines the shared workspace dependencies.  Individual
+# applications use their own src layouts, so setuptools must not attempt to
+# infer packages from the repository's top-level directories.
+[tool.setuptools]
+py-modules = ["drum_toolchain"]
+
+[project.scripts]
+drum-toolchain = "drum_toolchain:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages", "apps", "tools"]

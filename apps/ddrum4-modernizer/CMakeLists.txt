@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 project(ddrum4_converter VERSION 0.1.0 LANGUAGES C CXX)
 
+# yaml-cpp 0.8 still declares compatibility with CMake < 3.5.  CMake 4
+# rejects that declaration unless the consumer explicitly selects the policy
+# baseline.  This keeps FetchContent builds working without patching a vendor.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy version for fetched legacy projects")
+
 option(DDRUM4_BUILD_APP "Build the JUCE desktop application" ON)
 option(DDRUM4_BUILD_TESTS "Build unit tests" ON)
 
@@ -14,6 +19,7 @@ FetchContent_MakeAvailable(yaml-cpp)
 
 add_library(ddrum4_core
   src/core/Converter.cpp
+  src/core/RigRuntime.cpp
   src/config/ProfileLoader.cpp
 )
 target_include_directories(ddrum4_core PUBLIC src)
@@ -33,12 +39,19 @@ if(DDRUM4_BUILD_APP)
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:ddrum4_converter,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
   add_custom_command(TARGET ddrum4_converter POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/config $<TARGET_FILE_DIR:ddrum4_converter>/config)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/config $<TARGET_FILE_DIR:ddrum4_converter>/config)
 endif()
 
 if(DDRUM4_BUILD_TESTS)
   enable_testing()
   add_executable(ddrum4_core_tests tests/ConverterTests.cpp)
   target_link_libraries(ddrum4_core_tests PRIVATE ddrum4_core)
+  target_compile_definitions(ddrum4_core_tests PRIVATE
+    DDRUM4_TEST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config")
   add_test(NAME ddrum4_core_tests COMMAND ddrum4_core_tests)
+  add_executable(ddrum4_rig_runtime_tests tests/RigRuntimeTests.cpp)
+  target_link_libraries(ddrum4_rig_runtime_tests PRIVATE ddrum4_core)
+  target_compile_definitions(ddrum4_rig_runtime_tests PRIVATE
+    DDRUM4_TEST_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config")
+  add_test(NAME ddrum4_rig_runtime_tests COMMAND ddrum4_rig_runtime_tests)
 endif()

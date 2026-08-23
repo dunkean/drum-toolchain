@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(drum_toolchain LANGUAGES C CXX)
 
+include(CTest)
+
 option(DRUM_TOOLCHAIN_BUILD_MODERNIZER "Build the ddrum4 MIDI modernizer" ON)
 
 if(DRUM_TOOLCHAIN_BUILD_MODERNIZER)

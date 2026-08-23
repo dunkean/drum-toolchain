@@ -5,11 +5,21 @@
 namespace ddrum4 {
 Converter::Converter(const Profile& profile) : profile_(profile), compiled_(profile.kits.size()) {
   programKits_.fill(-1);
-  for(const auto& binding:profile_.programs) programKits_[binding.program]=static_cast<int16_t>(binding.kitIndex);
+  for(const auto& binding:profile_.programs) {
+    if (binding.kitIndex < profile_.kits.size())
+      programKits_[binding.program]=static_cast<int16_t>(binding.kitIndex);
+  }
   for(const auto cc:profile_.allowedCcs) allowedCcs_[cc]=true;
   for(size_t kitIndex=0;kitIndex<profile_.kits.size();++kitIndex) for(const auto& route:profile_.kits[kitIndex].routes) {
-    if(route.type==RouteType::HihatContinuous) { compiled_[kitIndex].hihatCc[(route.inputChannel-1)*128+route.inputCc]=&route; continue; }
-    for(uint8_t note=0;note<route.count;++note) compiled_[kitIndex].note[(route.inputChannel-1)*128+route.firstNote+note]=&route;
+    if (route.inputChannel < 1 || route.inputChannel > 16) continue;
+    if(route.type==RouteType::HihatContinuous) {
+      if (route.inputCc <= 127)
+        compiled_[kitIndex].hihatCc[(route.inputChannel-1)*128+route.inputCc]=&route;
+      continue;
+    }
+    const auto routeEnd = std::min<unsigned>(128u, static_cast<unsigned>(route.firstNote) + route.count);
+    for(unsigned note=route.firstNote;note<routeEnd;++note)
+      compiled_[kitIndex].note[(route.inputChannel-1)*128+note]=&route;
   }
   if (!profile_.kits.empty()) selectKit(std::min(profile_.initialKitIndex, profile_.kits.size() - 1), "startup");
 }
@@ -37,11 +47,20 @@ size_t Converter::process(const MidiEvent& input, std::array<MidiEvent, maxOutpu
   if (input.data1 > 127 || input.data2 > 127) { ignored_.fetch_add(1, std::memory_order_relaxed); return 0; }
   if (input.type == MidiType::ProgramChange) {
     if (input.channel != profile_.programSourceChannel) { ignored_.fetch_add(1, std::memory_order_relaxed); return 0; }
-    if (profile_.programManagerEnabled && programKits_[input.data1]>=0) { selectKit(static_cast<size_t>(programKits_[input.data1]), "PC"); if (!profile_.forwardProgramChange) return 0; output[0] = {MidiType::ProgramChange, profile_.kits[activeKit()].outputChannel, input.data1, 0, input.timestampUs}; return 1; }
-    if (profile_.unknownProgram == UnknownProgramPolicy::Forward || profile_.forwardProgramChange) { output[0] = {MidiType::ProgramChange, profile_.kits[activeKit()].outputChannel, input.data1, 0, input.timestampUs}; return 1; }
+    if (profile_.programManagerEnabled && programKits_[input.data1]>=0) {
+      selectKit(static_cast<size_t>(programKits_[input.data1]), "PC");
+      if (!profile_.forwardProgramChange) return 0;
+      if (profile_.kits.empty()) { ignored_.fetch_add(1, std::memory_order_relaxed); return 0; }
+      output[0] = {MidiType::ProgramChange, profile_.kits[activeKit()].outputChannel, input.data1, 0, input.timestampUs}; return 1;
+    }
+    if (profile_.unknownProgram == UnknownProgramPolicy::Forward || profile_.forwardProgramChange) {
+      if (profile_.kits.empty()) { ignored_.fetch_add(1, std::memory_order_relaxed); return 0; }
+      output[0] = {MidiType::ProgramChange, profile_.kits[activeKit()].outputChannel, input.data1, 0, input.timestampUs}; return 1;
+    }
     ignored_.fetch_add(1, std::memory_order_relaxed); return 0;
   }
   if (input.type == MidiType::ControlChange) {
+    if (profile_.kits.empty()) { ignored_.fetch_add(1, std::memory_order_relaxed); return 0; }
     const auto kitIndex=activeKit_.load(std::memory_order_acquire);
     const auto& kit=profile_.kits[kitIndex];
     if(const auto* route=compiled_[kitIndex].hihatCc[(input.channel-1)*128+input.data1]) {

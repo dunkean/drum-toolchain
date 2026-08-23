@@ -12,6 +12,16 @@ const NoteRoute NOTE_ROUTES[] = {
   {12, 18, 18, 1, 127, 1, 127}, // diagnostic.cymb2.first_note_p_branch
 };
 constexpr size_t NOTE_ROUTE_COUNT = sizeof(NOTE_ROUTES) / sizeof(NOTE_ROUTES[0]);
+// No measured Scene/VP state routes in this contract. Future generated
+// entries must be declared `const StateRoute ... PROGMEM`.
+constexpr const StateRoute* STATE_ROUTES = nullptr;
+constexpr size_t STATE_ROUTE_COUNT = 0;
+
+constexpr const NativeControlRoute* NATIVE_CONTROLS = nullptr;
+constexpr size_t NATIVE_CONTROL_COUNT = 0;
+
+constexpr LogicalControlConfig LOGICAL_CONTROLS = {0, 1, 2, 3};
+constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};
 
 constexpr HihatDirectCc4Config HIHAT_CC4 = {
   12, 4, 4,
@@ -19,3 +29,8 @@ constexpr HihatDirectCc4Config HIHAT_CC4 = {
   0, 127,
   false
 };
+// This bridge implements only measured direct CC4.  Note-P quantisation and
+// three-zone interpretation require validated module captures and are unsafe
+// to infer from this routing contract.
+constexpr bool HIHAT_NOTE_P_SUPPORTED = false;
+constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;

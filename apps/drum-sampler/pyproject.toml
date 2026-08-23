@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drum-sampler"
+version = "0.1.0"
+description = "Neutral drum-sample capture and DrumGizmo export"
+requires-python = ">=3.12"
+dependencies = [
+  "PyYAML>=6.0,<7",
+  "numpy>=2,<3",
+  "scipy>=1.14,<2",
+  "sounddevice>=0.5,<1",
+  "soundcard>=0.4.6,<1",
+]
+
+[project.scripts]
+drum-sampler = "drum_sampler.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

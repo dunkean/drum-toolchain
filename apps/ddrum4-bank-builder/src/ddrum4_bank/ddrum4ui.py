@@ -37,6 +37,13 @@ def discover(root: Path | None = None) -> ToolStatus:
             candidate = folder / name
             if candidate.is_file() and edit is None:
                 edit = candidate
+    if root and ":" in str(root) and ui is None and edit is None:
+        # WSL/Linux cannot always see a Windows tool root while the repository
+        # is being prepared for a later Windows run.  Surface the declared
+        # executable names for planning/discovery without making live backend
+        # commands pretend the tools are runnable.
+        ui = root / "ddrum4ui.exe"
+        edit = root / "ddrum4edit.exe"
     return ToolStatus(ui, edit)
 
 
