@@ -149,11 +149,29 @@ def launch() -> int:
             try:
                 self.project_document.setPlainText(path.read_text(encoding="utf-8"))
                 RigSimulator.from_path(path)
-                self._populate_visual_project_editor(yaml.safe_load(self.project_document.toPlainText()))
+                document = yaml.safe_load(self.project_document.toPlainText())
+                self._populate_visual_project_editor(document)
+                self._load_project_bank_reference(path, document)
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Cannot load rig project", str(error)); return
             self.project.setText(str(path))
             self.editor_status.setText("Loaded and validated. Edit, validate, then save.")
+
+        def _load_project_bank_reference(self, project_path: Path, document: object) -> None:
+            """Resolve an optional bank reference relative to the rig project.
+
+            This only selects local manifest/report files for the read-only
+            matrix; it never probes the DDrum4 or assumes installed memory.
+            """
+            if not isinstance(document, dict) or not isinstance(document.get("ddrum4_bank"), dict):
+                return
+            reference = document["ddrum4_bank"]
+            manifest = (project_path.parent / str(reference["manifest"])).resolve()
+            reports = [(project_path.parent / str(item)).resolve() for item in reference.get("reports", ())]
+            self.manifest.setText(str(manifest))
+            self.report_paths = reports
+            self.reports.setText("; ".join(str(item) for item in reports))
+            self.load_matrix()
 
         def _populate_visual_project_editor(self, document: object) -> None:
             if not isinstance(document, dict):
@@ -574,6 +592,9 @@ def launch() -> int:
             controls_layout.addLayout(row)
             simulate_control = QPushButton("Simulate scene / virtual-palette control")
             simulate_control.clicked.connect(self.simulate_control); controls_layout.addWidget(simulate_control)
+            diagnose = QPushButton("Run full offline no-pad diagnostic")
+            diagnose.setToolTip("Checks every declared playable input, Scene/VP state vector, and native control. No MIDI is opened.")
+            diagnose.clicked.connect(self.run_offline_diagnostic); controls_layout.addWidget(diagnose)
             controls.setLayout(controls_layout); layout.addWidget(controls)
             panel.setLayout(layout)
             return panel
@@ -702,6 +723,15 @@ def launch() -> int:
             except (OSError, ValueError, SimulationError) as error:
                 QMessageBox.warning(self, "Cannot simulate logical control", str(error)); return
             self.log.setPlainText(result.render_text())
+
+        def run_offline_diagnostic(self) -> None:
+            if not self.project.text() and not self.editor_project.text():
+                self.log.setPlainText("Select a rig project first."); return
+            try:
+                report = self.current_simulator().run_offline_diagnostic()
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot run offline diagnostic", str(error)); return
+            self.log.setPlainText(report.render_text())
 
         def current_simulator(self) -> RigSimulator:
             path_text = self.project.text().strip() or self.editor_project.text().strip()

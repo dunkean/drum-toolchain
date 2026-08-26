@@ -100,9 +100,30 @@ class ControlCenterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not a declared"):
             RigSimulator.from_path(project).simulate_logical_control("pc", 15, "cc", 99, 1)
 
+    def test_offline_diagnostic_covers_declared_pads_scenes_and_native_controls(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        report = RigSimulator.from_path(project).run_offline_diagnostic()
+
+        self.assertTrue(report.passed)
+        self.assertGreater(len(report.cases), 20)
+        identifiers = {case.identifier for case in report.cases}
+        self.assertIn("logical.scene.pc000", identifiers)
+        self.assertIn("logical.scene.pc001", identifiers)
+        self.assertIn("native.ddrum_program_metalcore", identifiers)
+        self.assertEqual(report.to_document()["hardware_io"], "disabled")
+
+    def test_native_control_simulation_changes_state_without_native_echo(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        result = RigSimulator.from_path(project).simulate_native_control("ddrum_program_dnb")
+
+        self.assertEqual(result.state["scene"], "dnb")
+        self.assertEqual(result.message, {"type": "program_change", "channel": 12, "data1": 1, "value": 1})
+        self.assertFalse(any(step.stage == "Arduino DDrum4 state" for step in result.steps))
+
     def test_r15_simulator_covers_ten_sounds_from_each_of_three_modules(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         simulator = RigSimulator.from_path(project)
+        self.assertEqual(simulator.project.ddrum4_bank, {"manifest": "../banks/metalcore-r15-installed.yaml"})
         notes = (0, 8, 16, 24, 32, 40, 48, 56, 64, 72)
         expected_ddrum = (0, 8, 18, 24, 32, 40, 48, 56, 64, 72)
 

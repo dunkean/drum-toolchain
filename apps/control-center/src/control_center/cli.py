@@ -86,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     control.add_argument("--data1", required=True, type=int, help="Program number or CC address")
     control.add_argument("--value", type=int, default=0, help="CC value; ignored for Program Change")
     control.add_argument("--json", action="store_true", help="print the complete machine-readable trace")
+    diagnose = commands.add_parser("diagnose", help="offline no-pad coverage test for every declared route and control")
+    diagnose.add_argument("project", type=Path)
+    diagnose.add_argument("--json", action="store_true", help="print the machine-readable coverage report")
     args = parser.parse_args(argv)
     center = ControlCenter(args.toolchain)
     if args.action == "kit-matrix":
@@ -123,6 +126,13 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(error))
         print(json.dumps(result.to_document(), indent=2, ensure_ascii=False) if args.json else result.render_text())
         return 0
+    if args.action == "diagnose":
+        try:
+            report = RigSimulator.from_path(args.project).run_offline_diagnostic()
+        except (OSError, ValueError, SimulationError) as error:
+            parser.error(str(error))
+        print(json.dumps(report.to_document(), indent=2, ensure_ascii=True) if args.json else report.render_text())
+        return 0 if report.passed else 1
     if args.action in {"validate", "report", "compile"}:
         return _print(center.run_rig(args.action, args.project, output=getattr(args, "output", None),
                                      replace=getattr(args, "replace", False), base_dump=getattr(args, "base_dump", None),

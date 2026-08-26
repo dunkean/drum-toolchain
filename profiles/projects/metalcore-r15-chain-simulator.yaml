@@ -7,6 +7,7 @@ rig: profiles/physical/greg-hybrid-kit.yaml
 deployment: simulation
 ddrum4_output_channel: 12
 control_bus: {endpoint: SIM_UMC_MIDI_OUT, channel: 15, status: planned}
+ddrum4_bank: {manifest: ../banks/metalcore-r15-installed.yaml}
 sources:
   ddrum4: {endpoint: SIM_DDrum4_DIN, channel: 12, primary: din, connection_profile: DIN_ONLY}
   ddti: {endpoint: SIM_DDTi_USB, channel: 2, primary: usb, connection_profile: LIVE_USB_PRIMARY}

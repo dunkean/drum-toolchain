@@ -92,6 +92,7 @@ class RigProject:
     deployment: str
     ddrum4_output_channel: int
     control_bus: Mapping[str, Any] | None
+    ddrum4_bank: Mapping[str, Any] | None
     sources: Mapping[str, Source]
     connection_profiles: Mapping[str, Mapping[str, Any]]
     source_decoders: tuple[SourceDecoder, ...]
@@ -352,4 +353,4 @@ def load_rig_project(path: Path) -> RigProject:
             action_type=row["type"], status=row["status"], channel=row.get("channel"),
             program=row.get("program"), data=tuple(row.get("data", ())), when=dict(row.get("when", {})), description=row.get("description"),
         ) for row in rows)
-    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])
+    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), document.get("ddrum4_bank"), source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])

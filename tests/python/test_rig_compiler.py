@@ -81,6 +81,7 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(firmware["ddrum_state_actions"], {})
             self.assertEqual(firmware["status"], "simulation-only")
             self.assertFalse((output / "firmware-project-mapping.h").exists())
+            self.assertNotIn("bank_reference", yaml.safe_load((output / "ddrum4-bank-plan.yaml").read_text(encoding="utf-8")))
             self.assertIn("rig-compiler/v1", (output / "sd3-megakit-map.md").read_text(encoding="utf-8"))
             drumgizmo = json.loads((output / "drumgizmo-midimap.json").read_text(encoding="utf-8"))
             self.assertEqual(drumgizmo["source_renderer"], "drumgizmo")
@@ -287,6 +288,18 @@ class RigCompilerTests(unittest.TestCase):
             runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
             self.assertNotIn("control_bus", runtime)
             self.assertEqual(runtime["hardware_io"], "disabled")
+
+    def test_compiler_preserves_optional_ddrum4_bank_reference_in_bank_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["ddrum4_bank"] = {"manifest": "../banks/metalcore-r15-installed.yaml",
+                                       "reports": ["reports/actual-bank.json"]}
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            compile_project(project, root / "out")
+            bank = yaml.safe_load((root / "out" / "ddrum4-bank-plan.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(bank["bank_reference"], document["ddrum4_bank"])
 
     def test_simulation_firmware_plan_is_rejected_by_generator(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

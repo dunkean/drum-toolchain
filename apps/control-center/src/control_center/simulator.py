@@ -104,6 +104,51 @@ class StateChangeResult:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class DiagnosticCase:
+    """One deterministic offline path checked against the declared rig."""
+
+    identifier: str
+    passed: bool
+    detail: str
+
+    def to_document(self) -> dict[str, Any]:
+        return {"id": self.identifier, "status": "passed" if self.passed else "failed", "detail": self.detail}
+
+
+@dataclass(frozen=True)
+class DiagnosticReport:
+    """Coverage report for a no-pad, no-port project verification run."""
+
+    project: str
+    cases: tuple[DiagnosticCase, ...]
+
+    @property
+    def passed(self) -> bool:
+        return all(case.passed for case in self.cases)
+
+    @property
+    def passed_count(self) -> int:
+        return sum(case.passed for case in self.cases)
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "kind": "drum-chain-offline-diagnostic/v1",
+            "hardware_io": "disabled",
+            "project": self.project,
+            "status": "passed" if self.passed else "failed",
+            "summary": {"passed": self.passed_count, "total": len(self.cases)},
+            "cases": [case.to_document() for case in self.cases],
+        }
+
+    def render_text(self) -> str:
+        lines = [f"Offline diagnostic: {self.project}",
+                 f"{self.passed_count}/{len(self.cases)} paths passed", ""]
+        lines.extend(f"{'PASS' if case.passed else 'FAIL'} {case.identifier} - {case.detail}" for case in self.cases)
+        lines.append("\nOffline only: no MIDI port, Arduino, DDrum4, VST, or audio device was opened.")
+        return "\n".join(lines)
+
+
 class RigSimulator:
     """Resolve virtual pad hits through the complete declared renderer chain."""
 
@@ -242,6 +287,121 @@ class RigSimulator:
             steps.append(TraceStep("Arduino DDrum4 state", "no native action declared for this scene"))
         steps.append(TraceStep("PC state echo", "the returned logical control is idempotent", dict(self._state)))
         return StateChangeResult(source, message, dict(self._state), tuple(steps))
+
+    def simulate_native_control(self, name: str) -> StateChangeResult:
+        """Trace one exact native DDrum4 control observation into logical state.
+
+        Native controls are observations only: the method intentionally never
+        creates a return Program Change or SysEx message.  That makes a manual
+        DDrum4 panel change safe to test without modelling a feedback loop.
+        """
+        native = self.project.native_control_map.get(name)
+        if not isinstance(native, Mapping):
+            raise SimulationError(f"unknown native control {name!r}")
+        target = native["decode_to"]
+        value = native["value"]
+        if target == "scene":
+            if value >= len(self.project.scenes):
+                raise SimulationError(f"native control {name!r} selects undeclared scene {value}")
+            self._state["scene"] = self.project.scenes[value]
+        else:
+            self._state[target] = value
+        address_key = {"program_change": "program", "cc": "cc", "note": "note"}[native["type"]]
+        message = {"type": native["type"], "channel": native["channel"],
+                   "data1": native[address_key], "value": value}
+        steps = (
+            TraceStep("native DDrum4 control", f"{name} exactly matches the declared address", message),
+            TraceStep("Arduino state", "updates Scene/VP without re-emitting the observed native control", dict(self._state)),
+            TraceStep("PC state echo", "the returned state is idempotent", dict(self._state)),
+        )
+        return StateChangeResult("ddrum4", message, dict(self._state), steps)
+
+    def run_offline_diagnostic(self) -> DiagnosticReport:
+        """Exercise every declared playable input and state address offline.
+
+        State coverage is intentionally finite: defaults, every scene, every
+        conditional route/action predicate combination and each native-control
+        value.  It catches broken mappings without inventing the unbounded
+        Cartesian product of arbitrary MIDI VP values.
+        """
+        cases: list[DiagnosticCase] = []
+        for scene, values in self._diagnostic_state_vectors():
+            for decoder in self.project.source_decoders:
+                if decoder.message_type not in {"note", "note_range"}:
+                    continue
+                notes = (decoder.match["note"],) if decoder.message_type == "note" else range(
+                    decoder.match["note_range"][0], decoder.match["note_range"][1] + 1)
+                for note in notes:
+                    identifier = self._diagnostic_id("pad", decoder.source, note, scene, values)
+                    candidate = RigSimulator(self.project)
+                    try:
+                        candidate.set_state(scene=scene, values=values)
+                        result = candidate.simulate_pad(decoder.source, note)
+                        cases.append(DiagnosticCase(identifier, True,
+                            f"{result.physical} -> {result.logical_target}; DDrum4/SD3/DrumGizmo declared"))
+                    except SimulationError as error:
+                        cases.append(DiagnosticCase(identifier, False, str(error)))
+        for index, scene in enumerate(self.project.scenes):
+            candidate = RigSimulator(self.project)
+            identifier = f"logical.scene.pc{index:03d}"
+            try:
+                candidate.simulate_logical_control("simulator", 15, "program_change", index)
+                cases.append(DiagnosticCase(identifier, True, f"selects scene {scene}"))
+            except SimulationError as error:
+                cases.append(DiagnosticCase(identifier, False, str(error)))
+        for variable, values in self._diagnostic_variable_values().items():
+            control = self.project.logical_control_protocol[variable]
+            for value in sorted(values):
+                candidate = RigSimulator(self.project)
+                identifier = f"logical.{variable}.cc{control['cc']:03d}.v{value:03d}"
+                try:
+                    candidate.simulate_logical_control("simulator", 15, "cc", control["cc"], value)
+                    cases.append(DiagnosticCase(identifier, True, f"sets {variable}={value}"))
+                except SimulationError as error:
+                    cases.append(DiagnosticCase(identifier, False, str(error)))
+        for name in sorted(self.project.native_control_map):
+            candidate = RigSimulator(self.project)
+            try:
+                result = candidate.simulate_native_control(name)
+                cases.append(DiagnosticCase(f"native.{name}", True,
+                    "updates " + ", ".join(f"{key}={value}" for key, value in result.state.items())))
+            except SimulationError as error:
+                cases.append(DiagnosticCase(f"native.{name}", False, str(error)))
+        return DiagnosticReport(self.project.project, tuple(cases))
+
+    def _diagnostic_variable_values(self) -> dict[str, set[int]]:
+        values = {name: {self.project.defaults[name]} for name in self.project.variables}
+        for scene in self.project.scenes:
+            for route in self.project.logical_routes[scene].values():
+                for variant in logical_route_variants(route):
+                    for name, value in variant.predicates.items():
+                        values[name].add(value)
+            for action in self.project.ddrum_state_actions.get(scene, ()):
+                for name, value in action.when.items():
+                    values[name].add(value)
+        for native in self.project.native_control_map.values():
+            if native["decode_to"] in values:
+                values[native["decode_to"]].add(native["value"])
+        return values
+
+    def _diagnostic_state_vectors(self) -> tuple[tuple[str, dict[str, int]], ...]:
+        vectors: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+        defaults = {name: self.project.defaults[name] for name in self.project.variables}
+        for scene in self.project.scenes:
+            vectors.add((scene, tuple(sorted(defaults.items()))))
+            for route in self.project.logical_routes[scene].values():
+                for variant in logical_route_variants(route):
+                    values = {**defaults, **variant.predicates}
+                    vectors.add((scene, tuple(sorted(values.items()))))
+            for action in self.project.ddrum_state_actions.get(scene, ()):
+                values = {**defaults, **action.when}
+                vectors.add((scene, tuple(sorted(values.items()))))
+        return tuple((scene, dict(values)) for scene, values in sorted(vectors))
+
+    @staticmethod
+    def _diagnostic_id(kind: str, source: str, note: int, scene: str, values: Mapping[str, int]) -> str:
+        suffix = ".".join(f"{name}{value}" for name, value in sorted(values.items()))
+        return f"{kind}.{source}.n{note:03d}.{scene}.{suffix or 'default'}"
 
     def _note_decoder(self, source: str, note: int):
         for decoder in self.project.source_decoders:

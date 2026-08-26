@@ -244,7 +244,10 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         return {**provenance, "format": "drum-note-map/v1", "target": target,
                 "status": report_status["sd3-midimap"] if target == "sd3" else report_status["drumgizmo-midimap"],
                 "source_renderer": renderer, "mappings": mappings}
-    bank = {**provenance, "format": "ddrum4-bank-plan/v1", "status": "planned", "records": routes, "hardware_transfer": "disabled"}
+    bank = {**provenance, "format": "ddrum4-bank-plan/v1", "status": "planned", "records": routes,
+            "hardware_transfer": "disabled"}
+    if document.get("ddrum4_bank") is not None:
+        bank["bank_reference"] = document["ddrum4_bank"]
     markdown = _megakit_markdown(digest, routes)
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
