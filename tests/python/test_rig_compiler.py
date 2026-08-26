@@ -294,12 +294,62 @@ class RigCompilerTests(unittest.TestCase):
             root = Path(temporary)
             project = self._project(root)
             document = yaml.safe_load(project.read_text(encoding="utf-8"))
-            document["ddrum4_bank"] = {"manifest": "../banks/metalcore-r15-installed.yaml",
+            manifest = root / "bank.yaml"
+            manifest.write_text(yaml.safe_dump({"bank": {"id": "fixture-bank", "midi_channel": 10},
+                                                "sounds": [{"note_base": 36, "note_p": 1},
+                                                           {"note_base": 38, "note_p": 1}]}, sort_keys=False), encoding="utf-8")
+            document["ddrum4_bank"] = {"manifest": "bank.yaml", "bank_id": "fixture-bank",
                                        "reports": ["reports/actual-bank.json"]}
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             compile_project(project, root / "out")
             bank = yaml.safe_load((root / "out" / "ddrum4-bank-plan.yaml").read_text(encoding="utf-8"))
-            self.assertEqual(bank["bank_reference"], document["ddrum4_bank"])
+            self.assertEqual(bank["bank_reference"]["manifest"], "bank.yaml")
+            self.assertEqual(Path(bank["bank_reference"]["manifest_resolved_path"]), manifest.resolve())
+            self.assertEqual(bank["bank_reference"]["bank_id"], "fixture-bank")
+            self.assertEqual(bank["bank_reference"]["midi_channel"], 10)
+            self.assertEqual(bank["bank_reference"]["playable_notes"], [36, 38])
+
+    def test_linked_bank_rejects_bad_hash_channel_and_renderer_note(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            manifest = root / "bank.yaml"
+            manifest.write_text(yaml.safe_dump({"bank": {"id": "fixture-bank", "midi_channel": 9},
+                                                "sounds": [{"note_base": 36, "note_p": 1}]}, sort_keys=False), encoding="utf-8")
+            document["ddrum4_bank"] = {"manifest": "bank.yaml", "bank_id": "fixture-bank", "sha256": "0" * 64}
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaisesRegex(RigCompilerError, "midi_channel"):
+                validate_project(project)
+
+            manifest.write_text(yaml.safe_dump({"bank": {"id": "fixture-bank", "midi_channel": 10},
+                                                "sounds": [{"note_base": 36, "note_p": 1}]}, sort_keys=False), encoding="utf-8")
+            with self.assertRaisesRegex(RigCompilerError, "sha256"):
+                validate_project(project)
+
+            document["ddrum4_bank"].pop("sha256")
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaisesRegex(RigCompilerError, "outside the linked bank"):
+                validate_project(project)
+
+    def test_linked_bank_facts_survive_base_dump_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            manifest = root / "bank.yaml"
+            manifest.write_text(yaml.safe_dump({"bank": {"id": "fixture-bank", "midi_channel": 10},
+                                                "sounds": [{"note_base": 36, "note_p": 1},
+                                                           {"note_base": 38, "note_p": 1}]}, sort_keys=False), encoding="utf-8")
+            document["ddrum4_bank"] = {"manifest": "bank.yaml", "bank_id": "fixture-bank"}
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            dump = root / "base.syx"; dump.write_bytes(b"fixture dump")
+            compile_project(project, root / "out", base_dump=dump)
+            bank = yaml.safe_load((root / "out" / "ddrum4-bank-plan.yaml").read_text(encoding="utf-8"))
+            reference = bank["bank_reference"]
+            self.assertEqual((reference["bank_id"], reference["midi_channel"], reference["playable_notes"]),
+                             ("fixture-bank", 10, [36, 38]))
+            self.assertEqual(reference["sha256"], __import__("hashlib").sha256(manifest.read_bytes()).hexdigest())
 
     def test_simulation_firmware_plan_is_rejected_by_generator(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

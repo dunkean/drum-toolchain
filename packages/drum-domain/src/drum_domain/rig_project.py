@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -66,6 +67,17 @@ class DdrumStateAction:
     description: str | None = None
 
 
+@dataclass(frozen=True)
+class Ddrum4BankFacts:
+    """Verified identity/address facts for a bank linked from a rig project."""
+
+    manifest: Path
+    sha256: str
+    bank_id: str
+    midi_channel: int
+    playable_notes: tuple[int, ...]
+
+
 def logical_route_variants(value: object) -> tuple[LogicalRouteVariant, ...]:
     """Normalise a legacy fixed route or its Scene/VP variant list."""
     if isinstance(value, str):
@@ -93,6 +105,7 @@ class RigProject:
     ddrum4_output_channel: int
     control_bus: Mapping[str, Any] | None
     ddrum4_bank: Mapping[str, Any] | None
+    ddrum4_bank_facts: Ddrum4BankFacts | None
     sources: Mapping[str, Source]
     connection_profiles: Mapping[str, Mapping[str, Any]]
     source_decoders: tuple[SourceDecoder, ...]
@@ -110,6 +123,45 @@ class RigProject:
 
 def _fail(message: str) -> None:
     raise RigProjectError(message)
+
+
+def _bank_facts(project_path: Path, reference: Mapping[str, Any] | None,
+                output_channel: int) -> Ddrum4BankFacts | None:
+    if reference is None:
+        return None
+    manifest = (project_path.parent / reference["manifest"]).resolve()
+    try:
+        payload = manifest.read_bytes()
+        document = yaml.safe_load(payload.decode("utf-8"))
+    except OSError as error:
+        _fail(f"ddrum4_bank manifest cannot be read: {manifest}")
+    except (UnicodeDecodeError, yaml.YAMLError) as error:
+        _fail(f"ddrum4_bank manifest cannot be parsed: {manifest}")
+    if not isinstance(document, Mapping) or not isinstance(document.get("bank"), Mapping):
+        _fail("ddrum4_bank manifest must contain a bank mapping")
+    bank = document["bank"]
+    bank_id, channel = bank.get("id"), bank.get("midi_channel")
+    if not isinstance(bank_id, str) or not isinstance(channel, int):
+        _fail("ddrum4_bank manifest needs bank.id and bank.midi_channel")
+    if channel != output_channel:
+        _fail("ddrum4_bank midi_channel must equal ddrum4_output_channel")
+    digest = hashlib.sha256(payload).hexdigest()
+    if reference.get("bank_id") not in {None, bank_id}:
+        _fail("ddrum4_bank bank_id does not match its manifest")
+    if reference.get("sha256") not in {None, digest}:
+        _fail("ddrum4_bank sha256 does not match its manifest")
+    sounds = document.get("sounds")
+    if not isinstance(sounds, list) or not sounds:
+        _fail("ddrum4_bank manifest needs declared sounds")
+    notes: set[int] = set()
+    for index, sound in enumerate(sounds):
+        if not isinstance(sound, Mapping) or not isinstance(sound.get("note_base"), int) or not isinstance(sound.get("note_p"), int):
+            _fail(f"ddrum4_bank sound {index + 1} needs note_base and note_p")
+        base, width = sound["note_base"], sound["note_p"]
+        if not 0 <= base <= 127 or not 1 <= width <= 128 - base:
+            _fail(f"ddrum4_bank sound {index + 1} has invalid NOTE#/NOTE P range")
+        notes.update(range(base, base + width))
+    return Ddrum4BankFacts(manifest, digest, bank_id, channel, tuple(sorted(notes)))
 
 
 def _validate_semantics(document: Mapping[str, Any]) -> None:
@@ -344,6 +396,12 @@ def load_rig_project(path: Path) -> RigProject:
     if not isinstance(document, dict):  # Kept explicit for static typing and future schema changes.
         _fail("rig project root must be a mapping")
     _validate_semantics(document)
+    bank_facts = _bank_facts(path, document.get("ddrum4_bank"), document["ddrum4_output_channel"])
+    if bank_facts is not None:
+        invalid_notes = sorted({renderer["note"] for renderer in document["renderers"]["ddrum4"].values()
+                                if renderer["note"] not in bank_facts.playable_notes})
+        if invalid_notes:
+            _fail(f"ddrum4 renderer note {invalid_notes[0]} is outside the linked bank NOTE#/NOTE P ranges")
     state = document["state"]
     source_objects = {name: Source(name, value["endpoint"], value["channel"], value["primary"], value.get("connection_profile")) for name, value in document["sources"].items()}
     decoders = tuple(SourceDecoder(item["match"]["source"], item["match"]["type"], item["emit"]["physical"], item["match"], item["emit"]) for item in document["source_decoders"])
@@ -353,4 +411,4 @@ def load_rig_project(path: Path) -> RigProject:
             action_type=row["type"], status=row["status"], channel=row.get("channel"),
             program=row.get("program"), data=tuple(row.get("data", ())), when=dict(row.get("when", {})), description=row.get("description"),
         ) for row in rows)
-    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), document.get("ddrum4_bank"), source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])
+    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), document.get("ddrum4_bank"), bank_facts, source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])

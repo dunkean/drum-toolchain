@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import json
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -120,10 +121,30 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(result.message, {"type": "program_change", "channel": 12, "data1": 1, "value": 1})
         self.assertFalse(any(step.stage == "Arduino DDrum4 state" for step in result.steps))
 
+    def test_offline_diagnostic_never_silently_skips_cc_or_aftertouch_decoders(self) -> None:
+        source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "cc-and-aftertouch.yaml"
+            document = yaml.safe_load(source.read_text(encoding="utf-8"))
+            document["source_decoders"].extend((
+                {"match": {"source": "edrumin", "type": "cc", "cc": 4},
+                 "emit": {"physical": "kick.hit", "expressions": ["position"], "normalize": "cc7"}},
+                {"match": {"source": "ddti", "type": "poly_aftertouch", "note": 38},
+                 "emit": {"physical": "snare.head", "expressions": ["pressure"]}},
+            ))
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            report = RigSimulator.from_path(project).run_offline_diagnostic()
+
+        self.assertFalse(report.passed)
+        failed = {case.identifier for case in report.cases if not case.passed}
+        self.assertIn("decoder.010.edrumin.cc", failed)
+        self.assertIn("decoder.011.ddti.poly_aftertouch", failed)
+
     def test_r15_simulator_covers_ten_sounds_from_each_of_three_modules(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         simulator = RigSimulator.from_path(project)
-        self.assertEqual(simulator.project.ddrum4_bank, {"manifest": "../banks/metalcore-r15-installed.yaml"})
+        self.assertEqual(simulator.project.ddrum4_bank["manifest"], "../banks/metalcore-r15-installed.yaml")
+        self.assertEqual(simulator.project.ddrum4_bank_facts.bank_id, "metalcore-r15-installed")
         notes = (0, 8, 16, 24, 32, 40, 48, 56, 64, 72)
         expected_ddrum = (0, 8, 18, 24, 32, 40, 48, 56, 64, 72)
 

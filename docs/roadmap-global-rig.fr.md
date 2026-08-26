@@ -12,9 +12,10 @@ change aucun réglage de module.
   compiler un projet rig sans ouvrir de port MIDI.
 - [x] Un simulateur offline de notes, scènes et Virtual Palettes, avec une
   trace des trois renderers.
-- [x] Un diagnostic offline « no-pad » parcourt chaque entrée jouable, scène,
+- [x] Un diagnostic offline « no-pad » parcourt chaque entrée Note, scène,
   état VP connu et contrôle natif déclaré, puis produit un rapport sans ouvrir
-  de port MIDI (`drum-control-center diagnose <projet>`).
+  de port MIDI (`drum-control-center diagnose <projet>`). Tout décodeur CC ou
+  aftertouch non encore simulé échoue explicitement : aucun faux PASS.
 - [x] Une matrice lisible de la banque r15 installée, y compris les layers,
   positions, vélocités, variations, pitch et round robin.
 - [x] Les Program Change natifs sont des correspondances exactes

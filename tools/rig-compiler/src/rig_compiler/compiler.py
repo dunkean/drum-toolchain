@@ -180,10 +180,11 @@ def validate_project(path: Path) -> Compilation:
     errors = _validate(document, routes)
     if errors:
         raise RigCompilerError("rig project validation failed:\n- " + "\n- ".join(errors))
-    return Compilation(path, digest, document, _artifacts(document, digest, routes))
+    return Compilation(path, digest, document, _artifacts(document, digest, routes, project.ddrum4_bank_facts))
 
 
-def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any]]) -> dict[str, Any]:
+def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any]],
+               bank_facts: Any = None) -> dict[str, Any]:
     provenance = _provenance(digest)
     if document.get("ddti_base_dump"):
         # The input is identified, not parsed, copied, or claimed usable.
@@ -246,8 +247,15 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
                 "source_renderer": renderer, "mappings": mappings}
     bank = {**provenance, "format": "ddrum4-bank-plan/v1", "status": "planned", "records": routes,
             "hardware_transfer": "disabled"}
-    if document.get("ddrum4_bank") is not None:
-        bank["bank_reference"] = document["ddrum4_bank"]
+    if bank_facts is not None:
+        reference = document["ddrum4_bank"]
+        bank["bank_reference"] = {
+            "manifest": reference["manifest"], "manifest_resolved_path": str(bank_facts.manifest),
+            "bank_id": bank_facts.bank_id,
+            "sha256": bank_facts.sha256, "midi_channel": bank_facts.midi_channel,
+            "playable_notes": list(bank_facts.playable_notes),
+            **({"reports": reference["reports"]} if "reports" in reference else {}),
+        }
     markdown = _megakit_markdown(digest, routes)
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
@@ -276,10 +284,11 @@ def compile_project(path: Path, output: Path, *, replace: bool = False, base_dum
             raise RigCompilerError(f"base dump does not exist: {base_dump}")
         # It is intentionally not parsed or copied: this compiler cannot create a transferable dump.
         from drum_domain.rig_project import load_rig_project
+        project = load_rig_project(compilation.source)
         document = {**compilation.document, "ddti_base_dump": {"path": str(base_dump), "sha256": hashlib.sha256(base_dump.read_bytes()).hexdigest()}}
         compilation = Compilation(compilation.source, compilation.source_sha256, document,
                                   _artifacts(document, compilation.source_sha256,
-                                             _domain_route_records(load_rig_project(compilation.source))))
+                                             _domain_route_records(project), project.ddrum4_bank_facts))
     if output.exists() and not output.is_dir():
         raise RigCompilerError(f"output must be a directory: {output}")
     existing = [output / name for name in compilation.artifacts if (output / name).exists()]

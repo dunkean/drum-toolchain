@@ -325,6 +325,12 @@ class RigSimulator:
         Cartesian product of arbitrary MIDI VP values.
         """
         cases: list[DiagnosticCase] = []
+        for decoder_index, decoder in enumerate(self.project.source_decoders, start=1):
+            if decoder.message_type not in {"note", "note_range"}:
+                cases.append(DiagnosticCase(
+                    f"decoder.{decoder_index:03d}.{decoder.source}.{decoder.message_type}", False,
+                    f"offline diagnostic does not yet exercise declared {decoder.message_type} decoder; no false PASS is emitted",
+                ))
         for scene, values in self._diagnostic_state_vectors():
             for decoder in self.project.source_decoders:
                 if decoder.message_type not in {"note", "note_range"}:

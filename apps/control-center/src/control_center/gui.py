@@ -163,6 +163,7 @@ def launch() -> int:
             This only selects local manifest/report files for the read-only
             matrix; it never probes the DDrum4 or assumes installed memory.
             """
+            self._clear_matrix()
             if not isinstance(document, dict) or not isinstance(document.get("ddrum4_bank"), dict):
                 return
             reference = document["ddrum4_bank"]
@@ -172,6 +173,16 @@ def launch() -> int:
             self.report_paths = reports
             self.reports.setText("; ".join(str(item) for item in reports))
             self.load_matrix()
+
+        def _clear_matrix(self, *, clear_reference: bool = True) -> None:
+            """Forget the displayed bank before changing projects or loading a new file."""
+            self.matrix = None
+            self.matrix_table.clearContents(); self.matrix_table.setRowCount(10)
+            self.layer_table.clearContents(); self.layer_table.setRowCount(0)
+            if clear_reference:
+                self.report_paths = []
+                self.manifest.clear()
+                self.reports.clear()
 
         def _populate_visual_project_editor(self, document: object) -> None:
             if not isinstance(document, dict):
@@ -652,12 +663,15 @@ def launch() -> int:
 
         def load_matrix(self) -> None:
             if not self.manifest.text():
+                self._clear_matrix()
                 self.log.setPlainText("Select a DDrum4 manifest first."); return
+            self._clear_matrix(clear_reference=False)
             try:
-                self.matrix = load_kit_matrix(Path(self.manifest.text()), self.report_paths)
+                matrix = load_kit_matrix(Path(self.manifest.text()), self.report_paths)
             except ValueError as error:
                 QMessageBox.warning(self, "Cannot load DDrum4 matrix", str(error)); return
-            for row, sound in enumerate(self.matrix.sounds):
+            self.matrix = matrix
+            for row, sound in enumerate(matrix.sounds):
                 values = (sound.slot, sound.sound_id or "missing", sound.source, sound.layer_count,
                           sound.encoded_blocks, sound.mem_left_delta_blocks, sound.status, sound.provenance)
                 for column, value in enumerate(values): self.matrix_table.setItem(row, column, self._cell(value))
