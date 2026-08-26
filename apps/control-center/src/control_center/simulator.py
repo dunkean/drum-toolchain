@@ -217,6 +217,17 @@ class RigSimulator:
             TraceStep("logical control", f"{source} emits a declared {target} command", message),
             TraceStep("Arduino state", "updates Scene/VP idempotently", dict(self._state)),
         ]
+        bus = self.project.control_bus
+        if bus is None:
+            steps.append(TraceStep("control bus", "no PC → Arduino control endpoint is declared; state remains local/offline"))
+        elif bus["status"] == "user-confirmed" and self.project.deployment == "live":
+            steps.append(TraceStep("control bus", "would send the logical command to the declared Master Merger input", {
+                "endpoint": bus["endpoint"], "channel": bus["channel"], "status": bus["status"],
+            }))
+        else:
+            steps.append(TraceStep("control bus", "declared for simulation/planning only; no hardware output is permitted", {
+                "endpoint": bus["endpoint"], "channel": bus["channel"], "status": bus["status"],
+            }))
         matching_actions = [action for action in actions
                             if all(self._state.get(name) == expected for name, expected in action.when.items())]
         for action in matching_actions:

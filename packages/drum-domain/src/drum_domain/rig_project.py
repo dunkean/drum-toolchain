@@ -91,6 +91,7 @@ class RigProject:
     rig: str
     deployment: str
     ddrum4_output_channel: int
+    control_bus: Mapping[str, Any] | None
     sources: Mapping[str, Source]
     connection_profiles: Mapping[str, Mapping[str, Any]]
     source_decoders: tuple[SourceDecoder, ...]
@@ -135,6 +136,12 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
             _fail("live deployment must declare the ddrum4 source")
         if ddrum["channel"] != output_channel:
             _fail("live ddrum4 source channel must equal ddrum4_output_channel")
+        control_bus = document.get("control_bus")
+        if control_bus is not None:
+            if control_bus["status"] != "user-confirmed":
+                _fail("live control_bus must be user-confirmed")
+            if control_bus["endpoint"].upper().startswith("SIM_") or "MEASURE_ME" in control_bus["endpoint"]:
+                _fail("live control_bus cannot use a simulated or unresolved endpoint")
 
     physical_events = set(document["physical_events"])
     decoder_keys: set[tuple[Any, ...]] = set()
@@ -187,6 +194,10 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
 
     state = document["state"]
     scenes, variables, defaults = set(state["scenes"]), set(state["variables"]), state["defaults"]
+    if len(scenes) > 128:
+        _fail("state supports at most 128 scenes (MIDI Program Change 0..127)")
+    if len(variables) > 4:
+        _fail("state supports at most 4 variables (MVP logical-control protocol)")
     if defaults.get("scene") not in scenes:
         _fail("state.defaults.scene must name a declared scene")
     if set(defaults) != {"scene", *variables}:
@@ -341,4 +352,4 @@ def load_rig_project(path: Path) -> RigProject:
             action_type=row["type"], status=row["status"], channel=row.get("channel"),
             program=row.get("program"), data=tuple(row.get("data", ())), when=dict(row.get("when", {})), description=row.get("description"),
         ) for row in rows)
-    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])
+    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])

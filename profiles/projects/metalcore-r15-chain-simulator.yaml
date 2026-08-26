@@ -6,8 +6,9 @@ project: metalcore-r15-chain-simulator
 rig: profiles/physical/greg-hybrid-kit.yaml
 deployment: simulation
 ddrum4_output_channel: 12
+control_bus: {endpoint: SIM_UMC_MIDI_OUT, channel: 15, status: planned}
 sources:
-  ddrum4: {endpoint: SIM_DDrum4_DIN, channel: 1, primary: din, connection_profile: DIN_ONLY}
+  ddrum4: {endpoint: SIM_DDrum4_DIN, channel: 12, primary: din, connection_profile: DIN_ONLY}
   ddti: {endpoint: SIM_DDTi_USB, channel: 2, primary: usb, connection_profile: LIVE_USB_PRIMARY}
   edrumin: {endpoint: SIM_eDRUMin_USB, channel: 3, primary: usb, connection_profile: LIVE_USB_PRIMARY}
 connection_profiles:
@@ -98,7 +99,7 @@ renderers:
     cymb2.hit: {note: 51, channel: 10, instrument: cymbal, articulation: two}
     hihat.closed: {note: 42, channel: 10, instrument: hihat, articulation: closed}
 native_control_map:
-  ddrum_program_metalcore: {decode_to: scene, source: ddrum4, channel: 1, type: program_change, program: 0, value: 0}
+  ddrum_program_metalcore: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 0, value: 0}
 ddrum_state_actions:
   metalcore:
     - {type: program_change, channel: 12, program: 0, status: user-confirmed, description: "Select r15 Metalcore renderer palette"}

@@ -16,6 +16,11 @@ change aucun réglage de module.
   positions, vélocités, variations, pitch et round robin.
 - [x] Les Program Change natifs sont des correspondances exactes
   `program → Scene/VP`, jamais des valeurs brutes copiées vers l'état.
+- [x] Un `control_bus` explicite sépare la sortie renderer PC (SD3/DrumGizmo)
+  de la sortie logique PC → Master Merger/Arduino. Seul un profil `live` avec
+  endpoint `user-confirmed` peut ouvrir ce second port sur CH14 ou CH15.
+- [x] Le protocole MVP est borné à 128 scènes (Program Change 0–127) et
+  quatre Virtual Palettes, les limites communes à l'UI et au firmware Uno.
 
 ## Palier B — garde-fous firmware
 
@@ -26,6 +31,9 @@ change aucun réglage de module.
   native du DDrum4 ne lui est jamais réémise.
 - [x] Le bridge Uno et le runtime PC sont compilés/testés avec la même
   correspondance exacte des contrôles.
+- [x] L'ouverture de la sortie de contrôle exige une correspondance MIDI
+  exacte, distincte du renderer; l'état Scene/VP complet est publié au départ
+  et le panic ne touche jamais CH14/15.
 
 ## Palier C — profil live à mesurer avant flash
 

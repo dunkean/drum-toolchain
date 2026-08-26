@@ -191,6 +191,9 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     unresolved = _has_unresolved_values(document)
     deployment = document.get("deployment", "simulation")
     live_ready = deployment == "live" and not unresolved
+    control_bus = document.get("control_bus")
+    logical_control_live = bool(live_ready and isinstance(control_bus, dict)
+                                and control_bus.get("status") == "user-confirmed")
     report_status = {
         "runtime-profile": "planned" if unresolved else "ready", "ddrum4-routing-plan": "planned",
         "ddrum4-routing-contract": "planned", "firmware-project-mapping": "ready" if live_ready else ("planned" if unresolved else ("simulation-only" if deployment == "simulation" else "planned")),
@@ -213,7 +216,10 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
                "physical_events": document["physical_events"], "logical_routes": document["logical_routes"],
                "renderers": document["renderers"], "native_control_map": document["native_control_map"],
                "ddrum_state_actions": document.get("ddrum_state_actions", {}),
-               "records": routes, "routes": routes, "hardware_io": "disabled"}
+               "records": routes, "routes": routes,
+               "hardware_io": "logical-control-only" if logical_control_live else "disabled"}
+    if control_bus is not None:
+        runtime["control_bus"] = control_bus
     routing = {**provenance, "format": "ddrum4-routing-plan/v1", "status": "planned", "records": routes, "hardware_write": "disabled"}
     contract = {**provenance, "format": "ddrum4-routing-contract/v1", "status": "planned", "routing_plan": "ddrum4-routing-plan.json", "records": routes}
     firmware = {

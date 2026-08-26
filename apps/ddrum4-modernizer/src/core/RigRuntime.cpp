@@ -4,7 +4,7 @@
 namespace ddrum4 {
 RigRuntime::RigRuntime(const RuntimeProfile& profile) : profile_(profile) {
   uint64_t initial=profile.defaultScene;
-  for(size_t i=0;i<profile.variables.size() && i<6;++i) initial|=static_cast<uint64_t>(profile.variables[i].defaultValue)<<(16+i*8);
+  for(size_t i=0;i<profile.variables.size() && i<4;++i) initial|=static_cast<uint64_t>(profile.variables[i].defaultValue)<<(16+i*8);
   state_.store(initial,std::memory_order_relaxed);
 }
 int RigRuntime::endpointSourceIndex(std::string_view endpoint, uint8_t channel) const noexcept {
@@ -43,9 +43,9 @@ bool RigRuntime::recall(uint16_t source, const MidiEvent& input, Active& active)
   if(!queue.size) return false;
   active=queue.entries[queue.head]; queue.head=static_cast<uint8_t>((queue.head+1)%queue.entries.size()); --queue.size; return true;
 }
-uint8_t RigRuntime::stateVariable(uint64_t state, size_t index) const noexcept { return index<6 ? static_cast<uint8_t>(state>>(16+index*8)) : 0; }
+uint8_t RigRuntime::stateVariable(uint64_t state, size_t index) const noexcept { return index<4 ? static_cast<uint8_t>(state>>(16+index*8)) : 0; }
 uint8_t RigRuntime::variable(size_t index) const noexcept { return stateVariable(state_.load(std::memory_order_acquire),index); }
-void RigRuntime::setStateVariable(size_t index,uint8_t value) noexcept { if(index>=6) return; const auto shift=16+index*8; const auto mask=uint64_t{0xff}<<shift; auto current=state_.load(std::memory_order_relaxed); do { const auto next=(current&~mask)|(static_cast<uint64_t>(value)<<shift); if(state_.compare_exchange_weak(current,next,std::memory_order_release,std::memory_order_relaxed)) return; } while(true); }
+void RigRuntime::setStateVariable(size_t index,uint8_t value) noexcept { if(index>=4) return; const auto shift=16+index*8; const auto mask=uint64_t{0xff}<<shift; auto current=state_.load(std::memory_order_relaxed); do { const auto next=(current&~mask)|(static_cast<uint64_t>(value)<<shift); if(state_.compare_exchange_weak(current,next,std::memory_order_release,std::memory_order_relaxed)) return; } while(true); }
 bool RigRuntime::selectScene(uint16_t scene) noexcept {
   if (scene>=profile_.scenes.size()) return false;
   auto current=state_.load(std::memory_order_relaxed);
@@ -55,7 +55,7 @@ bool RigRuntime::selectScene(uint16_t scene) noexcept {
   } while(true);
 }
 bool RigRuntime::setVariableValue(size_t index,uint8_t value) noexcept {
-  if (index>=profile_.variables.size() || index>=6) return false;
+  if (index>=profile_.variables.size() || index>=4) return false;
   setStateVariable(index,value);
   return true;
 }
@@ -69,7 +69,7 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
   // CH14/15 are the canonical logical-control bus, never physical pads.
   if (input.channel==14 || input.channel==15) {
     if (input.type==MidiType::ProgramChange && input.data1<profile_.scenes.size()) { auto current=state_.load(std::memory_order_relaxed); do { const auto next=(current&~uint64_t{0xffff})|input.data1; if(state_.compare_exchange_weak(current,next,std::memory_order_release,std::memory_order_relaxed)) break; } while(true); controls_.fetch_add(1, std::memory_order_relaxed); return 0; }
-    if (input.type==MidiType::ControlChange) for(size_t i=0;i<profile_.variables.size() && i<6;++i) if(profile_.variables[i].cc==input.data1) { setStateVariable(i,input.data2); controls_.fetch_add(1,std::memory_order_relaxed); return 0; }
+    if (input.type==MidiType::ControlChange) for(size_t i=0;i<profile_.variables.size() && i<4;++i) if(profile_.variables[i].cc==input.data1) { setStateVariable(i,input.data2); controls_.fetch_add(1,std::memory_order_relaxed); return 0; }
     // The logical bus is never a physical MIDI input, including unknown CCs,
     // note messages and aftertouch.
     ignore(); return 0;

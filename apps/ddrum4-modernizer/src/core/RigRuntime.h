@@ -24,16 +24,20 @@ struct RuntimeDecoder {
 };
 struct RuntimeRenderer { std::string logical; uint8_t note{}; uint8_t channel{10}; uint8_t positionCc{255}; uint8_t controller{255}; };
 struct RuntimePredicate { uint8_t variable{}; uint8_t value{}; };
-struct RuntimeRoute { uint16_t scene{}; std::string physical; std::string logical; std::array<RuntimePredicate, 6> predicates{}; uint8_t predicateCount{}; };
+struct RuntimeRoute { uint16_t scene{}; std::string physical; std::string logical; std::array<RuntimePredicate, 4> predicates{}; uint8_t predicateCount{}; };
 struct RuntimeControl { std::string name; uint8_t cc{}; uint8_t defaultValue{}; };
 // Native DDrum4 controls are optional observations of the module's own
-// Program/Palette protocol.  Target 0 is Scene; 1..6 address VP variables.
+// Program/Palette protocol.  Target 0 is Scene; 1..4 address VP variables.
 struct RuntimeNativeControl { int16_t source{-1}; uint8_t channel{}; NativeControlType type{}; uint8_t address{}; uint8_t target{}; uint8_t value{}; };
 struct RuntimeProfile {
   std::vector<RuntimeSource> sources; std::vector<std::string> scenes;
   std::vector<RuntimeDecoder> decoders; std::vector<RuntimeRoute> routes;
   std::vector<RuntimeRenderer> renderers; std::vector<RuntimeControl> variables; std::vector<RuntimeNativeControl> nativeControls;
   std::string sourceSha256; uint16_t defaultScene{}; bool echoMeasuredOnly{}; uint64_t dedupWindowUs{10000};
+  // A PC renderer may publish only logical CH14/15 control to this explicit
+  // endpoint. It is off unless the compiled source project is live and the
+  // endpoint was user-confirmed.
+  std::string controlBusEndpoint; uint8_t controlBusChannel{15}; bool controlBusEnabled{};
   RuntimeRendererTarget rendererTarget{RuntimeRendererTarget::Sd3};
 };
 struct RuntimeHealth { uint64_t received{}; uint64_t decoded{}; uint64_t rendered{}; uint64_t ignored{}; uint64_t duplicates{}; uint64_t echoes{}; uint64_t controls{}; };

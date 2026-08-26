@@ -31,6 +31,7 @@ class RigCompilerTests(unittest.TestCase):
         project = root / "kit.yaml"
         document = {
             "schema_version": 1, "kind": "rig-project", "project": "test-kit", "rig": "fixture", "deployment": "simulation", "ddrum4_output_channel": 10,
+            "control_bus": {"endpoint": "SIM_control", "channel": 15, "status": "planned"},
             "sources": {"brain": {"endpoint": "fixture", "channel": 10, "primary": "usb", "connection_profile": "LIVE"}},
             "connection_profiles": {"LIVE": {"usb_sources": True}},
             "source_decoders": [
@@ -70,6 +71,8 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(runtime["source_decoders"], validated.document["source_decoders"])
             self.assertEqual(runtime["sources"], validated.document["sources"])
             self.assertEqual(runtime["state"], validated.document["state"])
+            self.assertEqual(runtime["control_bus"], validated.document["control_bus"])
+            self.assertEqual(runtime["hardware_io"], "disabled")
             self.assertEqual(runtime["source_sha256"], validated.source_sha256)
             firmware = json.loads((output / "firmware-project-mapping.json").read_text(encoding="utf-8"))
             self.assertEqual(firmware["logical_control_protocol"], validated.document["logical_control_protocol"])
@@ -224,6 +227,8 @@ class RigCompilerTests(unittest.TestCase):
                     target.update({"instrument": "snare", "articulation": "alt"})
                 document["renderers"][renderer]["snare.alt"] = target
             document["deployment"] = "live"
+            document["control_bus"] = {"endpoint": "verified-control-bus", "channel": 15,
+                                       "status": "user-confirmed"}
             document["sources"]["ddrum4"] = document["sources"].pop("brain")
             for decoder in document["source_decoders"]:
                 decoder["match"]["source"] = "ddrum4"
@@ -245,6 +250,43 @@ class RigCompilerTests(unittest.TestCase):
             self.assertIn("constexpr size_t NATIVE_CONTROL_COUNT = 1;", generated)
             self.assertIn("constexpr LogicalControlConfig LOGICAL_CONTROLS = {20, 255, 255, 255};", generated)
             self.assertIn("constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};", generated)
+            runtime = yaml.safe_load((output / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(runtime["hardware_io"], "logical-control-only")
+
+    def test_mvp_logical_protocol_is_limited_to_midi_and_firmware_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["state"]["scenes"] = [f"scene-{index}" for index in range(129)]
+            document["state"]["defaults"]["scene"] = "scene-0"
+            document["logical_routes"] = {scene: document["logical_routes"]["metal"]
+                                          for scene in document["state"]["scenes"]}
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaisesRegex(RigCompilerError, "too long|128 scenes"):
+                validate_project(project)
+
+            document["state"] = {"scenes": ["metal"], "variables": ["vp1", "vp2", "vp3", "vp4", "vp5"],
+                                 "defaults": {"scene": "metal", "vp1": 0, "vp2": 0, "vp3": 0, "vp4": 0, "vp5": 0}}
+            document["logical_control_protocol"] = {"scene": {"channels": [14, 15], "type": "program_change"},
+                                                    **{f"vp{index}": {"channels": [14, 15], "type": "cc", "cc": index}
+                                                       for index in range(1, 6)}}
+            document["logical_routes"] = {"metal": document["logical_routes"]["scene-0"]}
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaisesRegex(RigCompilerError, "too long|4 variables"):
+                validate_project(project)
+
+    def test_runtime_omits_absent_control_bus(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document.pop("control_bus")
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            compile_project(project, root / "out")
+            runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            self.assertNotIn("control_bus", runtime)
+            self.assertEqual(runtime["hardware_io"], "disabled")
 
     def test_simulation_firmware_plan_is_rejected_by_generator(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

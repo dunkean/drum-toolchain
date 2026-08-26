@@ -66,10 +66,29 @@ class Router final : private juce::MidiInputCallback {
   MonitorQueue& monitor() noexcept { return monitor_; }
   bool runtimeMode() const noexcept { return runtime_!=nullptr; }
   const RuntimeProfile* runtimeProfile() const noexcept { return runtimeProfile_.get(); }
-  bool selectRuntimeScene(uint16_t scene) noexcept { return runtime_ && runtime_->selectScene(scene); }
-  bool setRuntimeVariable(size_t index,uint8_t value) noexcept { return runtime_ && runtime_->setVariableValue(index,value); }
+  bool selectRuntimeScene(uint16_t scene) noexcept {
+    if(!runtime_) return false;
+    auto* bus=controlOutput_.load(std::memory_order_acquire);
+    if(globalControlConfigured() && !bus) return false;
+    if(!runtime_->selectScene(scene)) return false;
+    if(bus)
+      bus->sendMessageNow(juce::MidiMessage::programChange(runtimeProfile_->controlBusChannel, static_cast<int>(scene)));
+    return true;
+  }
+  bool setRuntimeVariable(size_t index,uint8_t value) noexcept {
+    if(!runtime_ || index>=runtimeProfile_->variables.size()) return false;
+    auto* bus=controlOutput_.load(std::memory_order_acquire);
+    if(globalControlConfigured() && !bus) return false;
+    if(!runtime_->setVariableValue(index,value)) return false;
+    if(bus)
+      bus->sendMessageNow(juce::MidiMessage::controllerEvent(runtimeProfile_->controlBusChannel, runtimeProfile_->variables[index].cc, value));
+    return true;
+  }
   uint16_t runtimeScene() const noexcept { return runtime_ ? runtime_->scene() : 0; }
   uint8_t runtimeVariable(size_t index) const noexcept { return runtime_ ? runtime_->variable(index) : 0; }
+  bool globalControlConfigured() const noexcept { return runtimeProfile_ && runtimeProfile_->controlBusEnabled; }
+  bool globalControlOpen() const noexcept { return controlOutput_.load(std::memory_order_acquire)!=nullptr; }
+  juce::String globalControlEndpoint() const { return runtimeProfile_ ? juce::String(runtimeProfile_->controlBusEndpoint) : juce::String{}; }
   bool reload() {
     stop();
     try {
@@ -116,8 +135,6 @@ class Router final : private juce::MidiInputCallback {
       std::vector<const juce::MidiDeviceInfo*> matches;
       for(const auto& device:devices)
         if(device.name==requestedName||device.identifier==requestedName) matches.push_back(&device);
-      if(matches.empty()) for(const auto& device:devices)
-        if(device.name.containsIgnoreCase(requestedName)||device.identifier.containsIgnoreCase(requestedName)) matches.push_back(&device);
       if(matches.size()!=1) {
         error_=matches.empty() ? "Runtime input not found: "+juce::String(requested)
                                : "Runtime input is ambiguous: "+juce::String(requested);
@@ -139,14 +156,34 @@ class Router final : private juce::MidiInputCallback {
       if(opened) { inputs_.push_back(std::move(opened)); inputEndpoints_.push_back("legacy"); }
     }
     if(inputs_.empty()){error_="Unable to open selected MIDI input";stop();return;}
+    if(runtimeProfile_ && runtimeProfile_->controlBusEnabled) {
+      const auto controlName=juce::String(runtimeProfile_->controlBusEndpoint);
+      const auto outputDevices=juce::MidiOutput::getAvailableDevices();
+      std::vector<const juce::MidiDeviceInfo*> matches;
+      for(const auto& device:outputDevices)
+        if(device.name==controlName || device.identifier==controlName) matches.push_back(&device);
+      if(matches.size()!=1) { error_=matches.empty()?"Global control output not found: "+controlName:"Global control output is ambiguous: "+controlName; stop(); return; }
+      if(matches.front()->identifier==outputId) { error_="Global control output must be distinct from renderer output"; stop(); return; }
+      controlOutputOwned_=juce::MidiOutput::openDevice(matches.front()->identifier);
+      if(!controlOutputOwned_) { error_="Unable to open global control output"; stop(); return; }
+    }
+    controlOutput_.store(controlOutputOwned_.get(),std::memory_order_release);
     output_.store(outputOwned_.get(),std::memory_order_release); running_.store(true,std::memory_order_release);
+    publishCurrentLogicalState();
     worker_=std::thread([this]{ runWorker(); }); for(auto& input:inputs_) input->start();
   }
-  void stop() { running_.store(false,std::memory_order_release); for(auto& input:inputs_) input->stop(); while(callbacks_.load(std::memory_order_acquire)!=0) std::this_thread::yield(); if(worker_.joinable()) worker_.join(); output_.store(nullptr,std::memory_order_release); if(converter_) converter_->clearLedger(); if(runtime_) runtime_->clearLedger(); queue_.reset(); inputs_.clear(); inputEndpoints_.clear(); outputOwned_.reset(); }
+  void stop() { running_.store(false,std::memory_order_release); for(auto& input:inputs_) input->stop(); while(callbacks_.load(std::memory_order_acquire)!=0) std::this_thread::yield(); if(worker_.joinable()) worker_.join(); output_.store(nullptr,std::memory_order_release); controlOutput_.store(nullptr,std::memory_order_release); if(converter_) converter_->clearLedger(); if(runtime_) runtime_->clearLedger(); queue_.reset(); inputs_.clear(); inputEndpoints_.clear(); outputOwned_.reset(); controlOutputOwned_.reset(); }
   void panic() { clearLedgerRequested_.store(true,std::memory_order_release); if(auto* out=output_.load(std::memory_order_acquire)) for(int channel=1;channel<=16;++channel) out->sendMessageNow(juce::MidiMessage::allNotesOff(channel)); }
   bool running() const noexcept { return running_.load(std::memory_order_acquire); }
  private:
-  std::filesystem::path profilePath_; RuntimeRendererTarget rendererTarget_{RuntimeRendererTarget::Sd3}; std::unique_ptr<Profile> profile_; std::unique_ptr<Converter> converter_; std::unique_ptr<RuntimeProfile> runtimeProfile_; std::unique_ptr<RigRuntime> runtime_; std::vector<std::unique_ptr<juce::MidiInput>> inputs_; std::vector<std::string> inputEndpoints_; std::unique_ptr<juce::MidiOutput> outputOwned_; std::atomic<juce::MidiOutput*> output_{nullptr}; std::atomic<bool> running_{false}; std::atomic<bool> clearLedgerRequested_{false}; std::atomic<uint32_t> callbacks_{0},queueDropped_{0}; std::thread worker_; juce::String error_; MonitorQueue monitor_; InputQueue queue_;
+  std::filesystem::path profilePath_; RuntimeRendererTarget rendererTarget_{RuntimeRendererTarget::Sd3}; std::unique_ptr<Profile> profile_; std::unique_ptr<Converter> converter_; std::unique_ptr<RuntimeProfile> runtimeProfile_; std::unique_ptr<RigRuntime> runtime_; std::vector<std::unique_ptr<juce::MidiInput>> inputs_; std::vector<std::string> inputEndpoints_; std::unique_ptr<juce::MidiOutput> outputOwned_,controlOutputOwned_; std::atomic<juce::MidiOutput*> output_{nullptr},controlOutput_{nullptr}; std::atomic<bool> running_{false}; std::atomic<bool> clearLedgerRequested_{false}; std::atomic<uint32_t> callbacks_{0},queueDropped_{0}; std::thread worker_; juce::String error_; MonitorQueue monitor_; InputQueue queue_;
+  void publishCurrentLogicalState() noexcept {
+    auto* bus=controlOutput_.load(std::memory_order_acquire);
+    if(!bus || !runtime_ || !runtimeProfile_ || !runtimeProfile_->controlBusEnabled) return;
+    bus->sendMessageNow(juce::MidiMessage::programChange(runtimeProfile_->controlBusChannel, static_cast<int>(runtime_->scene())));
+    for(size_t i=0;i<runtimeProfile_->variables.size();++i)
+      bus->sendMessageNow(juce::MidiMessage::controllerEvent(runtimeProfile_->controlBusChannel, runtimeProfile_->variables[i].cc, runtime_->variable(i)));
+  }
   void handleIncomingMidiMessage(juce::MidiInput* sender,const juce::MidiMessage& m) override {
     if(!running_.load(std::memory_order_acquire)) return; callbacks_.fetch_add(1,std::memory_order_acq_rel); const struct Guard{std::atomic<uint32_t>& n;~Guard(){n.fetch_sub(1,std::memory_order_release);}} guard{callbacks_};
     if(m.isMidiClock()||m.isMidiStart()||m.isMidiStop()||m.isMidiContinue()||m.isActiveSense()) return;
@@ -199,8 +236,32 @@ class MainComponent final : public juce::Component, private juce::Timer {
   void showPage(int next){page_=next; const bool play=page_==0, edit=page_==1, prog=page_==2, mon=page_==3, runtime=router_.runtimeMode(); input_.setVisible(play);output_.setVisible(play);start_.setVisible(play);panic_.setVisible(play); for(auto& b:kits_)b.setVisible((play||prog)&&!runtime); runtimeStateLabel_.setVisible((play||prog)&&runtime);runtimeScene_.setVisible((play||prog)&&runtime);for(size_t i=0;i<runtimeVariables_.size();++i){runtimeVariableLabels_[i].setVisible((play||prog)&&runtime);runtimeVariables_[i].setVisible((play||prog)&&runtime);}config_.setVisible(edit);apply_.setVisible(edit);monitor_.setVisible(mon);info_.setVisible(play||prog); refresh(); }
   void refreshPorts(){ const auto selectedIn=input_.getText(),selectedOut=output_.getText(); input_.clear();output_.clear();int id=1;for(const auto& d:juce::MidiInput::getAvailableDevices())input_.addItem(d.name,id++);output_.addItem("Create virtual port: "+juce::String(router_.profile()?router_.profile()->endpoint:"ddrum_converted"),1);id=2;for(const auto& d:juce::MidiOutput::getAvailableDevices())output_.addItem(d.name,id++);const auto* p=router_.profile(); auto choose=[](juce::ComboBox& box,const juce::String& old,const std::string& match){for(int i=0;i<box.getNumItems();++i)if(box.getItemText(i)==old||box.getItemText(i).containsIgnoreCase(match)){box.setSelectedItemIndex(i);return;}if(box.getNumItems())box.setSelectedItemIndex(0);};choose(input_,selectedIn,p?p->inputPortMatch:"");choose(output_,selectedOut,p?p->endpoint:""); }
   void toggle(){if(router_.running())router_.stop();else {const auto in=juce::MidiInput::getAvailableDevices(),out=juce::MidiOutput::getAvailableDevices();const int ii=input_.getSelectedItemIndex(),oi=output_.getSelectedItemIndex();if(ii>=0&&ii<(int)in.size()&&oi>=0)router_.start(in[(size_t)ii].identifier,oi==0?"__ddrum4_virtual__":(oi-1<(int)out.size()?out[(size_t)(oi-1)].identifier:juce::String{}));}refresh();}
-  void refreshRuntimeControls(){ const auto* runtime=router_.runtimeProfile(); if(!runtime) return; const auto hash=router_.runtimeSourceHash(); if(hash!=runtimeControlsHash_){runtimeScene_.clear(juce::dontSendNotification);for(size_t i=0;i<runtime->scenes.size();++i)runtimeScene_.addItem(juce::String(runtime->scenes[i]),static_cast<int>(i+1));for(size_t i=0;i<runtimeVariables_.size();++i){const bool present=i<runtime->variables.size();runtimeVariableLabels_[i].setText(present?juce::String(runtime->variables[i].name):"",juce::dontSendNotification);runtimeVariableLabels_[i].setEnabled(present);runtimeVariables_[i].setEnabled(present);}runtimeControlsHash_=hash;}runtimeScene_.setSelectedItemIndex(router_.runtimeScene(),juce::dontSendNotification);for(size_t i=0;i<runtimeVariables_.size();++i)if(i<runtime->variables.size())runtimeVariables_[i].setValue(router_.runtimeVariable(i),juce::dontSendNotification); }
-  void refresh(){const auto* p=router_.profile();const auto* c=router_.converter();const auto active=c?c->activeKit():0;for(size_t i=0;i<kits_.size();++i){juce::String label="—";if(p&&i<p->kits.size()){label=p->kits[i].label;for(const auto& binding:p->programs)if(binding.kitIndex==i){label+="  · PC "+juce::String(binding.program);break;}}kits_[i].setButtonText(label);kits_[i].onClick=[this,i]{if(auto*c=router_.converter())c->selectKit(i,"UI");};kits_[i].setEnabled(p&&i<p->kits.size());}status_.setText(router_.running()?"● CONNECTED":"● STOPPED",juce::dontSendNotification);start_.setButtonText(router_.running()?"Stop":"Start"); juce::String detail=juce::String("Profile: ")+juce::String(router_.profilePath().string())+"\n"; if(router_.runtimeMode()) { refreshRuntimeControls(); const auto h=router_.runtimeHealth(); detail+="Renderer: "+router_.runtimeRenderer()+"\n"; detail+="Scene/VP commands in this view are local to the PC renderer; a Master Merger is required to make them global.\n"; detail+=juce::String("Runtime: ")+juce::String((juce::int64)h.received)+" received, "+juce::String((juce::int64)h.rendered)+" rendered, echoes "+juce::String((juce::int64)h.echoes)+", drops "+juce::String(router_.queueDropped()); if(router_.runtimeSourceHash().isNotEmpty()) detail+="\nSource SHA-256: "+router_.runtimeSourceHash(); } else if(p&&c) { detail=juce::String("Active kit: ")+juce::String(p->kits[active].label)+"  · origin: "+c->lastProgramOrigin()+"\n"+detail; } detail+="\n"; detail+=router_.error().isEmpty()?juce::String("Select ddrum4 as input and the virtual port visible to SD3 / DrumGizmo."):router_.error(); info_.setText(detail,juce::dontSendNotification); }
+  void refreshRuntimeControls(){
+    const auto* runtime=router_.runtimeProfile();
+    if(!runtime) return;
+    const bool controlsEnabled=!router_.globalControlConfigured()||router_.globalControlOpen();
+    const auto hash=router_.runtimeSourceHash();
+    if(hash!=runtimeControlsHash_){
+      runtimeScene_.clear(juce::dontSendNotification);
+      for(size_t i=0;i<runtime->scenes.size();++i)
+        runtimeScene_.addItem(juce::String(runtime->scenes[i]),static_cast<int>(i+1));
+      for(size_t i=0;i<runtimeVariables_.size();++i){
+        const bool present=i<runtime->variables.size();
+        runtimeVariableLabels_[i].setText(present?juce::String(runtime->variables[i].name):"",juce::dontSendNotification);
+      }
+      runtimeControlsHash_=hash;
+    }
+    runtimeScene_.setSelectedItemIndex(router_.runtimeScene(),juce::dontSendNotification);
+    for(size_t i=0;i<runtimeVariables_.size();++i)
+      if(i<runtime->variables.size()) runtimeVariables_[i].setValue(router_.runtimeVariable(i),juce::dontSendNotification);
+    runtimeScene_.setEnabled(controlsEnabled);
+    for(size_t i=0;i<runtimeVariables_.size();++i){
+      const bool present=i<runtime->variables.size();
+      runtimeVariableLabels_[i].setEnabled(present&&controlsEnabled);
+      runtimeVariables_[i].setEnabled(present&&controlsEnabled);
+    }
+  }
+  void refresh(){const auto* p=router_.profile();const auto* c=router_.converter();const auto active=c?c->activeKit():0;for(size_t i=0;i<kits_.size();++i){juce::String label="—";if(p&&i<p->kits.size()){label=p->kits[i].label;for(const auto& binding:p->programs)if(binding.kitIndex==i){label+="  · PC "+juce::String(binding.program);break;}}kits_[i].setButtonText(label);kits_[i].onClick=[this,i]{if(auto*c=router_.converter())c->selectKit(i,"UI");};kits_[i].setEnabled(p&&i<p->kits.size());}status_.setText(router_.running()?"● CONNECTED":"● STOPPED",juce::dontSendNotification);start_.setButtonText(router_.running()?"Stop":"Start"); juce::String detail=juce::String("Profile: ")+juce::String(router_.profilePath().string())+"\n"; if(router_.runtimeMode()) { refreshRuntimeControls(); const auto h=router_.runtimeHealth(); detail+="Renderer: "+router_.runtimeRenderer()+"\n"; if(router_.globalControlOpen()) detail+="Global control: port open to "+router_.globalControlEndpoint()+"; state published, unverified (logical CH14/15 only).\n"; else if(router_.globalControlConfigured()) detail+="Global control: configured for "+router_.globalControlEndpoint()+"; start required, controls are locked until the port is open.\n"; else detail+="Global control: local only; a user-confirmed live control_bus is required.\n"; detail+=juce::String("Runtime: ")+juce::String((juce::int64)h.received)+" received, "+juce::String((juce::int64)h.rendered)+" rendered, echoes "+juce::String((juce::int64)h.echoes)+", drops "+juce::String(router_.queueDropped()); if(router_.runtimeSourceHash().isNotEmpty()) detail+="\nSource SHA-256: "+router_.runtimeSourceHash(); } else if(p&&c) { detail=juce::String("Active kit: ")+juce::String(p->kits[active].label)+"  · origin: "+c->lastProgramOrigin()+"\n"+detail; } detail+="\n"; detail+=router_.error().isEmpty()?juce::String("Select the source input and renderer output. A live control bus is opened separately only when confirmed."):router_.error(); info_.setText(detail,juce::dontSendNotification); }
   void timerCallback() override {MonitorLine line;bool changed=false;while(router_.monitor().pop(line)){juce::String text="IN ch"+juce::String(line.event.channel)+" d"+juce::String(line.event.data1)+" v"+juce::String(line.event.data2)+"  | OUT ";for(uint8_t i=0;i<line.outputCount;++i){const auto&e=line.output[i];text+="ch"+juce::String(e.channel)+" d"+juce::String(e.data1)+" v"+juce::String(e.data2)+(i+1<line.outputCount?" · ":"");}if(line.outputCount==0)text+="filtered";monitor_.moveCaretToEnd();monitor_.insertTextAtCaret(text+"\n");changed=true;}if(changed&&monitor_.getTotalNumChars()>24000)monitor_.setText(monitor_.getTextInRange({monitor_.getTotalNumChars()-18000,18000}),false);refresh();}
 };
 class App final:public juce::JUCEApplication{public:const juce::String getApplicationName()override{return "ddrum4 Converter";}const juce::String getApplicationVersion()override{return "0.2.0";}void initialise(const juce::String&)override{window_=std::make_unique<Window>(getApplicationName(),std::make_unique<MainComponent>(),*this);}void shutdown()override{window_.reset();}private:class Window final:public juce::DocumentWindow{public:Window(const juce::String& name,std::unique_ptr<juce::Component> content,App& app):DocumentWindow(name,juce::Colour(0xff15171b),allButtons),app_(app){setUsingNativeTitleBar(true);setContentOwned(content.release(),true);centreWithSize(getWidth(),getHeight());setVisible(true);}void closeButtonPressed()override{app_.systemRequestedQuit();}App&app_;};std::unique_ptr<Window>window_;};

@@ -123,6 +123,19 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
   RuntimeProfile result; result.rendererTarget=target;
   const auto rendererName=runtimeRendererName(target);
   if(root["source_sha256"]) result.sourceSha256=root["source_sha256"].as<std::string>();
+  if(root["control_bus"] && !root["control_bus"].IsNull()) {
+    const auto bus=root["control_bus"];
+    if(!bus.IsMap() || !bus["endpoint"] || !bus["channel"] || !bus["status"])
+      invalid("runtime control_bus is incomplete");
+    result.controlBusEndpoint=bus["endpoint"].as<std::string>();
+    result.controlBusChannel=channel(bus,"channel",15);
+    if(result.controlBusChannel!=14 && result.controlBusChannel!=15)
+      invalid("runtime control_bus must use channel 14 or 15");
+    const auto status=bus["status"].as<std::string>();
+    const auto live=root["deployment"] && root["deployment"].as<std::string>()=="live";
+    const auto hardwareIo=root["hardware_io"] ? root["hardware_io"].as<std::string>() : "disabled";
+    result.controlBusEnabled=live && status=="user-confirmed" && hardwareIo=="logical-control-only";
+  }
   if(root["state"] && root["state"]["scenes"]) for(const auto& s:root["state"]["scenes"]) sceneIndex(result,s.as<std::string>());
   if(root["state"] && root["state"]["defaults"] && root["state"]["defaults"]["scene"]) result.defaultScene=sceneIndex(result,root["state"]["defaults"]["scene"].as<std::string>());
   if(root["policies"] && root["policies"]["echo"]) result.echoMeasuredOnly=root["policies"]["echo"].as<std::string>()=="measured_only";
@@ -172,9 +185,9 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
   validateRuntimeProfile(result); return result;
 }
 void validateRuntimeProfile(const RuntimeProfile& profile) {
-  if(profile.sources.empty()||profile.sources.size()>8||profile.scenes.empty()||profile.decoders.empty()||profile.routes.empty()||profile.renderers.empty()) invalid("runtime profile has no complete pipeline or exceeds eight MIDI sources");
+  if(profile.sources.empty()||profile.sources.size()>8||profile.scenes.empty()||profile.scenes.size()>128||profile.decoders.empty()||profile.routes.empty()||profile.renderers.empty()) invalid("runtime profile has no complete pipeline, exceeds eight MIDI sources, or exceeds 128 scenes");
   if(profile.defaultScene>=profile.scenes.size()) invalid("runtime default scene is invalid");
-  if(profile.variables.size()>6) invalid("runtime profile supports at most 6 atomic state variables");
+  if(profile.variables.size()>4) invalid("runtime profile supports at most 4 atomic state variables");
   std::set<std::pair<std::string,uint8_t>> endpointChannels;
   for(const auto& source:profile.sources) { if(source.id.empty()||source.endpoint.empty()) invalid("runtime source id and endpoint may not be empty"); if(!endpointChannels.insert({source.endpoint,source.channel}).second) invalid("runtime sources sharing an endpoint must use distinct channels"); }
   for(const auto& decoder:profile.decoders) if(decoder.source>=profile.sources.size()||decoder.physical.empty()) invalid("runtime decoder is invalid");
