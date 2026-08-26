@@ -83,6 +83,47 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual({result.physical for result in results.values()}, {"snare.head"})
         self.assertEqual({result.logical_target for result in results.values()}, {"snare.metalcore"})
 
+    def test_complete_chain_simulator_traces_logical_scene_to_declared_ddrum_program(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+
+        result = simulator.simulate_logical_control("pc", 15, "program_change", 1)
+
+        self.assertEqual(result.state["scene"], "dnb")
+        action = next(step for step in result.steps if step.stage == "Arduino DDrum4 state")
+        self.assertEqual(action.message, {"type": "program_change", "channel": 12, "program": 1,
+                                          "status": "user-confirmed"})
+        self.assertTrue(result.to_document()["hardware_io"] == "disabled")
+
+    def test_complete_chain_simulator_rejects_undeclared_logical_control(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        with self.assertRaisesRegex(ValueError, "not a declared"):
+            RigSimulator.from_path(project).simulate_logical_control("pc", 15, "cc", 99, 1)
+
+    def test_r15_simulator_covers_ten_sounds_from_each_of_three_modules(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+        notes = (0, 8, 16, 24, 32, 40, 48, 56, 64, 72)
+        expected_ddrum = (0, 8, 18, 24, 32, 40, 48, 56, 64, 72)
+
+        for source in ("ddrum4", "ddti", "edrumin"):
+            results = [simulator.simulate_pad(source, note, 100) for note in notes]
+            rendered = tuple(next(step.message["note"] for step in result.steps
+                                  if step.stage == "Arduino DDrum4 renderer") for result in results)
+            channels = {next(step.message["channel"] for step in result.steps
+                             if step.stage == "Arduino DDrum4 renderer") for result in results}
+            self.assertEqual(rendered, expected_ddrum)
+            self.assertEqual(channels, {12})
+
+    def test_installed_r15_matrix_exposes_shared_crash_variations_without_extra_samples(self) -> None:
+        manifest = Path(__file__).resolve().parents[3] / "profiles" / "banks" / "metalcore-r15-installed.yaml"
+        matrix = load_kit_matrix(manifest)
+        crash = next(sound for sound in matrix.sounds if sound.sound_id == "CYMB_982")
+        self.assertEqual(crash.encoded_blocks, 1038)
+        self.assertEqual(crash.layers[2].variation, (2,))
+        self.assertEqual((crash.layers[2].pitch, crash.layers[2].source, crash.layers[2].velocity),
+                         (3, "crash high shared", 68))
+
     def test_kit_matrix_keeps_unmeasured_memory_unknown_and_marks_missing_wav(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

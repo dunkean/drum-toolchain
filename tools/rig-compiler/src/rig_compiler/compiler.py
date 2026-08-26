@@ -189,38 +189,43 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         # The input is identified, not parsed, copied, or claimed usable.
         provenance["base_dump"] = document["ddti_base_dump"]
     unresolved = _has_unresolved_values(document)
+    deployment = document.get("deployment", "simulation")
+    live_ready = deployment == "live" and not unresolved
     report_status = {
         "runtime-profile": "planned" if unresolved else "ready", "ddrum4-routing-plan": "planned",
-        "ddrum4-routing-contract": "planned", "firmware-project-mapping": "planned" if unresolved else "ready",
+        "ddrum4-routing-contract": "planned", "firmware-project-mapping": "ready" if live_ready else ("planned" if unresolved else ("simulation-only" if deployment == "simulation" else "planned")),
         "sd3-midimap": "user-confirmed", "drumgizmo-midimap": "planned" if unresolved else "ready", "sd3-megakit-map": "user-confirmed",
         "ddrum4-bank-plan": "planned", "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
     }
     report = {**provenance, "format": "rig-project-report/v1", "project": document.get("project", "unnamed-rig"),
               "artifacts": [{"name": key, "status": value} for key, value in report_status.items()],
-              "route_count": len(routes), "unresolved_measurements": unresolved, "hardware_io": "disabled"}
+              "route_count": len(routes), "deployment": deployment,
+              "unresolved_measurements": unresolved, "hardware_io": "disabled"}
     # Keep the complete validated declarative model in the runtime artifact.
     # ``records`` remains a compatibility/index view, never the sole source of
     # truth: it cannot express state variants, connection-profile policy, or
     # source decoder metadata without loss.
     runtime = {**provenance, "format": "rig-runtime-profile/v1", "status": report_status["runtime-profile"],
-               "project": document.get("project", "unnamed-rig"),
+               "project": document.get("project", "unnamed-rig"), "deployment": deployment,
                "state": document["state"], "logical_control_protocol": document["logical_control_protocol"],
                "policies": document["policies"], "connection_profiles": document["connection_profiles"],
                "sources": document["sources"], "source_decoders": document["source_decoders"],
                "physical_events": document["physical_events"], "logical_routes": document["logical_routes"],
                "renderers": document["renderers"], "native_control_map": document["native_control_map"],
+               "ddrum_state_actions": document.get("ddrum_state_actions", {}),
                "records": routes, "routes": routes, "hardware_io": "disabled"}
     routing = {**provenance, "format": "ddrum4-routing-plan/v1", "status": "planned", "records": routes, "hardware_write": "disabled"}
     contract = {**provenance, "format": "ddrum4-routing-contract/v1", "status": "planned", "routing_plan": "ddrum4-routing-plan.json", "records": routes}
     firmware = {
         **provenance,
         "format": "ddrum4-firmware-project-mapping-plan/v1",
-        "status": report_status["firmware-project-mapping"],
+        "status": report_status["firmware-project-mapping"], "deployment": deployment,
         "state": document["state"],
         "logical_control_protocol": document["logical_control_protocol"],
         "native_control_map": document["native_control_map"],
+        "ddrum_state_actions": document.get("ddrum_state_actions", {}),
         "records": routes,
-        "hardware_flash": "disabled",
+        "hardware_flash": "ready" if live_ready else "disabled",
     }
     def note_map(target: str, renderer: str) -> dict[str, Any]:
         mappings = []

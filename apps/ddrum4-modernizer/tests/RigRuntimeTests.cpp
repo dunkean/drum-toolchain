@@ -15,7 +15,7 @@ int main() {
   p.routes={{0,"snare.head","snare.metal"},{1,"snare.head","snare.electronic"},{0,"hat.opening","hat.opening"},{1,"hat.opening","hat.opening"},{0,"cymbal.choke","cymbal.choke"},{1,"cymbal.choke","cymbal.choke"}};
   p.renderers={{"snare.metal",38,10,16},{"snare.electronic",40,10,16},{"hat.opening",46,10,255},{"cymbal.choke",49,10,255}};
   p.variables={{"vp1",20,9}};
-  p.nativeControls={{0,1,NativeControlType::ProgramChange,0,0},{0,1,NativeControlType::ControlChange,21,1}};
+  p.nativeControls={{0,1,NativeControlType::ProgramChange,1,0,1},{0,1,NativeControlType::ControlChange,21,1,66}};
   RigRuntime runtime{p}; assert(runtime.variable(0)==9); std::array<MidiEvent,RigRuntime::maxOutputEvents> out{};
   assert(runtime.selectScene(1) && runtime.scene()==1);
   assert(runtime.setVariableValue(0,12) && runtime.variable(0)==12);

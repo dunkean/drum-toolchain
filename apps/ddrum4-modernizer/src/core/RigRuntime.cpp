@@ -2,7 +2,7 @@
 #include <algorithm>
 
 namespace ddrum4 {
-RigRuntime::RigRuntime(const RuntimeProfile& profile) noexcept : profile_(profile) {
+RigRuntime::RigRuntime(const RuntimeProfile& profile) : profile_(profile) {
   uint64_t initial=profile.defaultScene;
   for(size_t i=0;i<profile.variables.size() && i<6;++i) initial|=static_cast<uint64_t>(profile.variables[i].defaultValue)<<(16+i*8);
   state_.store(initial,std::memory_order_relaxed);
@@ -33,12 +33,12 @@ bool RigRuntime::duplicate(uint16_t source, const MidiEvent& input) noexcept {
   return false;
 }
 void RigRuntime::remember(uint16_t source, const MidiEvent& input, const RuntimeRenderer& renderer) noexcept {
-  auto& queue=active_[source][input.channel-1][input.data1];
+  auto& queue=(*active_)[source][input.channel-1][input.data1];
   if(queue.size==queue.entries.size()) { queue.head=static_cast<uint8_t>((queue.head+1)%queue.entries.size()); --queue.size; ++queue.discardedOffs; }
   queue.entries[(queue.head+queue.size)%queue.entries.size()]={renderer.channel,renderer.note}; ++queue.size;
 }
 bool RigRuntime::recall(uint16_t source, const MidiEvent& input, Active& active) noexcept {
-  auto& queue=active_[source][input.channel-1][input.data1];
+  auto& queue=(*active_)[source][input.channel-1][input.data1];
   if(queue.discardedOffs) { --queue.discardedOffs; return false; }
   if(!queue.size) return false;
   active=queue.entries[queue.head]; queue.head=static_cast<uint8_t>((queue.head+1)%queue.entries.size()); --queue.size; return true;
@@ -60,7 +60,7 @@ bool RigRuntime::setVariableValue(size_t index,uint8_t value) noexcept {
   return true;
 }
 RuntimeHealth RigRuntime::health() const noexcept { return {received_.load(),decoded_.load(),rendered_.load(),ignored_.load(),duplicates_.load(),echoes_.load(),controls_.load()}; }
-void RigRuntime::clearLedger() noexcept { for(auto& source:active_) for(auto& channel:source) for(auto& queue:channel) queue={}; }
+void RigRuntime::clearLedger() noexcept { for(auto& source:*active_) for(auto& channel:source) for(auto& queue:channel) queue={}; }
 size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, std::array<MidiEvent, maxOutputEvents>& output) noexcept {
   received_.fetch_add(1, std::memory_order_relaxed);
   const auto source=sourceIndex(sourceId);
@@ -76,11 +76,11 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
   }
   for (const auto& control : profile_.nativeControls) {
     if ((control.source>=0 && control.source!=source) || control.channel!=input.channel) continue;
-    const bool matches=(control.type==NativeControlType::ProgramChange && input.type==MidiType::ProgramChange) ||
-      (control.type==NativeControlType::ControlChange && input.type==MidiType::ControlChange && control.address==input.data1) ||
+    const bool matches=(control.type==NativeControlType::ProgramChange && input.type==MidiType::ProgramChange && control.address==input.data1) ||
+      (control.type==NativeControlType::ControlChange && input.type==MidiType::ControlChange && control.address==input.data1 && control.value==input.data2) ||
       (control.type==NativeControlType::NoteOn && isNoteOn(input) && input.data2!=0 && control.address==input.data1);
     if (!matches) continue;
-    const uint8_t value=control.type==NativeControlType::ProgramChange ? input.data1 : input.data2;
+    const uint8_t value=control.value;
     if (control.target==0) {
       if (!selectScene(value)) { ignore(); return 0; }
     } else if (!setVariableValue(static_cast<size_t>(control.target-1),value)) {

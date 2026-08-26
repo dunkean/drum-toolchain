@@ -3,13 +3,15 @@
   "$id": "https://drum-toolchain.local/contracts/schemas/rig-project/v1",
   "title": "Rig project v1",
   "type": "object",
-  "required": ["schema_version", "kind", "project", "rig", "sources", "connection_profiles", "source_decoders", "physical_events", "state", "logical_control_protocol", "logical_routes", "renderers", "native_control_map", "policies"],
+  "required": ["schema_version", "kind", "project", "rig", "deployment", "ddrum4_output_channel", "sources", "connection_profiles", "source_decoders", "physical_events", "state", "logical_control_protocol", "logical_routes", "renderers", "native_control_map", "policies"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {"const": 1},
     "kind": {"const": "rig-project"},
     "project": {"$ref": "#/$defs/id"},
     "rig": {"type": "string", "minLength": 1},
+    "deployment": {"enum": ["simulation", "live"]},
+    "ddrum4_output_channel": {"$ref": "#/$defs/channel"},
     "sources": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/source"}},
     "connection_profiles": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/connectionProfile"}},
     "source_decoders": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/decoder"}},
@@ -19,6 +21,7 @@
     "logical_routes": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/logicalRoute"}}},
     "renderers": {"type": "object", "required": ["ddrum4", "sd3", "drumgizmo"], "additionalProperties": false, "properties": {"ddrum4": {"$ref": "#/$defs/ddrum4Renderer"}, "sd3": {"$ref": "#/$defs/sd3Renderer"}, "drumgizmo": {"$ref": "#/$defs/drumgizmoRenderer"}}},
     "native_control_map": {"type": "object", "additionalProperties": {"$ref": "#/$defs/nativeControl"}},
+    "ddrum_state_actions": {"type": "object", "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/ddrumStateAction"}}},
     "policies": {"$ref": "#/$defs/policies"}
   },
   "$defs": {
@@ -37,7 +40,8 @@
     "ddrum4Renderer": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "required": ["note"], "additionalProperties": false, "properties": {"note": {"$ref": "#/$defs/byte"}, "position_policy": {"type": "string", "minLength": 1}}}},
     "sd3Renderer": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "required": ["note"], "additionalProperties": false, "properties": {"note": {"$ref": "#/$defs/byte"}, "channel": {"$ref": "#/$defs/channel"}, "position_cc": {"$ref": "#/$defs/byte"}}}},
     "drumgizmoRenderer": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "required": ["note", "instrument", "articulation"], "additionalProperties": false, "properties": {"note": {"$ref": "#/$defs/byte"}, "channel": {"$ref": "#/$defs/channel"}, "instrument": {"$ref": "#/$defs/id"}, "articulation": {"$ref": "#/$defs/id"}}}},
-    "nativeControl": {"type": "object", "required": ["decode_to", "channel", "type"], "additionalProperties": false, "properties": {"decode_to": {"$ref": "#/$defs/id"}, "source": {"$ref": "#/$defs/id"}, "channel": {"$ref": "#/$defs/channel"}, "type": {"enum": ["program_change", "cc", "note"]}, "cc": {"$ref": "#/$defs/byte"}, "note": {"$ref": "#/$defs/byte"}}},
+    "nativeControl": {"type": "object", "required": ["decode_to", "channel", "type", "value"], "additionalProperties": false, "properties": {"decode_to": {"$ref": "#/$defs/id"}, "source": {"$ref": "#/$defs/id"}, "channel": {"$ref": "#/$defs/channel"}, "type": {"enum": ["program_change", "cc", "note"]}, "program": {"$ref": "#/$defs/byte"}, "cc": {"$ref": "#/$defs/byte"}, "note": {"$ref": "#/$defs/byte"}, "value": {"$ref": "#/$defs/byte"}}},
+    "ddrumStateAction": {"type": "object", "required": ["type", "status"], "additionalProperties": false, "properties": {"type": {"enum": ["program_change", "sysex"]}, "channel": {"$ref": "#/$defs/channel"}, "program": {"$ref": "#/$defs/byte"}, "data": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/byte"}}, "when": {"type": "object", "additionalProperties": {"$ref": "#/$defs/byte"}}, "status": {"enum": ["measured", "user-confirmed", "planned"]}, "description": {"type": "string", "minLength": 1}}},
     "policies": {"type": "object", "required": ["echo", "unknown_message"], "additionalProperties": false, "properties": {"echo": {"enum": ["measured_only", "disabled"]}, "unknown_message": {"enum": ["drop_and_count", "drop"]}}}
   }
 }

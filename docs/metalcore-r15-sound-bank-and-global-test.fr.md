@@ -73,6 +73,12 @@ rebouclé vers le merger.
 
 ## 4. Occupation mémoire et affectation des dix canaux
 
+Le fichier machine lisible qui reprend exactement cette banque installée est
+[`profiles/banks/metalcore-r15-installed.yaml`](../profiles/banks/metalcore-r15-installed.yaml).
+Il décrit les Sound IDs, `NOTE #`, `NOTE P`, layers, vélocités, variations,
+round robins, pitchs partagés et occupation mémoire; il ne contient aucun dump
+ni mécanisme d'écriture vers le module.
+
 La mesure à retenir est le nombre de blocs DDrum4. La taille des fichiers MIDI
 de transfert sur le PC inclut le protocole SysEx et ne représente pas la mémoire
 audio affichée par le module.

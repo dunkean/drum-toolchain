@@ -6,6 +6,7 @@ device-discovery, or module-memory operations.
 from __future__ import annotations
 
 from pathlib import Path
+import yaml
 
 from .ddrum4_matrix import Ddrum4KitMatrix, MatrixLayer, UNKNOWN, load_kit_matrix
 from .service import ControlCenter
@@ -20,7 +21,7 @@ def launch() -> int:
         from PySide6.QtCore import QProcess
         from PySide6.QtGui import QTextCursor
         from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog,
-                                       QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+                                       QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                        QMainWindow, QMessageBox, QPushButton,
                                        QSplitter, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
                                        QTextEdit, QVBoxLayout, QWidget)
@@ -31,12 +32,16 @@ def launch() -> int:
         def __init__(self) -> None:
             super().__init__()
             self.center = ControlCenter()
+            self._visual_project_syncing = False
+            self._active_simulator: RigSimulator | None = None
+            self._active_simulator_path: Path | None = None
             self.matrix: Ddrum4KitMatrix | None = None
             self.report_paths: list[Path] = []
             self.campaign_directory: Path | None = None
             self.campaign_process: QProcess | None = None
             self.setWindowTitle("Drum Control Center — offline")
             tabs = QTabWidget()
+            tabs.addTab(self._project_editor_workspace(), "Kit, MIDI map, and palettes")
             tabs.addTab(self._campaign_workspace(), "SD3 capture campaign")
             layout = QVBoxLayout()
             self.project = QLineEdit()
@@ -78,6 +83,222 @@ def launch() -> int:
             holder = QWidget(); holder.setLayout(layout)
             tabs.addTab(holder, "Rig, DDrum4, and applications")
             self.setCentralWidget(tabs)
+
+        def _project_editor_workspace(self) -> QWidget:
+            """Editable source-of-truth project document, always validated before save.
+
+            The rig project deliberately contains the kit map, scene/VP state,
+            renderer notes and native actions in one file.  This prevents the
+            DDrum4 palette and PC renderer from silently drifting apart.
+            """
+            workspace = QWidget()
+            layout = QVBoxLayout()
+            layout.addWidget(QLabel(
+                "One project is the source of truth for sources, pads, logical sounds, DDrum4 NOTE P routes, "
+                "Scenes/Virtual Palettes, SD3/DrumGizmo maps, and declared DDrum4 Program/SysEx actions. "
+                "Save validates the complete project first; it never opens MIDI or writes hardware."
+            ))
+            self.editor_project = QLineEdit()
+            choose = QPushButton("Open rig project…"); choose.clicked.connect(self.select_editor_project)
+            load = QPushButton("Load"); load.clicked.connect(self.load_editor_project)
+            row = QHBoxLayout(); row.addWidget(QLabel("Project:")); row.addWidget(self.editor_project); row.addWidget(choose); row.addWidget(load)
+            layout.addLayout(row)
+            editor_tabs = QTabWidget()
+            self.visual_sounds = QTableWidget(0, 4)
+            self.visual_sounds.setHorizontalHeaderLabels(("Logical sound", "DDrum4 note / NOTE P", "SD3 note", "DrumGizmo note"))
+            self.visual_sounds.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.visual_sounds.itemChanged.connect(lambda _: self._sync_visual_project("sounds"))
+            editor_tabs.addTab(self.visual_sounds, "Sounds and renderer map")
+            self.visual_routes = QTableWidget(0, 3)
+            self.visual_routes.setHorizontalHeaderLabels(("Scene", "Physical pad / articulation", "Logical sound"))
+            self.visual_routes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.visual_routes.itemChanged.connect(lambda _: self._sync_visual_project("routes"))
+            editor_tabs.addTab(self.visual_routes, "Scenes and palettes")
+            self.visual_actions = QTableWidget(0, 6)
+            self.visual_actions.setHorizontalHeaderLabels(("Scene", "Native action", "Channel", "Program", "Status", "Description"))
+            self.visual_actions.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.visual_actions.itemChanged.connect(lambda _: self._sync_visual_project("actions"))
+            editor_tabs.addTab(self.visual_actions, "DDrum4 kit / palette actions")
+            self.visual_sources = QTableWidget(0, 4)
+            self.visual_sources.setHorizontalHeaderLabels(("Module", "Endpoint", "Raw channel", "Primary input"))
+            self.visual_sources.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.visual_sources.itemChanged.connect(lambda _: self._sync_visual_project("sources"))
+            editor_tabs.addTab(self.visual_sources, "Modules and MIDI map")
+            self.project_document = QTextEdit(); self.project_document.setAcceptRichText(False)
+            self.project_document.setPlaceholderText("Advanced YAML source.")
+            editor_tabs.addTab(self.project_document, "Advanced YAML")
+            layout.addWidget(editor_tabs)
+            validate = QPushButton("Validate project")
+            validate.clicked.connect(self.validate_editor_project)
+            save = QPushButton("Save validated project")
+            save.setToolTip("Writes only the selected YAML project after complete validation. It does not compile, flash, or send MIDI.")
+            save.clicked.connect(self.save_editor_project)
+            row = QHBoxLayout(); row.addWidget(validate); row.addWidget(save); layout.addLayout(row)
+            self.editor_status = QLabel("No project loaded."); layout.addWidget(self.editor_status)
+            workspace.setLayout(layout)
+            return workspace
+
+        def select_editor_project(self) -> None:
+            filename, _ = QFileDialog.getOpenFileName(self, "Open rig project", "", "Rig projects (*.yaml *.yml)")
+            if filename:
+                self.editor_project.setText(filename)
+                self.load_editor_project()
+
+        def load_editor_project(self) -> None:
+            path = Path(self.editor_project.text().strip())
+            try:
+                self.project_document.setPlainText(path.read_text(encoding="utf-8"))
+                RigSimulator.from_path(path)
+                self._populate_visual_project_editor(yaml.safe_load(self.project_document.toPlainText()))
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot load rig project", str(error)); return
+            self.project.setText(str(path))
+            self.editor_status.setText("Loaded and validated. Edit, validate, then save.")
+
+        def _populate_visual_project_editor(self, document: object) -> None:
+            if not isinstance(document, dict):
+                raise ValueError("rig project root must be a mapping")
+            self._visual_project_syncing = True
+            try:
+                self._populate_visual_project_tables(document)
+            finally:
+                self._visual_project_syncing = False
+
+        def _populate_visual_project_tables(self, document: object) -> None:
+            """Populate editable tables without changing their YAML source."""
+            renderers = document.get("renderers", {})
+            if not isinstance(renderers, dict):
+                raise ValueError("rig project renderers must be a mapping")
+            logical_ids = sorted(set().union(*(set(rows) for rows in renderers.values() if isinstance(rows, dict))))
+            self.visual_sounds.setRowCount(len(logical_ids))
+            for row, logical in enumerate(logical_ids):
+                values = [logical]
+                for renderer in ("ddrum4", "sd3", "drumgizmo"):
+                    value = renderers.get(renderer, {}).get(logical, {}) if isinstance(renderers.get(renderer), dict) else {}
+                    values.append(value.get("note", "—") if isinstance(value, dict) else "—")
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column == 0:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.visual_sounds.setItem(row, column, item)
+            routes = document.get("logical_routes", {})
+            route_rows = []
+            if isinstance(routes, dict):
+                for scene, mappings in routes.items():
+                    if isinstance(mappings, dict):
+                        for physical, target in mappings.items():
+                            fixed_target = isinstance(target, str)
+                            if isinstance(target, list):
+                                target = " / ".join(str(item.get("logical_target", "?")) for item in target if isinstance(item, dict))
+                            route_rows.append((scene, physical, target, fixed_target))
+            self.visual_routes.setRowCount(len(route_rows))
+            for row, values in enumerate(route_rows):
+                for column, value in enumerate(values[:3]):
+                    item = QTableWidgetItem(str(value))
+                    if column < 2 or not values[3]:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.visual_routes.setItem(row, column, item)
+            action_rows = []
+            for scene, actions in document.get("ddrum_state_actions", {}).items():
+                if isinstance(actions, list):
+                    for action in actions:
+                        if isinstance(action, dict): action_rows.append((scene, action.get("type", "—"), action.get("channel", "—"), action.get("program", "—"), action.get("status", "—"), action.get("description", "")))
+            self.visual_actions.setRowCount(len(action_rows))
+            for row, values in enumerate(action_rows):
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column < 2:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.visual_actions.setItem(row, column, item)
+            sources = document.get("sources", {})
+            source_rows = [(name, item.get("endpoint", "—"), item.get("channel", "—"), item.get("primary", "—")) for name, item in sources.items() if isinstance(item, dict)]
+            self.visual_sources.setRowCount(len(source_rows))
+            for row, values in enumerate(source_rows):
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column == 0:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.visual_sources.setItem(row, column, item)
+
+        def _sync_visual_project(self, table: str) -> None:
+            """Write a table edit back into Advanced YAML, preserving one source of truth."""
+            if self._visual_project_syncing:
+                return
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                if table == "sounds":
+                    for row in range(self.visual_sounds.rowCount()):
+                        logical = self.visual_sounds.item(row, 0).text()
+                        for column, renderer in enumerate(("ddrum4", "sd3", "drumgizmo"), start=1):
+                            item = self.visual_sounds.item(row, column)
+                            if item is None or item.text().strip() == "—":
+                                continue
+                            document["renderers"][renderer][logical]["note"] = int(item.text())
+                elif table == "routes":
+                    for row in range(self.visual_routes.rowCount()):
+                        scene = self.visual_routes.item(row, 0).text()
+                        physical = self.visual_routes.item(row, 1).text()
+                        document["logical_routes"][scene][physical] = self.visual_routes.item(row, 2).text().strip()
+                elif table == "sources":
+                    for row in range(self.visual_sources.rowCount()):
+                        name = self.visual_sources.item(row, 0).text()
+                        source = document["sources"][name]
+                        source["endpoint"] = self.visual_sources.item(row, 1).text().strip()
+                        source["channel"] = int(self.visual_sources.item(row, 2).text())
+                        source["primary"] = self.visual_sources.item(row, 3).text().strip()
+                else:
+                    action_rows = [(scene, action) for scene, actions in document.get("ddrum_state_actions", {}).items()
+                                   if isinstance(actions, list) for action in actions if isinstance(action, dict)]
+                    for row, (_, action) in enumerate(action_rows):
+                        action["channel"] = int(self.visual_actions.item(row, 2).text())
+                        action["program"] = int(self.visual_actions.item(row, 3).text())
+                        action["status"] = self.visual_actions.item(row, 4).text().strip()
+                        action["description"] = self.visual_actions.item(row, 5).text().strip()
+                self._visual_project_syncing = True
+                self.project_document.setPlainText(yaml.safe_dump(document, sort_keys=False, allow_unicode=True))
+                self._visual_project_syncing = False
+                self.editor_status.setText("Table edit applied to Advanced YAML. Validate before saving.")
+            except (TypeError, ValueError, KeyError) as error:
+                self._visual_project_syncing = True
+                self._populate_visual_project_tables(yaml.safe_load(self.project_document.toPlainText()))
+                self._visual_project_syncing = False
+                self.editor_status.setText(f"Table edit rejected: {error}")
+
+        def _validate_editor_text(self) -> None:
+            path = Path(self.editor_project.text().strip())
+            if not path.is_file():
+                raise ValueError("select an existing rig project")
+            temporary = path.with_suffix(path.suffix + ".validate.tmp")
+            if temporary.exists():
+                raise ValueError(f"remove stale validation file first: {temporary}")
+            try:
+                temporary.write_text(self.project_document.toPlainText(), encoding="utf-8", newline="\n")
+                RigSimulator.from_path(temporary)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+        def validate_editor_project(self) -> None:
+            try:
+                self._validate_editor_text()
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Project validation failed", str(error)); return
+            self.editor_status.setText("Valid project. Safe to save or compile.")
+
+        def save_editor_project(self) -> None:
+            try:
+                self._validate_editor_text()
+                path = Path(self.editor_project.text().strip())
+                temporary = path.with_suffix(path.suffix + ".save.tmp")
+                if temporary.exists():
+                    raise ValueError(f"remove stale save file first: {temporary}")
+                temporary.write_text(self.project_document.toPlainText(), encoding="utf-8", newline="\n")
+                temporary.replace(path)
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot save rig project", str(error)); return
+            self.project.setText(str(path))
+            self.editor_status.setText("Saved validated project. Compile explicitly to generate PC/Arduino artifacts.")
 
         def _campaign_workspace(self) -> QWidget:
             workspace = QWidget()
@@ -324,6 +545,36 @@ def launch() -> int:
             layout.addLayout(row)
             simulate = QPushButton("Simulate complete chain")
             simulate.clicked.connect(self.simulate_chain); layout.addWidget(simulate)
+            pad_actions = QHBoxLayout()
+            load_pads = QPushButton("Load declared virtual pads")
+            load_pads.setToolTip("Creates clickable buttons for the exact note decoders of the selected source. Offline only.")
+            load_pads.clicked.connect(self.load_simulator_pads)
+            reset_pads = QPushButton("Reset simulator state")
+            reset_pads.clicked.connect(self.reset_simulator)
+            pad_actions.addWidget(load_pads); pad_actions.addWidget(reset_pads); layout.addLayout(pad_actions)
+            self.sim_pad_group = QGroupBox("Virtual pads — load a project to populate")
+            self.sim_pad_grid = QGridLayout(); self.sim_pad_group.setLayout(self.sim_pad_grid)
+            layout.addWidget(self.sim_pad_group)
+            controls = QGroupBox("Logical control bus — PC/external → Arduino → DDrum4")
+            controls_layout = QVBoxLayout()
+            controls_layout.addWidget(QLabel(
+                "Offline only. Program Change selects Scene; the declared CC values select Virtual Palettes. "
+                "DDrum4 native actions are traced but never sent from this editor."
+            ))
+            self.sim_control_source = QLineEdit("pc")
+            self.sim_control_channel = QSpinBox(); self.sim_control_channel.setRange(1, 16); self.sim_control_channel.setValue(15)
+            self.sim_control_type = QLineEdit("program_change")
+            self.sim_control_data1 = QSpinBox(); self.sim_control_data1.setRange(0, 127)
+            self.sim_control_value = QSpinBox(); self.sim_control_value.setRange(0, 127)
+            row = QHBoxLayout()
+            for label, field in (("Origin:", self.sim_control_source), ("Channel:", self.sim_control_channel),
+                                 ("Type:", self.sim_control_type), ("Program / CC:", self.sim_control_data1),
+                                 ("Value:", self.sim_control_value)):
+                row.addWidget(QLabel(label)); row.addWidget(field)
+            controls_layout.addLayout(row)
+            simulate_control = QPushButton("Simulate scene / virtual-palette control")
+            simulate_control.clicked.connect(self.simulate_control); controls_layout.addWidget(simulate_control)
+            controls.setLayout(controls_layout); layout.addWidget(controls)
             panel.setLayout(layout)
             return panel
 
@@ -345,8 +596,8 @@ def launch() -> int:
             self.matrix_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.matrix_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.matrix_table.itemSelectionChanged.connect(self.show_layers)
-            self.layer_table = QTableWidget(0, 6)
-            self.layer_table.setHorizontalHeaderLabels(("Layer", "WAV", "Resource", "Source", "Status", "Provenance"))
+            self.layer_table = QTableWidget(0, 11)
+            self.layer_table.setHorizontalHeaderLabels(("Layer", "Position", "Velocity", "Variation", "Pitch", "RR", "WAV", "Resource", "Source", "Status", "Provenance"))
             self.layer_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.layer_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             split = QSplitter(Qt.Orientation.Vertical); split.addWidget(self.matrix_table); split.addWidget(self.layer_table); layout.addWidget(split)
@@ -397,7 +648,10 @@ def launch() -> int:
             layers = self.matrix.sound(self.matrix_table.currentRow() + 1).layers
             self.layer_table.setRowCount(len(layers))
             for row, layer in enumerate(layers):
-                values = (layer.index, layer.wav, layer.resource_status, layer.source, layer.status, layer.provenance)
+                values = (layer.index, layer.position, layer.velocity,
+                          "/".join(str(value) for value in layer.variation) if layer.variation else None,
+                          layer.pitch, layer.round_robin, layer.wav, layer.resource_status,
+                          layer.source, layer.status, layer.provenance)
                 for column, value in enumerate(values): self.layer_table.setItem(row, column, self._cell(value))
 
         def audition_layer(self) -> None:
@@ -424,17 +678,73 @@ def launch() -> int:
             self.log.setPlainText(" ".join(result.command) + "\n\n" + result.text)
 
         def simulate_chain(self) -> None:
-            if not self.project.text():
+            if not self.project.text() and not self.editor_project.text():
                 self.log.setPlainText("Select a rig project first."); return
             if not self.sim_source.text():
                 self.log.setPlainText("Enter a declared source module for the simulation."); return
             try:
-                simulator = RigSimulator.from_path(Path(self.project.text()))
+                simulator = self.current_simulator()
                 simulator.set_state(scene=self.sim_scene.text() or None)
                 result = simulator.simulate_pad(self.sim_source.text(), self.sim_note.value(), self.sim_velocity.value())
             except (OSError, ValueError, SimulationError) as error:
                 QMessageBox.warning(self, "Cannot simulate drum chain", str(error)); return
             self.log.setPlainText(result.render_text())
+
+        def simulate_control(self) -> None:
+            if not self.project.text() and not self.editor_project.text():
+                self.log.setPlainText("Select a rig project first."); return
+            try:
+                simulator = self.current_simulator()
+                result = simulator.simulate_logical_control(
+                    self.sim_control_source.text().strip(), self.sim_control_channel.value(),
+                    self.sim_control_type.text().strip(), self.sim_control_data1.value(), self.sim_control_value.value(),
+                )
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot simulate logical control", str(error)); return
+            self.log.setPlainText(result.render_text())
+
+        def current_simulator(self) -> RigSimulator:
+            path_text = self.project.text().strip() or self.editor_project.text().strip()
+            if not path_text:
+                raise SimulationError("select a rig project first")
+            path = Path(path_text).resolve()
+            if self._active_simulator is None or self._active_simulator_path != path:
+                self._active_simulator = RigSimulator.from_path(path)
+                self._active_simulator_path = path
+            return self._active_simulator
+
+        def reset_simulator(self) -> None:
+            self._active_simulator = None
+            self._active_simulator_path = None
+            self.log.setPlainText("Simulator state reset to the project defaults. No MIDI was sent.")
+
+        def load_simulator_pads(self) -> None:
+            try:
+                simulator = self.current_simulator()
+                source = self.sim_source.text().strip() or next(iter(simulator.project.sources))
+                if source not in simulator.project.sources:
+                    raise SimulationError(f"unknown source module {source!r}")
+                self.sim_source.setText(source)
+                while self.sim_pad_grid.count():
+                    item = self.sim_pad_grid.takeAt(0)
+                    if item.widget() is not None:
+                        item.widget().deleteLater()
+                decoders = [decoder for decoder in simulator.project.source_decoders
+                            if decoder.source == source and decoder.message_type == "note"]
+                for index, decoder in enumerate(decoders):
+                    note = decoder.match["note"]
+                    button = QPushButton(f"{decoder.physical}\nraw note {note}")
+                    button.setToolTip("Offline hit at the current velocity; the complete route is shown in the log.")
+                    button.clicked.connect(lambda _=False, hit_note=note: self.simulate_virtual_pad(hit_note))
+                    self.sim_pad_grid.addWidget(button, index // 4, index % 4)
+                self.sim_pad_group.setTitle(f"Virtual pads — {source}, {len(decoders)} declared exact-note inputs")
+                self.log.setPlainText("Virtual pads loaded. Click one to trace its complete route; no MIDI is emitted.")
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot load virtual pads", str(error))
+
+        def simulate_virtual_pad(self, note: int) -> None:
+            self.sim_note.setValue(note)
+            self.simulate_chain()
 
         def launch_target(self, target: str) -> None:
             if target == "ddti": result = self.center.launch("ddti")

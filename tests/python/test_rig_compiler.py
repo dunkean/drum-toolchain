@@ -30,7 +30,7 @@ class RigCompilerTests(unittest.TestCase):
     def _project(self, root: Path, *, duplicate: bool = False) -> Path:
         project = root / "kit.yaml"
         document = {
-            "schema_version": 1, "kind": "rig-project", "project": "test-kit", "rig": "fixture",
+            "schema_version": 1, "kind": "rig-project", "project": "test-kit", "rig": "fixture", "deployment": "simulation", "ddrum4_output_channel": 10,
             "sources": {"brain": {"endpoint": "fixture", "channel": 10, "primary": "usb", "connection_profile": "LIVE"}},
             "connection_profiles": {"LIVE": {"usb_sources": True}},
             "source_decoders": [
@@ -75,7 +75,8 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(firmware["logical_control_protocol"], validated.document["logical_control_protocol"])
             self.assertEqual(firmware["native_control_map"], validated.document["native_control_map"])
             self.assertEqual(firmware["state"], validated.document["state"])
-            self.assertEqual(firmware["status"], "ready")
+            self.assertEqual(firmware["ddrum_state_actions"], {})
+            self.assertEqual(firmware["status"], "simulation-only")
             self.assertFalse((output / "firmware-project-mapping.h").exists())
             self.assertIn("rig-compiler/v1", (output / "sd3-megakit-map.md").read_text(encoding="utf-8"))
             drumgizmo = json.loads((output / "drumgizmo-midimap.json").read_text(encoding="utf-8"))
@@ -180,7 +181,7 @@ class RigCompilerTests(unittest.TestCase):
                 "vp1": {"channels": [14, 15], "type": "cc", "cc": 20},
             }
             document["native_control_map"] = {
-                "brain_program": {"decode_to": "scene", "source": "brain", "channel": 10, "type": "program_change"},
+                "brain_program": {"decode_to": "scene", "source": "brain", "channel": 10, "type": "program_change", "program": 0, "value": 0},
             }
             document["logical_routes"]["metal"]["snare.head"] = [
                 {"logical_target": "snare.alt", "when": {"vp1": 1}},
@@ -211,7 +212,7 @@ class RigCompilerTests(unittest.TestCase):
                 "vp1": {"channels": [14, 15], "type": "cc", "cc": 20},
             }
             document["native_control_map"] = {
-                "brain_program": {"decode_to": "scene", "source": "brain", "channel": 10, "type": "program_change"},
+                "brain_program": {"decode_to": "scene", "source": "brain", "channel": 10, "type": "program_change", "program": 0, "value": 0},
             }
             document["logical_routes"]["metal"]["snare.head"] = [
                 {"logical_target": "snare.alt", "when": {"vp1": 1}},
@@ -222,6 +223,11 @@ class RigCompilerTests(unittest.TestCase):
                 if renderer == "drumgizmo":
                     target.update({"instrument": "snare", "articulation": "alt"})
                 document["renderers"][renderer]["snare.alt"] = target
+            document["deployment"] = "live"
+            document["sources"]["ddrum4"] = document["sources"].pop("brain")
+            for decoder in document["source_decoders"]:
+                decoder["match"]["source"] = "ddrum4"
+            document["native_control_map"]["brain_program"]["source"] = "ddrum4"
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             output = root / "out"
             compile_project(project, output)
@@ -235,10 +241,22 @@ class RigCompilerTests(unittest.TestCase):
             generated = header.read_text(encoding="utf-8")
             self.assertIn("const StateRoute STATE_ROUTES[] PROGMEM", generated)
             self.assertIn("const NativeControlRoute NATIVE_CONTROLS[] PROGMEM", generated)
-            self.assertIn("{10, NativeControlType::ProgramChange, 0, 0},", generated)
+            self.assertIn("{10, NativeControlType::ProgramChange, 0, 0, 0},", generated)
             self.assertIn("constexpr size_t NATIVE_CONTROL_COUNT = 1;", generated)
             self.assertIn("constexpr LogicalControlConfig LOGICAL_CONTROLS = {20, 255, 255, 255};", generated)
             self.assertIn("constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};", generated)
+
+    def test_simulation_firmware_plan_is_rejected_by_generator(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, output = self._project(root), root / "out"
+            compile_project(project, output)
+            result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping",
+                 str(output / "firmware-project-mapping.json"), "--output-channel", "10",
+                 "--output", str(root / "generated_mapping.h")], capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("verified live flash plan", result.stderr)
 
     def test_placeholders_and_zero_notes_keep_artifacts_planned(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

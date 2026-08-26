@@ -128,8 +128,22 @@ enum class NativeControlType : uint8_t { ProgramChange, ControlChange, NoteOn };
 struct NativeControlRoute {
   uint8_t sourceChannel;
   NativeControlType type;
+  // Exact incoming Program/CC/note value. A native message can never copy an
+  // arbitrary value into Scene/VP state.
   uint8_t address;
   uint8_t target;
+  uint8_t value;
+};
+
+// Scene reconciliation is deliberately limited to short MIDI channel events.
+// Vendor SysEx is handled only by a separately reviewed streaming transport.
+struct DdrumStateAction {
+  uint8_t scene;
+  uint8_t vp1;
+  uint8_t vp2;
+  uint8_t vp3;
+  uint8_t vp4;
+  MidiEvent event;
 };
 
 struct BridgeConfig {
@@ -153,6 +167,8 @@ struct BridgeConfig {
   LogicalControlConfig logicalControls = {};
   const NativeControlRoute* nativeControls = nullptr;
   size_t nativeControlCount = 0;
+  const DdrumStateAction* stateActions = nullptr;
+  size_t stateActionCount = 0;
 };
 
 // Pure, allocation-free routing core. It has no Arduino dependency so tests can
@@ -203,12 +219,14 @@ class DdrumBridge {
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   StateRoute readStateRoute(size_t index) const;
   NativeControlRoute readNativeControl(size_t index) const;
+  DdrumStateAction readStateAction(size_t index) const;
   const NoteRoute* findLedgerRoute(uint8_t inputChannel, uint8_t inputNote, uint32_t nowMs);
   void rememberPrimaryHit(uint8_t inputChannel, uint8_t inputNote, const NoteRoute* route, uint32_t nowMs);
   uint8_t mapVelocity(const NoteRoute& route, uint8_t velocity) const;
   uint8_t mapHihatCc(uint8_t value) const;
   bool isLogicalControl(const MidiEvent& input);
   bool isNativeControl(const MidiEvent& input);
+  size_t emitStateActions(MidiEvent* output, size_t capacity, uint32_t nowMs);
   bool isExpectedEcho(const MidiEvent& input, uint32_t nowMs);
   void rememberOutput(const MidiEvent& output, uint32_t nowMs);
   bool validConfig() const;

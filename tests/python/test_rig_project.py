@@ -16,6 +16,8 @@ def valid_project() -> dict:
         "kind": "rig-project",
         "project": "hybrid-demo",
         "rig": "profiles/physical/greg-hybrid-kit.yaml",
+        "deployment": "simulation",
+        "ddrum4_output_channel": 12,
         "sources": {
             "edrumin": {"endpoint": "usb-edrumin", "channel": 3, "primary": "usb", "connection_profile": "LIVE_USB"},
             "ddti": {"endpoint": "usb-ddti", "channel": 2, "primary": "usb", "connection_profile": "LIVE_USB"},
@@ -35,7 +37,7 @@ def valid_project() -> dict:
             "electronic": {"snare1.head": "snare.electronic.head", "tom1.head": "tom.electronic.head", "hh.opening": "hh.electronic.opening", "cymbal.choke": "cymbal.electronic.choke"},
         },
         "renderers": {"ddrum4": {}, "sd3": {}},
-        "native_control_map": {"ddrum4_program_change": {"decode_to": "scene", "channel": 1, "type": "program_change"}},
+        "native_control_map": {"ddrum4_program_change": {"decode_to": "scene", "channel": 1, "type": "program_change", "program": 0, "value": 0}},
         "policies": {"echo": "measured_only", "unknown_message": "drop_and_count"},
     }
 
@@ -117,14 +119,21 @@ class RigProjectTests(unittest.TestCase):
         fill_renderers(document)
         document["native_control_map"]["ddrum4_palette"] = {
             "decode_to": "vp1_snare", "source": "edrumin", "channel": 3,
-            "type": "cc", "cc": 21,
+            "type": "cc", "cc": 21, "value": 1,
         }
         self.load(document)
 
         document["native_control_map"]["duplicate"] = {
-            "decode_to": "vp1_snare", "channel": 3, "type": "cc", "cc": 21,
+            "decode_to": "vp1_snare", "channel": 3, "type": "cc", "cc": 21, "value": 1,
         }
         with self.assertRaisesRegex(RigProjectError, "overlaps another native control"):
+            self.load(document)
+
+    def test_program_change_requires_an_exact_program_and_state_value(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        document["native_control_map"]["ddrum4_program_change"].pop("program")
+        with self.assertRaisesRegex(RigProjectError, "program"):
             self.load(document)
 
     def test_routes_support_non_overlapping_scene_vp_variants_with_a_fallback(self) -> None:

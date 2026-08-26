@@ -5,6 +5,8 @@ schema_version: 1
 kind: rig-project
 project: greg-hybrid-mvp
 rig: profiles/physical/greg-hybrid-kit.yaml
+deployment: simulation
+ddrum4_output_channel: 12
 
 # Known topology: USB modules (including UMC404HD) reach the PC; DDrum4 OUT
 # reaches Arduino IN; UMC404HD OUT reaches DDrum4 IN. USB endpoint names are

@@ -67,6 +67,18 @@ NativeControlRoute DdrumBridge::readNativeControl(size_t index) const {
 #endif
 }
 
+DdrumStateAction DdrumBridge::readStateAction(size_t index) const {
+#if defined(ARDUINO_ARCH_AVR)
+  DdrumStateAction result{};
+  const uint8_t* source = reinterpret_cast<const uint8_t*>(config_.stateActions) + index * sizeof(DdrumStateAction);
+  uint8_t* destination = reinterpret_cast<uint8_t*>(&result);
+  for (size_t byte = 0; byte < sizeof(DdrumStateAction); ++byte) destination[byte] = pgm_read_byte(source + byte);
+  return result;
+#else
+  return config_.stateActions[index];
+#endif
+}
+
 const NoteRoute* DdrumBridge::findLedgerRoute(uint8_t inputChannel, uint8_t inputNote, uint32_t nowMs) {
   for (size_t i = 0; i < HIT_LEDGER_CAPACITY; ++i) {
     HitLedgerEntry& entry = hitLedger_[i];
@@ -113,6 +125,7 @@ bool DdrumBridge::validConfig() const {
   if (config_.relayProgramChannelCount && !config_.relayProgramChannels) return false;
   if (config_.stateRouteCount && !config_.stateRoutes) return false;
   if (config_.nativeControlCount && !config_.nativeControls) return false;
+  if (config_.stateActionCount && !config_.stateActions) return false;
   if (config_.echoGuard.mode != EchoGuardMode::Disabled &&
       config_.echoGuard.mode != EchoGuardMode::DualDdrum) return false;
   if (config_.echoGuard.mode == EchoGuardMode::DualDdrum &&
@@ -147,7 +160,7 @@ bool DdrumBridge::validConfig() const {
   }
   for (size_t i = 0; i < config_.nativeControlCount; ++i) {
     NativeControlRoute control = readNativeControl(i);
-    if (control.sourceChannel < 1 || control.sourceChannel > 16 || control.address > 127 || control.target > 4 ||
+    if (control.sourceChannel < 1 || control.sourceChannel > 16 || control.address > 127 || control.target > 4 || control.value > 127 ||
         (control.type != NativeControlType::ProgramChange && control.type != NativeControlType::ControlChange && control.type != NativeControlType::NoteOn)) return false;
     for (size_t j = i + 1; j < config_.nativeControlCount; ++j) {
       NativeControlRoute other = readNativeControl(j);
@@ -172,6 +185,22 @@ bool DdrumBridge::validConfig() const {
     }
   }
   return true;
+}
+
+size_t DdrumBridge::emitStateActions(MidiEvent* output, size_t capacity, uint32_t nowMs) {
+  size_t count = 0;
+  for (size_t index = 0; index < config_.stateActionCount; ++index) {
+    const DdrumStateAction action = readStateAction(index);
+    if (action.scene != logicalState_.scene ||
+        (action.vp1 != 0xff && action.vp1 != logicalState_.vp1) ||
+        (action.vp2 != 0xff && action.vp2 != logicalState_.vp2) ||
+        (action.vp3 != 0xff && action.vp3 != logicalState_.vp3) ||
+        (action.vp4 != 0xff && action.vp4 != logicalState_.vp4) || !action.event.channel) continue;
+    if (count == capacity) { ++outputOverflows_; break; }
+    output[count++] = action.event;
+    rememberOutput(action.event, nowMs);
+  }
+  return count;
 }
 
 bool DdrumBridge::isLogicalControl(const MidiEvent& input) {
@@ -200,11 +229,11 @@ bool DdrumBridge::isNativeControl(const MidiEvent& input) {
   for (size_t i = 0; i < config_.nativeControlCount; ++i) {
     const NativeControlRoute control = readNativeControl(i);
     if (control.sourceChannel != input.channel) continue;
-    const bool matches = (control.type == NativeControlType::ProgramChange && input.type == MidiEventType::ProgramChange) ||
-        (control.type == NativeControlType::ControlChange && input.type == MidiEventType::ControlChange && control.address == input.data1) ||
+    const bool matches = (control.type == NativeControlType::ProgramChange && input.type == MidiEventType::ProgramChange && control.address == input.data1) ||
+        (control.type == NativeControlType::ControlChange && input.type == MidiEventType::ControlChange && control.address == input.data1 && control.value == input.data2) ||
         (control.type == NativeControlType::NoteOn && input.type == MidiEventType::NoteOn && input.data2 != 0 && control.address == input.data1);
     if (!matches) continue;
-    const uint8_t value = control.type == NativeControlType::ProgramChange ? input.data1 : input.data2;
+    const uint8_t value = control.value;
     switch (control.target) {
       case 0: logicalState_.scene = value; break;
       case 1: logicalState_.vp1 = value; break;
@@ -308,11 +337,19 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
 
   if (isExpectedEcho(input, nowMs)) return 0;
 
-  // Logical controls are bridge-local and deliberately never reach DDrum4.
-  if (isLogicalControl(input)) return 0;
-  // DDrum4's native Program/Palette observations have the same state-only
-  // behavior. They are data-driven and never overlap a hit route.
-  if (isNativeControl(input)) return 0;
+  // Logical controls update state and reconcile only declared native output.
+  const LogicalState priorState = logicalState_;
+  if (isLogicalControl(input)) {
+    if (priorState.scene == logicalState_.scene && priorState.vp1 == logicalState_.vp1 &&
+        priorState.vp2 == logicalState_.vp2 && priorState.vp3 == logicalState_.vp3 && priorState.vp4 == logicalState_.vp4) return 0;
+    return emitStateActions(output, capacity, nowMs);
+  }
+  // Native DDrum4 changes are observations. Update state but never echo an
+  // action back to that same module; PC/logical controls are the sole origin
+  // of renderer reconciliation.
+  if (isNativeControl(input)) {
+    return 0;
+  }
 
   if (mode_ == BridgeMode::Silent) return 0;
 

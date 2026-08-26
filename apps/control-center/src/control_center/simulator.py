@@ -74,6 +74,36 @@ class SimulationResult:
         return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class StateChangeResult:
+    """Offline trace of one logical control travelling from PC/controller to DDrum4."""
+
+    source: str
+    message: Mapping[str, Any]
+    state: Mapping[str, Any]
+    steps: tuple[TraceStep, ...]
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "kind": "drum-chain-state-change-simulation/v1",
+            "hardware_io": "disabled",
+            "source": self.source,
+            "message": dict(self.message),
+            "state": dict(self.state),
+            "trace": [step.to_document() for step in self.steps],
+        }
+
+    def render_text(self) -> str:
+        lines = [
+            f"{self.source} logical control: " + " ".join(f"{key}={value}" for key, value in self.message.items()),
+            "state: " + ", ".join(f"{name}={value}" for name, value in self.state.items()),
+            "",
+        ]
+        lines.extend(f"{index}. {step.stage}: {step.detail}" for index, step in enumerate(self.steps, start=1))
+        lines.append("\nSimulation only: no MIDI, SysEx, or hardware module was opened.")
+        return "\n".join(lines)
+
+
 class RigSimulator:
     """Resolve virtual pad hits through the complete declared renderer chain."""
 
@@ -124,7 +154,7 @@ class RigSimulator:
             TraceStep("logical sound", logical),
         ]
         ddrum = self.project.renderers["ddrum4"][logical]
-        ddrum_channel = self.project.sources.get("ddrum4", self.project.sources[source]).channel
+        ddrum_channel = self.project.ddrum4_output_channel
         ddrum_message = {"type": "note_on", "channel": ddrum_channel, "note": ddrum["note"], "velocity": velocity}
         steps.extend((
             TraceStep("Arduino DDrum4 renderer", "writes the converted event to DDrum4 MIDI IN", ddrum_message),
@@ -147,6 +177,60 @@ class RigSimulator:
             TraceStep("DrumGizmo audio", f"Kit renders {drumgizmo['instrument']}/{drumgizmo['articulation']}"),
         ))
         return SimulationResult(source, note, velocity, physical, logical, dict(self._state), tuple(steps))
+
+    def simulate_logical_control(
+        self, source: str, channel: int, message_type: str, data1: int, value: int = 0,
+    ) -> StateChangeResult:
+        """Apply and trace a CH14/15 Scene or VP command without opening MIDI.
+
+        The same logical command is what the PC converter and an external
+        controller put on the future Master Merger.  A DDrum4 reconciliation
+        action is rendered only when it is declared in the project, and SysEx
+        payloads are displayed as captured data rather than synthesised.
+        """
+        if source not in {"pc", "external", "simulator"}:
+            raise SimulationError("logical-control source must be pc, external, or simulator")
+        if type(channel) is not int or not 1 <= channel <= 16:
+            raise SimulationError("logical-control channel must be in 1..16")
+        if message_type not in {"program_change", "cc"}:
+            raise SimulationError("logical-control type must be program_change or cc")
+        if type(data1) is not int or not 0 <= data1 <= 127 or type(value) is not int or not 0 <= value <= 127:
+            raise SimulationError("logical-control data must be MIDI bytes")
+        target: str | None = None
+        for name, control in self.project.logical_control_protocol.items():
+            if channel not in control["channels"] or control["type"] != message_type:
+                continue
+            if message_type == "program_change" or control.get("cc") == data1:
+                target = name
+                break
+        if target is None:
+            raise SimulationError("message is not a declared logical Scene/VP control")
+        message = {"type": message_type, "channel": channel, "data1": data1, "value": value}
+        if target == "scene":
+            if data1 >= len(self.project.scenes):
+                raise SimulationError(f"scene Program Change {data1} is not declared")
+            self._state["scene"] = self.project.scenes[data1]
+        else:
+            self._state[target] = value
+        actions = self.project.ddrum_state_actions.get(self._state["scene"], ())
+        steps: list[TraceStep] = [
+            TraceStep("logical control", f"{source} emits a declared {target} command", message),
+            TraceStep("Arduino state", "updates Scene/VP idempotently", dict(self._state)),
+        ]
+        matching_actions = [action for action in actions
+                            if all(self._state.get(name) == expected for name, expected in action.when.items())]
+        for action in matching_actions:
+            if action.action_type == "program_change":
+                native = {"type": "program_change", "channel": action.channel, "program": action.program,
+                          "status": action.status}
+            else:
+                native = {"type": "sysex", "data": list(action.data), "status": action.status}
+            detail = action.description or "declared DDrum4 state reconciliation"
+            steps.append(TraceStep("Arduino DDrum4 state", detail, native))
+        if not matching_actions:
+            steps.append(TraceStep("Arduino DDrum4 state", "no native action declared for this scene"))
+        steps.append(TraceStep("PC state echo", "the returned logical control is idempotent", dict(self._state)))
+        return StateChangeResult(source, message, dict(self._state), tuple(steps))
 
     def _note_decoder(self, source: str, note: int):
         for decoder in self.project.source_decoders:

@@ -29,6 +29,11 @@ class MatrixLayer:
     wav: Path | None = None
     status: str | None = None
     provenance: str | None = None
+    position: int | None = None
+    velocity: int | None = None
+    variation: tuple[int, ...] = ()
+    pitch: int | None = None
+    round_robin: int | None = None
 
     @property
     def resource_status(self) -> str:
@@ -110,10 +115,21 @@ def _layers(value: object, base: Path) -> tuple[MatrixLayer, ...]:
             item = {"wav": item}
         if not isinstance(item, dict):
             raise ValueError("each declared layer must be a mapping or WAV path")
+        variation = item.get("variation", ())
+        if isinstance(variation, int): variation = (variation,)
+        if not isinstance(variation, list | tuple) or any(not isinstance(number, int) or not 1 <= number <= 10 for number in variation):
+            raise ValueError("layer variation must be one variation number or a list of 1..10")
+        def optional_int(key: str) -> int | None:
+            raw = item.get(key)
+            if raw is None: return None
+            if not isinstance(raw, int): raise ValueError(f"layer {key} must be an integer")
+            return raw
         parsed.append(MatrixLayer(
             index=index, source=_text(item.get("source")) or _text(item.get("raw_file")),
             wav=_path(item.get("wav") or item.get("prepared_file") or item.get("file"), base),
             status=_text(item.get("status")), provenance=_text(item.get("provenance")),
+            position=optional_int("position"), velocity=optional_int("velocity"),
+            variation=tuple(variation), pitch=optional_int("pitch"), round_robin=optional_int("rr"),
         ))
     return tuple(parsed)
 
@@ -215,5 +231,12 @@ def format_matrix(matrix: Ddrum4KitMatrix) -> str:
                                   str(item.mem_left_delta_blocks) if item.mem_left_delta_blocks is not None else UNKNOWN,
                                   item.status or UNKNOWN, item.provenance or UNKNOWN)))
         for layer in item.layers:
-            lines.append(f"  L{layer.index} | {layer.wav or UNKNOWN} | {layer.source or UNKNOWN} | {layer.resource_status} | {layer.status or UNKNOWN} | {layer.provenance or UNKNOWN}")
+            details = ", ".join(part for part in (
+                f"P{layer.position}" if layer.position is not None else "",
+                f"v{layer.velocity}" if layer.velocity is not None else "",
+                "V" + "/".join(str(number) for number in layer.variation) if layer.variation else "",
+                f"pitch {layer.pitch:+d}" if layer.pitch is not None else "",
+                f"RR{layer.round_robin}" if layer.round_robin is not None else "",
+            ) if part)
+            lines.append(f"  L{layer.index} | {layer.wav or UNKNOWN} | {layer.source or UNKNOWN} | {details or UNKNOWN} | {layer.resource_status} | {layer.status or UNKNOWN} | {layer.provenance or UNKNOWN}")
     return "\n".join(lines)

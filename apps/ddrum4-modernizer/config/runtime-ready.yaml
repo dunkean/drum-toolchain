@@ -7,8 +7,8 @@ logical_control_protocol:
   scene: {channels: [14, 15], type: program_change}
   vp1: {channels: [14, 15], type: cc, cc: 20}
 native_control_map:
-  module_program: {decode_to: scene, source: edrumin, channel: 1, type: program_change}
-  module_vp1: {decode_to: vp1, source: edrumin, channel: 1, type: cc, cc: 21}
+  module_program: {decode_to: scene, source: edrumin, channel: 1, type: program_change, program: 1, value: 1}
+  module_vp1: {decode_to: vp1, source: edrumin, channel: 1, type: cc, cc: 21, value: 1}
 policies: {echo: measured_only}
 records:
   - scene: metal

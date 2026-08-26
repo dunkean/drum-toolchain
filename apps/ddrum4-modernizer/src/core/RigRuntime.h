@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,7 +28,7 @@ struct RuntimeRoute { uint16_t scene{}; std::string physical; std::string logica
 struct RuntimeControl { std::string name; uint8_t cc{}; uint8_t defaultValue{}; };
 // Native DDrum4 controls are optional observations of the module's own
 // Program/Palette protocol.  Target 0 is Scene; 1..6 address VP variables.
-struct RuntimeNativeControl { int16_t source{-1}; uint8_t channel{}; NativeControlType type{}; uint8_t address{}; uint8_t target{}; };
+struct RuntimeNativeControl { int16_t source{-1}; uint8_t channel{}; NativeControlType type{}; uint8_t address{}; uint8_t target{}; uint8_t value{}; };
 struct RuntimeProfile {
   std::vector<RuntimeSource> sources; std::vector<std::string> scenes;
   std::vector<RuntimeDecoder> decoders; std::vector<RuntimeRoute> routes;
@@ -40,7 +41,7 @@ struct RuntimeHealth { uint64_t received{}; uint64_t decoded{}; uint64_t rendere
 class RigRuntime {
  public:
   static constexpr size_t maxOutputEvents = 3;
-  explicit RigRuntime(const RuntimeProfile& profile) noexcept;
+  explicit RigRuntime(const RuntimeProfile& profile);
   size_t process(std::string_view sourceId, const MidiEvent& input,
                  std::array<MidiEvent, maxOutputEvents>& output) noexcept;
   size_t processEndpoint(std::string_view endpoint, const MidiEvent& input,
@@ -60,7 +61,11 @@ class RigRuntime {
   const RuntimeProfile& profile_; std::atomic<uint64_t> state_{};
   std::array<Seen, 32> seen_{};
   static constexpr size_t maxSources=8;
-  std::array<std::array<std::array<ActiveQueue, 128>, 16>, maxSources> active_{};
+  using ActiveLedgers = std::array<std::array<std::array<ActiveQueue, 128>, 16>, maxSources>;
+  // Keep the sizeable Note-On/Off ledger off the caller stack. A converter
+  // owns one runtime for its lifetime; allocating its bounded storage once is
+  // safer than making every construction consume several hundred KiB of stack.
+  std::unique_ptr<ActiveLedgers> active_{std::make_unique<ActiveLedgers>()};
   std::atomic<uint64_t> received_{}, decoded_{}, rendered_{}, ignored_{}, duplicates_{}, echoes_{}, controls_{};
   int sourceIndex(std::string_view id) const noexcept;
   int endpointSourceIndex(std::string_view endpoint, uint8_t channel) const noexcept;

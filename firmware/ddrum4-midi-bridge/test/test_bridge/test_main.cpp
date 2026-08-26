@@ -149,9 +149,9 @@ void test_logical_controls_use_the_generated_cc_addresses() {
 
 void test_native_controls_update_state_without_rendering_a_hit() {
   static const NativeControlRoute nativeControls[] = {
-      {12, NativeControlType::ProgramChange, 0, 0},
-      {12, NativeControlType::ControlChange, 74, 1},
-      {12, NativeControlType::NoteOn, 52, 2},
+      {12, NativeControlType::ProgramChange, 3, 0, 1},
+      {12, NativeControlType::ControlChange, 74, 1, 9},
+      {12, NativeControlType::NoteOn, 52, 2, 11},
   };
   static const BridgeConfig nativeConfig = {
       10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
@@ -162,13 +162,50 @@ void test_native_controls_update_state_without_rendering_a_hit() {
   DdrumBridge bridge(nativeConfig);
   MidiEvent output;
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 12, 3, 0}, &output, 1));
-  TEST_ASSERT_EQUAL_UINT8(3, bridge.logicalState().scene);
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.logicalState().scene);
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 12, 74, 9}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(9, bridge.logicalState().vp1);
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOn, 12, 52, 11}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(11, bridge.logicalState().vp2);
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::NoteOn, 12, 52, 0}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(11, bridge.logicalState().vp2);
+}
+
+void test_unmapped_native_program_cannot_create_an_invalid_scene() {
+  static const NativeControlRoute nativeControls[] = {
+      {12, NativeControlType::ProgramChange, 0, 0, 0},
+  };
+  static const BridgeConfig nativeConfig = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), false, nullptr,
+      {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
+      {20, 21, 22, 23}, nativeControls, 1,
+  };
+  DdrumBridge bridge(nativeConfig);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 12, 100, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.logicalState().scene);
+}
+
+void test_state_actions_respect_virtual_palette_predicates_and_native_changes_do_not_echo() {
+  static const DdrumStateAction actions[] = {
+      {0, 7, 255, 255, 255, {MidiEventType::ProgramChange, 12, 9, 0}},
+  };
+  static const NativeControlRoute nativeControls[] = {
+      {12, NativeControlType::ProgramChange, 1, 0, 0},
+  };
+  static const BridgeConfig stateConfig = {
+      12, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), false, nullptr,
+      {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
+      {20, 255, 255, 255}, nativeControls, 1, actions, 1,
+  };
+  DdrumBridge bridge(stateConfig);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::ControlChange, 15, 20, 7}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(9, output.data1);
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 12, 1, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.logicalState().scene);
 }
 
 void test_route_emits_bounded_note_and_cc() {
@@ -266,6 +303,8 @@ int main(int, char**) {
   RUN_TEST(test_logical_controls_update_reserved_channel_state);
   RUN_TEST(test_logical_controls_use_the_generated_cc_addresses);
   RUN_TEST(test_native_controls_update_state_without_rendering_a_hit);
+  RUN_TEST(test_unmapped_native_program_cannot_create_an_invalid_scene);
+  RUN_TEST(test_state_actions_respect_virtual_palette_predicates_and_native_changes_do_not_echo);
   RUN_TEST(test_route_emits_bounded_note_and_cc);
   RUN_TEST(test_guard_drops_only_emitted_future_echo);
   RUN_TEST(test_invalid_note_cannot_cross_an_index_row);

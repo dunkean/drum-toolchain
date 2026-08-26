@@ -50,6 +50,7 @@ const BridgeConfig BRIDGE_CONFIG = {
   STATE_ROUTES, STATE_ROUTE_COUNT,
   LOGICAL_CONTROLS,
   NATIVE_CONTROLS, NATIVE_CONTROL_COUNT,
+  STATE_ACTIONS, STATE_ACTION_COUNT,
 };
 DdrumBridge bridge(BRIDGE_CONFIG);
 // CC119 on channel 16 selects nested / PC-clean / bypass without a cable swap.

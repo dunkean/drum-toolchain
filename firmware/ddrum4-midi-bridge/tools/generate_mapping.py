@@ -29,15 +29,16 @@ def project_mapping_header(document, output_channel):
     """Lower a ready rig-compiler firmware plan to fixed Arduino tables."""
     if document.get("format") != "ddrum4-firmware-project-mapping-plan/v1":
         raise ValueError("expected ddrum4-firmware-project-mapping-plan/v1")
-    if document.get("status") != "ready":
-        raise ValueError("firmware project mapping is unresolved/planned")
+    if document.get("status") != "ready" or document.get("deployment") != "live" or document.get("hardware_flash") != "ready":
+        raise ValueError("firmware project mapping is not a verified live flash plan")
     output_channel = integer(output_channel, "output channel", 1, 16)
     state = document.get("state")
     controls = document.get("logical_control_protocol")
     records = document.get("records")
     native_control_map = document.get("native_control_map", {})
+    state_actions_document = document.get("ddrum_state_actions", {})
     if (not isinstance(state, dict) or not isinstance(controls, dict) or not isinstance(records, list)
-            or not isinstance(native_control_map, dict)):
+            or not isinstance(native_control_map, dict) or not isinstance(state_actions_document, dict)):
         raise ValueError("firmware project mapping needs state, logical_control_protocol, native_control_map, and records")
     scenes = state.get("scenes")
     variables = state.get("variables")
@@ -104,11 +105,31 @@ def project_mapping_header(document, output_channel):
         else:
             raise ValueError(f"native control {name!r} has unknown state target")
         channel = integer(control.get("channel"), f"native control {name} channel", 1, 16)
-        address = 0 if kind == "program_change" else integer(
-            control.get("cc" if kind == "cc" else "note"), f"native control {name} address", 0, 127)
-        native_routes.append((channel, native_type[kind], address, target))
+        address = integer(control.get("program" if kind == "program_change" else "cc" if kind == "cc" else "note"),
+                          f"native control {name} address", 0, 127)
+        mapped_value = integer(control.get("value"), f"native control {name} value", 0, 127)
+        native_routes.append((channel, native_type[kind], address, target, mapped_value))
     if len({route[:3] for route in native_routes}) != len(native_routes):
         raise ValueError("duplicate firmware native control")
+    state_actions = []
+    for scene, actions in sorted(state_actions_document.items()):
+        if scene not in scenes or not isinstance(actions, list):
+            raise ValueError("invalid DDrum state action scene")
+        for action in actions:
+            if not isinstance(action, dict) or action.get("status") == "planned":
+                raise ValueError("firmware refuses planned DDrum state actions")
+            if action.get("type") != "program_change":
+                raise ValueError("firmware supports only reviewed Program Change state actions; SysEx needs streaming approval")
+            predicates = action.get("when", {})
+            if not isinstance(predicates, dict):
+                raise ValueError("state action predicates must be an object")
+            values = [255, 255, 255, 255]
+            for name, value in predicates.items():
+                if name not in variables:
+                    raise ValueError(f"unknown state action predicate {name!r}")
+                values[variables.index(name)] = integer(value, f"state action predicate {name}", 0, 127)
+            state_actions.append((scenes.index(scene), *values, integer(action.get("channel"), "state action channel", 1, 16),
+                                  integer(action.get("program"), "state action program", 0, 127)))
     source_hash = document.get("source_sha256")
     if not isinstance(source_hash, str) or not source_hash:
         raise ValueError("firmware project mapping needs source_sha256")
@@ -137,13 +158,24 @@ def project_mapping_header(document, output_channel):
         "const NativeControlRoute NATIVE_CONTROLS[] PROGMEM = {",
     ])
     if native_routes:
-        lines.extend(f"  {{{channel}, NativeControlType::{kind}, {address}, {target}}},"
-                     for channel, kind, address, target in native_routes)
+        lines.extend(f"  {{{channel}, NativeControlType::{kind}, {address}, {target}, {value}}},"
+                     for channel, kind, address, target, value in native_routes)
     else:
-        lines.append("  {1, NativeControlType::ProgramChange, 0, 0}, // empty sentinel")
+        lines.append("  {1, NativeControlType::ProgramChange, 0, 0, 0}, // empty sentinel")
     lines.extend([
         "};",
         f"constexpr size_t NATIVE_CONTROL_COUNT = {len(native_routes)};",
+        "",
+        "const DdrumStateAction STATE_ACTIONS[] PROGMEM = {",
+    ])
+    if state_actions:
+        lines.extend(f"  {{{scene}, {vp1}, {vp2}, {vp3}, {vp4}, {{MidiEventType::ProgramChange, {channel}, {program}, 0}}}},"
+                     for scene, vp1, vp2, vp3, vp4, channel, program in state_actions)
+    else:
+        lines.append("  {0, 255, 255, 255, 255, {MidiEventType::ProgramChange, 1, 0, 0}}, // empty sentinel")
+    lines.extend([
+        "};",
+        f"constexpr size_t STATE_ACTION_COUNT = {len(state_actions)};",
         "",
         "constexpr LogicalControlConfig LOGICAL_CONTROLS = {" + ", ".join(str(value) for value in control_values) + "};",
         "constexpr LogicalState INITIAL_LOGICAL_STATE = {" + ", ".join(str(value) for value in (scenes.index(defaults["scene"]), *initial_values)) + "};",
@@ -255,6 +287,10 @@ def main() -> int:
             "// entries must be declared `const StateRoute ... PROGMEM`.",
             "constexpr const StateRoute* STATE_ROUTES = nullptr;",
             "constexpr size_t STATE_ROUTE_COUNT = 0;",
+            "constexpr const NativeControlRoute* NATIVE_CONTROLS = nullptr;",
+            "constexpr size_t NATIVE_CONTROL_COUNT = 0;",
+            "constexpr const DdrumStateAction* STATE_ACTIONS = nullptr;",
+            "constexpr size_t STATE_ACTION_COUNT = 0;",
             "",
             "constexpr LogicalControlConfig LOGICAL_CONTROLS = {0, 1, 2, 3};",
             "constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};",

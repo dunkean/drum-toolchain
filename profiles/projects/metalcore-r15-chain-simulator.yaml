@@ -1,0 +1,105 @@
+# Complete no-pad diagnostic project for the installed Metalcore r15 DDrum4 bank.
+# Addresses are a stable simulation namespace, not a claim about unconnected pads.
+schema_version: 1
+kind: rig-project
+project: metalcore-r15-chain-simulator
+rig: profiles/physical/greg-hybrid-kit.yaml
+deployment: simulation
+ddrum4_output_channel: 12
+sources:
+  ddrum4: {endpoint: SIM_DDrum4_DIN, channel: 1, primary: din, connection_profile: DIN_ONLY}
+  ddti: {endpoint: SIM_DDTi_USB, channel: 2, primary: usb, connection_profile: LIVE_USB_PRIMARY}
+  edrumin: {endpoint: SIM_eDRUMin_USB, channel: 3, primary: usb, connection_profile: LIVE_USB_PRIMARY}
+connection_profiles:
+  LIVE_USB_PRIMARY: {deduplicate_din_copies: true, usb_sources: true, din_sources: true}
+  DIN_ONLY: {deduplicate_din_copies: false, usb_sources: false, din_sources: true}
+source_decoders:
+  - {match: {source: ddrum4, type: note, note: 0}, emit: {physical: kick.hit, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 8}, emit: {physical: snare.center, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 16}, emit: {physical: rim.hit, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 24}, emit: {physical: tom.high, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 32}, emit: {physical: tom.mid, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 40}, emit: {physical: tom.low, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 48}, emit: {physical: perc.hit, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 56}, emit: {physical: cymb1.hit, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 64}, emit: {physical: cymb2.hit, expressions: [velocity]}}
+  - {match: {source: ddrum4, type: note, note: 72}, emit: {physical: hihat.closed, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 0}, emit: {physical: kick.hit, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 8}, emit: {physical: snare.center, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 16}, emit: {physical: rim.hit, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 24}, emit: {physical: tom.high, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 32}, emit: {physical: tom.mid, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 40}, emit: {physical: tom.low, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 48}, emit: {physical: perc.hit, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 56}, emit: {physical: cymb1.hit, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 64}, emit: {physical: cymb2.hit, expressions: [velocity]}}
+  - {match: {source: ddti, type: note, note: 72}, emit: {physical: hihat.closed, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 0}, emit: {physical: kick.hit, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 8}, emit: {physical: snare.center, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 16}, emit: {physical: rim.hit, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 24}, emit: {physical: tom.high, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 32}, emit: {physical: tom.mid, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 40}, emit: {physical: tom.low, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 48}, emit: {physical: perc.hit, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 56}, emit: {physical: cymb1.hit, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 64}, emit: {physical: cymb2.hit, expressions: [velocity]}}
+  - {match: {source: edrumin, type: note, note: 72}, emit: {physical: hihat.closed, expressions: [velocity]}}
+physical_events: [kick.hit, snare.center, rim.hit, tom.high, tom.mid, tom.low, perc.hit, cymb1.hit, cymb2.hit, hihat.closed]
+state:
+  scenes: [metalcore]
+  variables: []
+  defaults: {scene: metalcore}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+logical_routes:
+  metalcore:
+    kick.hit: kick.acoustic
+    snare.center: snare.center
+    rim.hit: rim.cross
+    tom.high: tom.high
+    tom.mid: tom.mid
+    tom.low: tom.low
+    perc.hit: perc.hit
+    cymb1.hit: cymb1.hit
+    cymb2.hit: cymb2.hit
+    hihat.closed: hihat.closed
+renderers:
+  ddrum4:
+    kick.acoustic: {note: 0}
+    snare.center: {note: 8}
+    rim.cross: {note: 18}
+    tom.high: {note: 24}
+    tom.mid: {note: 32}
+    tom.low: {note: 40}
+    perc.hit: {note: 48}
+    cymb1.hit: {note: 56}
+    cymb2.hit: {note: 64}
+    hihat.closed: {note: 72}
+  sd3:
+    kick.acoustic: {note: 36, channel: 10}
+    snare.center: {note: 38, channel: 10}
+    rim.cross: {note: 37, channel: 10}
+    tom.high: {note: 48, channel: 10}
+    tom.mid: {note: 45, channel: 10}
+    tom.low: {note: 41, channel: 10}
+    perc.hit: {note: 54, channel: 10}
+    cymb1.hit: {note: 49, channel: 10}
+    cymb2.hit: {note: 51, channel: 10}
+    hihat.closed: {note: 42, channel: 10}
+  drumgizmo:
+    kick.acoustic: {note: 36, channel: 10, instrument: kick, articulation: acoustic}
+    snare.center: {note: 38, channel: 10, instrument: snare, articulation: center}
+    rim.cross: {note: 37, channel: 10, instrument: rim, articulation: cross}
+    tom.high: {note: 48, channel: 10, instrument: tom, articulation: high}
+    tom.mid: {note: 45, channel: 10, instrument: tom, articulation: mid}
+    tom.low: {note: 41, channel: 10, instrument: tom, articulation: low}
+    perc.hit: {note: 54, channel: 10, instrument: perc, articulation: hit}
+    cymb1.hit: {note: 49, channel: 10, instrument: cymbal, articulation: one}
+    cymb2.hit: {note: 51, channel: 10, instrument: cymbal, articulation: two}
+    hihat.closed: {note: 42, channel: 10, instrument: hihat, articulation: closed}
+native_control_map:
+  ddrum_program_metalcore: {decode_to: scene, source: ddrum4, channel: 1, type: program_change, program: 0, value: 0}
+ddrum_state_actions:
+  metalcore:
+    - {type: program_change, channel: 12, program: 0, status: user-confirmed, description: "Select r15 Metalcore renderer palette"}
+policies: {echo: measured_only, unknown_message: drop_and_count}

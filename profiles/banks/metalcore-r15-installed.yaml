@@ -1,0 +1,86 @@
+# Measured installed DDrum4 r15 bank. This is the authoritative description
+# of the ten resident Sounds, not a transfer file and never a reason to flash.
+bank:
+  id: metalcore-r15-installed
+  status: user-confirmed-installed
+  capacity_blocks: 8120
+  used_blocks: 8037
+  free_blocks: 83
+  midi_channel: 12
+  local_control: off
+  source_document: docs/metalcore-r15-sound-bank-and-global-test.fr.md
+sounds:
+  - sound_id: KICK_981
+    source: kick-metalcore-and-electronic-tom-low
+    physical_channel: KICK
+    note_base: 0
+    note_p: 8
+    encoded_blocks: 605
+    status: user-confirmed
+    variations: [{number: 1, name: Metalcore}, {number: 2, name: Sleep Token}, {number: 3, name: Electronic Tom}]
+    layers:
+      - {source: kick metalcore head, position: 1, velocity: 84, rr: 1, variation: [1, 2], sample: 1}
+      - {source: kick metalcore head, position: 1, velocity: 124, rr: 1, variation: [1, 2], sample: 2}
+      - {source: kick metalcore head, position: 2, velocity: 124, rr: 2, variation: [1, 2], sample: 3}
+      - {source: electronic tom low, position: 5, velocity: 104, rr: 1, variation: [3], sample: 4}
+  - sound_id: SNRE_981
+    source: snare-metalcore
+    physical_channel: SNARE
+    note_base: 8
+    note_p: 8
+    encoded_blocks: 911
+    status: user-confirmed
+    variations: [{number: 1, name: Metalcore}, {number: 2, name: Deftones-like}, {number: 3, name: Sleep Token}]
+    layers:
+      - {source: center, position: 1, velocity: 20, rr: 1, variation: [1, 2, 3], sample: 1}
+      - {source: center, position: 1, velocity: 68, rr: 1, variation: [1, 2, 3], sample: 2}
+      - {source: center, position: 1, velocity: 124, rr: 1, variation: [1, 2, 3], sample: 3}
+      - {source: center, position: 2, velocity: 124, rr: 2, variation: [1, 2, 3], sample: 4}
+      - {source: center, position: 3, velocity: 124, rr: 3, variation: [1, 2, 3], sample: 5}
+      - {source: mid, position: 4, velocity: 20, rr: 1, variation: [1, 2, 3], sample: 6}
+      - {source: mid, position: 4, velocity: 68, rr: 1, variation: [1, 2, 3], sample: 7}
+      - {source: mid, position: 4, velocity: 124, rr: 1, variation: [1, 2, 3], sample: 8}
+      - {source: edge, position: 5, velocity: 20, rr: 1, variation: [1, 2, 3], sample: 9}
+      - {source: edge, position: 5, velocity: 124, rr: 1, variation: [1, 2, 3], sample: 10}
+  - sound_id: RIM_981
+    source: rimshot-and-crossstick
+    physical_channel: RIM
+    note_base: 16
+    note_p: 8
+    encoded_blocks: 365
+    status: user-confirmed
+    variations: [{number: 1, name: Metalcore}, {number: 2, name: Deftones-like}, {number: 3, name: Sleep-like}]
+    layers:
+      - {source: rimshot, position: 1, velocity: 20, rr: 1, sample: 1}
+      - {source: rimshot, position: 1, velocity: 124, rr: 1, sample: 2}
+      - {source: rimshot, position: 2, velocity: 124, rr: 2, sample: 3}
+      - {source: cross-stick, position: 3, velocity: 124, rr: 1, sample: 4}
+      - {source: rimshot shared, position: 4, velocity: 20, rr: 1, sample: 1}
+      - {source: rimshot shared, position: 4, velocity: 124, rr: 1, sample: 2}
+      - {source: rimshot RR2 shared, position: 5, velocity: 124, rr: 2, sample: 3}
+      - {source: cross-stick shared, position: 6, velocity: 124, rr: 1, sample: 4}
+  - sound_id: TOM_981
+    source: toms-pitched-and-round-robin
+    physical_channel: TOM_HIGH
+    note_base: 24
+    note_p: 8
+    encoded_blocks: 1057
+    status: user-confirmed
+    variations: [{number: 1, name: Metalcore}, {number: 2, name: Sleep}, {number: 3, name: Deftones}]
+    layers:
+      - {source: rack tom 1, position: 1, velocity: 68, pitch: 4, sample: 1}
+      - {source: rack tom 1, position: 1, velocity: 124, pitch: 4, sample: 2}
+      - {source: tom medium, position: 2, velocity: 68, sample: 1}
+      - {source: tom medium, position: 2, velocity: 124, sample: 2}
+      - {source: floor tom 1, position: 3, velocity: 68, pitch: 4, sample: 3}
+      - {source: floor tom 1, position: 3, velocity: 124, pitch: 4, sample: 4}
+      - {source: floor tom 2, position: 4, velocity: 68, sample: 3}
+      - {source: floor tom 2, position: 4, velocity: 124, sample: 4}
+      - {source: tom medium RR2, position: 2, velocity: 124, rr: 2, sample: 5}
+      - {source: floor tom 2 RR2, position: 4, velocity: 124, rr: 2, sample: 6}
+  - {sound_id: PERC_981, source: electronic-snares, physical_channel: TOM_MID, note_base: 32, note_p: 8, encoded_blocks: 353, status: user-confirmed, variations: [{number: 1, name: DnB}, {number: 2, name: Industrial-Trap}], layers: [{source: snare low trap-DnB, position: 7, velocity: 104, variation: [1], sample: 1}, {source: snare trap-Industrial, position: 8, velocity: 104, variation: [2], sample: 2}]}
+  - {sound_id: CYMB_981, source: hihat-edge-and-pedal, physical_channel: TOM_LOW, note_base: 40, note_p: 8, encoded_blocks: 1401, status: user-confirmed, variations: [{number: 1, name: Edge-pedal}], layers: [{source: edge closed, position: 1, velocity: 68, sample: 1}, {source: edge closed, position: 1, velocity: 124, sample: 2}, {source: edge quarter-open, position: 2, velocity: 68, sample: 3}, {source: edge quarter-open, position: 2, velocity: 124, sample: 4}, {source: edge half-open, position: 3, velocity: 68, sample: 5}, {source: edge half-open, position: 3, velocity: 124, sample: 6}, {source: edge open, position: 4, velocity: 68, sample: 7}, {source: edge open, position: 4, velocity: 124, sample: 8}, {source: pedal close, position: 5, velocity: 104, sample: 9}, {source: foot splash, position: 6, velocity: 104, sample: 10}]}
+  - {sound_id: PERC_982, source: cowbell-and-woodblock, physical_channel: PERC, note_base: 48, note_p: 8, encoded_blocks: 303, status: user-confirmed, variations: [{number: 1, name: Compact}], layers: [{source: cowbell, position: 7, velocity: 104, sample: 1}, {source: woodblock, position: 8, velocity: 104, sample: 2}]}
+  - {sound_id: CYMB_982, source: crash-splash-china, physical_channel: CYMBAL_1, note_base: 56, note_p: 8, encoded_blocks: 1038, status: user-confirmed, variations: [{number: 1, name: Crash}, {number: 2, name: Crash High}, {number: 3, name: Crash Low}], layers: [{source: crash, position: 1, velocity: 68, pitch: 0, variation: [1], sample: 1}, {source: crash, position: 1, velocity: 124, pitch: 0, variation: [1], sample: 2}, {source: crash high shared, position: 1, velocity: 68, pitch: 3, variation: [2], sample: 1}, {source: crash high shared, position: 1, velocity: 124, pitch: 3, variation: [2], sample: 2}, {source: crash low shared, position: 1, velocity: 68, pitch: -3, variation: [3], sample: 1}, {source: crash low shared, position: 1, velocity: 124, pitch: -3, variation: [3], sample: 2}, {source: splash, position: 3, velocity: 68, variation: [1, 2, 3], sample: 3}, {source: splash, position: 3, velocity: 124, variation: [1, 2, 3], sample: 4}, {source: china, position: 4, velocity: 68, variation: [1, 2, 3], sample: 5}, {source: china, position: 4, velocity: 124, variation: [1, 2, 3], sample: 6}]}
+  - {sound_id: CYMB_983, source: ride-bow-and-bell, physical_channel: CYMBAL_2, note_base: 64, note_p: 8, encoded_blocks: 1271, status: user-confirmed, variations: [{number: 1, name: Metalcore}], layers: [{source: ride bow, position: 3, velocity: 68, sample: 1}, {source: ride bow, position: 3, velocity: 124, sample: 2}, {source: ride bell, position: 4, velocity: 68, sample: 3}, {source: ride bell, position: 4, velocity: 124, sample: 4}]}
+  - {sound_id: HHAT_981, source: hihat-bow, physical_channel: HI_HAT, note_base: 72, note_p: 8, encoded_blocks: 733, status: user-confirmed, variations: [{number: 1, name: Bow-pedal}], layers: [{source: bow closed, position: 1, velocity: 68, sample: 1}, {source: bow closed, position: 1, velocity: 124, sample: 2}, {source: bow loose, position: 2, velocity: 68, sample: 3}, {source: bow loose, position: 2, velocity: 124, sample: 4}, {source: bow quarter-open, position: 3, velocity: 68, sample: 5}, {source: bow quarter-open, position: 3, velocity: 124, sample: 6}, {source: bow half-open, position: 4, velocity: 68, sample: 7}, {source: bow open, position: 5, velocity: 68, sample: 8}]}

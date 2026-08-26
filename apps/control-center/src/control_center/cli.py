@@ -78,6 +78,14 @@ def main(argv: list[str] | None = None) -> int:
     simulate.add_argument("--state", action="append", default=[], metavar="NAME=VALUE",
                           help="optional virtual-palette override; repeat as needed")
     simulate.add_argument("--json", action="store_true", help="print the complete machine-readable trace")
+    control = commands.add_parser("simulate-control", help="offline trace: Scene/VP command through Arduino DDrum4 reconciliation")
+    control.add_argument("project", type=Path)
+    control.add_argument("--source", choices=("pc", "external", "simulator"), default="pc")
+    control.add_argument("--channel", type=int, default=15)
+    control.add_argument("--type", dest="message_type", choices=("program_change", "cc"), required=True)
+    control.add_argument("--data1", required=True, type=int, help="Program number or CC address")
+    control.add_argument("--value", type=int, default=0, help="CC value; ignored for Program Change")
+    control.add_argument("--json", action="store_true", help="print the complete machine-readable trace")
     args = parser.parse_args(argv)
     center = ControlCenter(args.toolchain)
     if args.action == "kit-matrix":
@@ -101,6 +109,16 @@ def main(argv: list[str] | None = None) -> int:
             simulator = RigSimulator.from_path(args.project)
             simulator.set_state(scene=args.scene, values=overrides)
             result = simulator.simulate_pad(args.source, args.note, args.velocity)
+        except (OSError, ValueError, SimulationError) as error:
+            parser.error(str(error))
+        print(json.dumps(result.to_document(), indent=2, ensure_ascii=False) if args.json else result.render_text())
+        return 0
+    if args.action == "simulate-control":
+        try:
+            simulator = RigSimulator.from_path(args.project)
+            result = simulator.simulate_logical_control(
+                args.source, args.channel, args.message_type, args.data1, args.value,
+            )
         except (OSError, ValueError, SimulationError) as error:
             parser.error(str(error))
         print(json.dumps(result.to_document(), indent=2, ensure_ascii=False) if args.json else result.render_text())

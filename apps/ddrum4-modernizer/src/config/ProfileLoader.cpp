@@ -154,14 +154,16 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
   }
   if(root["native_control_map"]) for(const auto& item:root["native_control_map"]) {
     const auto name=item.first.as<std::string>(); const auto native=item.second;
-    if(!native["decode_to"]||!native["channel"]||!native["type"]) invalid("native control "+name+" is incomplete");
+    if(!native["decode_to"]||!native["channel"]||!native["type"]||!native["value"]) invalid("native control "+name+" is incomplete");
     RuntimeNativeControl control; control.channel=channel(native,"channel",1); control.type=runtimeNativeControlType(native["type"].as<std::string>());
     const auto target=native["decode_to"].as<std::string>();
     if(target=="scene") control.target=0;
     else { auto variable=std::find_if(result.variables.begin(),result.variables.end(),[&](const RuntimeControl& value){return value.name==target;}); if(variable==result.variables.end()) invalid("native control "+name+" has unknown state target"); control.target=static_cast<uint8_t>(variable-result.variables.begin()+1); }
     if(native["source"]) { const auto sourceId=native["source"].as<std::string>(); auto source=std::find_if(result.sources.begin(),result.sources.end(),[&](const RuntimeSource& value){return value.id==sourceId;}); if(source==result.sources.end()) invalid("native control "+name+" has unknown source"); if(source->channel!=control.channel) invalid("native control "+name+" channel differs from source"); control.source=static_cast<int16_t>(source-result.sources.begin()); }
+    if(control.type==NativeControlType::ProgramChange) { if(!native["program"]) invalid("native Program Change control needs program"); control.address=midi(native,"program"); }
     if(control.type==NativeControlType::ControlChange) { if(!native["cc"]) invalid("native CC control needs cc"); control.address=midi(native,"cc"); }
     if(control.type==NativeControlType::NoteOn) { if(!native["note"]) invalid("native note control needs note"); control.address=midi(native,"note"); }
+    control.value=midi(native,"value");
     for(const auto& existing:result.nativeControls) if(existing.channel==control.channel&&existing.type==control.type&&existing.address==control.address&&(existing.source<0||control.source<0||existing.source==control.source)) invalid("duplicate native runtime control");
     result.nativeControls.push_back(control);
   }
