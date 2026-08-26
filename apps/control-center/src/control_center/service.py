@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from typing import Callable, Sequence
 
@@ -92,6 +93,57 @@ class ControlCenter:
         return CommandResult(command, completed.returncode, completed.stdout, completed.stderr)
 
     @staticmethod
+    def sampler_command(action: str, run_directory: Path, *, note_map: Path | None = None,
+                        confirm_capture: bool = False) -> tuple[str, ...]:
+        """Build a capture-campaign command from conventional run artefacts.
+
+        This keeps the GUI workflow explicit.  In particular, capture cannot be
+        started by a status refresh or a plan-generation action.
+        """
+        session = run_directory / "capture-session.json"
+        raw = run_directory / "raw-wav"
+        library = run_directory / "library.json"
+        reports = run_directory / "reports"
+        identifier = run_directory.name
+        campaign_path = run_directory / "campaign.json"
+        if campaign_path.is_file():
+            try:
+                declared_id = json.loads(campaign_path.read_text(encoding="utf-8")).get("id")
+                if isinstance(declared_id, str) and declared_id:
+                    identifier = declared_id
+            except (OSError, json.JSONDecodeError):
+                pass
+        command = (sys.executable, "-m", "drum_sampler.cli")
+        if action == "capture":
+            if not confirm_capture:
+                raise ValueError("capture requires explicit confirmation")
+            return (*command, "capture", "--session", str(session), "--raw-directory", str(raw),
+                    "--library-output", str(library), "--id", identifier, "--source", "sd3",
+                    "--license", "SD3 capture for personal kit development", "--confirm-capture")
+        if action == "audit-quality":
+            return (*command, "audit-quality", "--library", str(library), "--audio-root", str(raw),
+                    "--output", str(reports / "quality.json"))
+        if action == "export-drumgizmo":
+            if note_map is None:
+                raise ValueError("DrumGizmo export requires a compiled note map")
+            return (*command, "export-drumgizmo", "--library", str(library), "--audio-root", str(raw),
+                    "--output-directory", str(run_directory / "drumgizmo-kit"), "--note-map", str(note_map),
+                    "--report", str(reports / "drumgizmo-export.json"))
+        if action == "verify-drumgizmo":
+            return (*command, "verify-drumgizmo", "--kit-directory", str(run_directory / "drumgizmo-kit"),
+                    "--report", str(reports / "drumgizmo-verify.json"))
+        raise ValueError(f"unsupported sampler action: {action}")
+
+    def run_sampler(self, action: str, run_directory: Path, *, note_map: Path | None = None,
+                    confirm_capture: bool = False, dry_run: bool = False) -> CommandResult:
+        command = self.sampler_command(action, run_directory, note_map=note_map,
+                                       confirm_capture=confirm_capture)
+        if dry_run:
+            return CommandResult(command, None, dry_run=True)
+        completed = self._runner(command, **_offline_run_options())
+        return CommandResult(command, completed.returncode, completed.stdout, completed.stderr)
+
+    @staticmethod
     def ddti_command(action: str, dump: Path, *, preset: Path | None = None,
                      output: Path | None = None, name: str | None = None) -> tuple[str, ...]:
         """Build a strictly offline DDTi configuration command.
@@ -126,7 +178,7 @@ class ControlCenter:
         return CommandResult(command, completed.returncode, completed.stdout, completed.stderr)
 
     def launch_command(self, target: str, *, ddrum4ui: Path | None = None,
-                       converter: Path | None = None, runtime_profile: Path | None = None,
+                       converter: Path | None = None, external: Path | None = None, runtime_profile: Path | None = None,
                        converter_arguments: Sequence[str] = (), renderer_target: str = "sd3") -> tuple[str, ...]:
         if target == "ddti":
             return ("ddti-editor",)
@@ -134,6 +186,10 @@ class ControlCenter:
             if ddrum4ui is None:
                 raise ValueError("ddrum4UI requires an explicit executable path")
             return (str(ddrum4ui),)
+        if target == "external":
+            if external is None:
+                raise ValueError("external application requires an explicit executable path")
+            return (str(external), *converter_arguments)
         if target == "converter":
             if converter is None:
                 raise ValueError("converter requires an explicit executable path")
@@ -145,14 +201,14 @@ class ControlCenter:
         raise ValueError(f"unsupported launcher target: {target}")
 
     def launch(self, target: str, *, ddrum4ui: Path | None = None, converter: Path | None = None,
-               runtime_profile: Path | None = None, converter_arguments: Sequence[str] = (),
+               external: Path | None = None, runtime_profile: Path | None = None, converter_arguments: Sequence[str] = (),
                renderer_target: str = "sd3", dry_run: bool = False) -> CommandResult:
-        command = self.launch_command(target, ddrum4ui=ddrum4ui, converter=converter,
+        command = self.launch_command(target, ddrum4ui=ddrum4ui, converter=converter, external=external,
                                       runtime_profile=runtime_profile,
                                       converter_arguments=converter_arguments, renderer_target=renderer_target)
         if dry_run:
             return CommandResult(command, None, dry_run=True)
-        key = self._launch_key(target, converter, runtime_profile)
+        key = self._launch_key(target, converter or external, runtime_profile)
         existing = self._owned_processes.get(key)
         if existing is not None and getattr(existing, "poll", lambda: 0)() is None:
             raise RuntimeError(f"{target} is already running from this Control Center")
@@ -188,9 +244,30 @@ class ControlCenter:
         self._launcher(command)
         return CommandResult(command, 0)
 
+    def launched_processes(self) -> tuple[tuple[str, bool], ...]:
+        """Return only applications started by this Control Center instance."""
+        return tuple((key, getattr(process, "poll", lambda: 0)() is None)
+                     for key, process in sorted(self._owned_processes.items()))
+
+    def stop_launched_processes(self) -> tuple[str, ...]:
+        """Request termination of applications this instance started.
+
+        It never targets a process discovered elsewhere on the machine.
+        """
+        stopped: list[str] = []
+        for key, process in tuple(self._owned_processes.items()):
+            if getattr(process, "poll", lambda: 0)() is None:
+                terminate = getattr(process, "terminate", None)
+                if terminate is not None:
+                    terminate()
+                    stopped.append(key)
+        return tuple(stopped)
+
     @staticmethod
-    def _launch_key(target: str, converter: Path | None, runtime_profile: Path | None) -> str:
-        return f"{target}:{converter}:{runtime_profile}" if target == "converter" else target
+    def _launch_key(target: str, executable: Path | None, runtime_profile: Path | None) -> str:
+        if target in {"converter", "external"}:
+            return f"{target}:{executable}:{runtime_profile}"
+        return target
 
     def converter_lock_path(self, converter: Path, runtime_profile: Path) -> Path:
         """Stable cross-process lease path for one converter/profile pairing."""

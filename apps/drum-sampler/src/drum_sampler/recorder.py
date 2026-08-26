@@ -19,6 +19,11 @@ def capture_pending(session: CaptureSessionPlan, raw_directory: Path, *, capture
     captured: list[Path] = []
     pending = session.incomplete_takes(raw_directory)
     for index, take in enumerate(pending):
+        print(
+            f"[{index + 1}/{len(pending)}] {take.raw_filename()} "
+            f"(note {take.request.note}, velocity {take.velocity})",
+            flush=True,
+        )
         output = raw_directory / take.raw_filename()
         path = capture(
             midi_port=session.midi_output,

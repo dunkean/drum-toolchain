@@ -1,0 +1,922 @@
+{
+  "audio_input": "loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)",
+  "channels": [
+    "left",
+    "right"
+  ],
+  "cooldown_ms": 350,
+  "gate_ms": 10500,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 200,
+  "requests": [
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "kick_metalcore",
+      "note": 24,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "kick_dnb",
+      "note": 26,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "kick_industrial",
+      "note": 27,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "kick_trap",
+      "note": 28,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "kick_sub",
+      "note": 29,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "center",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_metalcore",
+      "note": 32,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "mid",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_metalcore",
+      "note": 33,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_metalcore",
+      "note": 34,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "rimshot",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_metalcore",
+      "note": 35,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "cross_stick",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_metalcore",
+      "note": 36,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_low_trap",
+      "note": 47,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_trap",
+      "note": 48,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "main",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "clap",
+      "note": 50,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "click",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "electronic_rim",
+      "note": 51,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "tom_1",
+      "note": 56,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "tom_2",
+      "note": 57,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "tom_3",
+      "note": 58,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "head",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "tom_4",
+      "note": 59,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_closed",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          127
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_closed",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          127
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_tight",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          110
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_tight",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          110
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_loose",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          92
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_loose",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          92
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_quarter_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          72
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_quarter_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          72
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_half_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          54
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_half_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          54
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_three_quarter_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          30
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_three_quarter_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          30
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "tip_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          0
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 64,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge_open",
+      "channel": 10,
+      "controllers": [
+        [
+          4,
+          0
+        ]
+      ],
+      "instrument": "hi_hat",
+      "note": 65,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "pedal_close",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 66,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "pedal_splash",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "hi_hat",
+      "note": 67,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "closed",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "electronic_hi_hat",
+      "note": 68,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "open",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "electronic_hi_hat",
+      "note": 69,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_1",
+      "note": 72,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_2",
+      "note": 74,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_ride",
+      "note": 76,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "hit",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "splash",
+      "note": 77,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "china_1",
+      "note": 79,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "china_2",
+      "note": 81,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "ride",
+      "note": 83,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "bell",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "ride",
+      "note": 84,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "hit",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "stack",
+      "note": 85,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "hit",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "metallic_hit",
+      "note": 88,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "hit",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "glitch_noise",
+      "note": 89,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "low",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "electronic_tom",
+      "note": 90,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "hit",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "cowbell",
+      "note": 92,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    },
+    {
+      "articulation": "hit",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "woodblock",
+      "note": 93,
+      "repetitions": 2,
+      "velocities": [
+        24,
+        44,
+        64,
+        84,
+        104,
+        124
+      ]
+    }
+  ],
+  "sample_rate": 48000,
+  "schema_version": 1,
+  "tail_ms": 0
+}

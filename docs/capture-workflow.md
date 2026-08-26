@@ -1,5 +1,14 @@
 # Capture Workflow
 
+## Master resolution
+
+Capture the master library at **48 kHz, stereo, 32-bit float WAV**. This is the
+unchanged source for all later targets; it is not a DDrum4 export. The audio
+interface determines the real converter resolution, while the float WAV avoids
+an additional 16-bit quantisation step in the capture tool. Generate compact
+DDrum4 and initial DrumGizmo files as separate, reproducible derivatives from
+these masters.
+
 ## Observed audio devices — 2026-08-09
 
 The UMC404HD exposes physical inputs `IN 1-2`, `IN 3-4`, and `IN 1-4`, plus
@@ -40,10 +49,12 @@ transport proof but failed the listening test.
 
 Use the two versioned sessions under `profiles/capture/` in this order:
 
-1. `sd3-djentle-beast-long-tail-proof.json` records one crash hit at velocity
-   110 for ten seconds. Confirm the physical SD3 OUT 1/2 -> UMC IN 3/4 patch,
-   waveform onset, absence of clipping, and an audible decay past four
-   seconds before continuing.
+1. Create a fresh proof session using
+   `loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)`. Set SD3's shared Windows
+   audio output to UMC `OUT 3-4`; do not patch an interface output to an
+   interface input. Record one crash hit at velocity 110 for ten seconds and
+   confirm waveform onset, no clipping, digital silence before the hit, and an
+   audible decay past four seconds before continuing.
 2. `sd3-djentle-beast-long-tail-cymbals.json` captures the two primary
    crashes at five mandatory velocities (24, 56, 88, 110, 127), three round
    robins each. It then captures the ride and secondary cymbals at reduced
@@ -52,12 +63,13 @@ Use the two versioned sessions under `profiles/capture/` in this order:
    the compact cymbal profile. Measure its real encoded block count, transfer
    it to an unused sound ID, and record a module render before accepting it.
 
-The saved device indices are currently valid only for this PC: `out_WORLDE 2`
-and WASAPI input `33` (UMC IN 3-4). The shared WASAPI endpoint currently runs
-at 48 kHz. SD3 must also use a shared Windows driver during capture: opening
-the UMC input through PortAudio while SD3 owns `UMC ASIO Driver` makes the SD3
-audio engine inactive. Restore ASIO after sampling for the low-latency playing
-profile. Re-list devices immediately before capture if the topology changes.
+The saved device indices and virtual-port suffixes are historical evidence,
+not configuration. Re-list them immediately before capture. For the digital
+route, the current capture name is exactly
+`loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)` and the current MIDI output is
+`out_WORLDE`. The shared WASAPI endpoint runs at 48 kHz. SD3 must use a shared
+Windows driver during capture; restore ASIO afterwards for the low-latency
+playing profile.
 
 ### First long-tail diagnostic — 2026-08-10
 

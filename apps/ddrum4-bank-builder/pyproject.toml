@@ -13,8 +13,14 @@ dependencies = [
   "python-rtmidi>=1.5,<2",
 ]
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.8,<7"]
+
 [project.scripts]
 ddrum4-bank-builder = "ddrum4_bank.cli:main"
+
+[project.gui-scripts]
+ddrum4-capture-auditioner = "ddrum4_bank.auditioner:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

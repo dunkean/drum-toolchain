@@ -27,6 +27,8 @@ class QualityProfile:
     max_duration_seconds: float | None = None
     force_mono: bool = False
     trim_tail: bool = True
+    onset_margin_ms: float = 3.0
+    tail_margin_ms: float | None = None
 
 
 def _sounddevice():
@@ -47,7 +49,7 @@ def load_quality_profile(path: Path, name: str) -> QualityProfile:
     values = profiles.get(name)
     if not isinstance(values, dict):
         raise ValueError(f"quality profile {name!r} not found in {path}")
-    keys = {"target_sample_rate", "trim_threshold_db", "normalize_dbfs", "fade_in_ms", "fade_out_ms", "highpass_hz", "lowpass_hz", "max_duration_seconds", "force_mono", "trim_tail"}
+    keys = {"target_sample_rate", "trim_threshold_db", "normalize_dbfs", "fade_in_ms", "fade_out_ms", "highpass_hz", "lowpass_hz", "max_duration_seconds", "force_mono", "trim_tail", "onset_margin_ms", "tail_margin_ms"}
     unknown = set(values) - keys
     if unknown:
         raise ValueError(f"unknown quality profile fields: {sorted(unknown)}")
@@ -78,7 +80,8 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
     """Record a VST/audio loopback while issuing exactly one MIDI note.
 
     No input/output routing is guessed: callers choose both the MIDI output and
-    audio capture device.  The generated WAV is an immutable raw take.
+    audio capture device. The generated WAV is an immutable 32-bit-float raw
+    take, so later target preparation never starts from a 16-bit reduction.
     """
     if not 0 <= note <= 127 or not 1 <= velocity <= 127 or not 1 <= channel <= 16:
         raise ValueError("note must be 0..127, velocity 1..127 and channel 1..16")
@@ -103,7 +106,7 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
     time.sleep(preroll)
     _emit_note(midi_port, note, velocity, channel, controllers, gate, duration)
     sd.wait()
-    wavfile.write(output, sample_rate, _float_to_pcm(recording))
+    _write_raw_master(output, sample_rate, recording)
     return output
 
 
@@ -151,8 +154,17 @@ def _capture_loopback(
     worker.join()
     if trigger_error:
         raise RuntimeError("MIDI trigger failed during loopback capture") from trigger_error[0]
-    wavfile.write(output, sample_rate, _float_to_pcm(recording))
+    _write_raw_master(output, sample_rate, recording)
     return output
+
+
+def _write_raw_master(output: Path, sample_rate: int, samples: np.ndarray) -> None:
+    """Write an unprocessed capture in a float32 WAV container.
+
+    This preserves the precision supplied by the capture backend. The actual
+    converter resolution remains determined by the connected interface.
+    """
+    wavfile.write(output, sample_rate, np.asarray(samples, dtype=np.float32))
 
 
 def _float_to_pcm(samples: np.ndarray) -> np.ndarray:
@@ -186,7 +198,9 @@ def analyze_wav(path: Path) -> dict[str, int | float | bool | str]:
     }
 
 
-def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str, int | float]:
+def process_wav(
+    source: Path, output: Path, profile: QualityProfile, *, gain_db: float | None = None,
+) -> dict[str, int | float]:
     """Apply transparent preparation effects and write a new WAV, never source."""
     rate, raw = wavfile.read(source)
     samples = _to_float(raw)
@@ -197,9 +211,15 @@ def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str
     active = np.flatnonzero(peak >= threshold)
     if active.size:
         # Preserve a tiny attack margin; cue-marker decisions remain manual.
-        margin = round(rate * 0.003)
-        start = max(0, active[0] - margin)
-        end = min(len(samples), active[-1] + margin + 1) if profile.trim_tail else len(samples)
+        if profile.onset_margin_ms < 0:
+            raise ValueError("onset_margin_ms cannot be negative")
+        onset_margin = round(rate * profile.onset_margin_ms / 1000.0)
+        tail_margin_ms = profile.onset_margin_ms if profile.tail_margin_ms is None else profile.tail_margin_ms
+        if tail_margin_ms < 0:
+            raise ValueError("tail_margin_ms cannot be negative")
+        tail_margin = round(rate * tail_margin_ms / 1000.0)
+        start = max(0, active[0] - onset_margin)
+        end = min(len(samples), active[-1] + tail_margin + 1) if profile.trim_tail else len(samples)
         samples = samples[start:end]
     for kind, cutoff in (("highpass", profile.highpass_hz), ("lowpass", profile.lowpass_hz)):
         if cutoff is not None:
@@ -208,13 +228,27 @@ def process_wav(source: Path, output: Path, profile: QualityProfile) -> dict[str
             samples = sosfiltfilt(butter(4, cutoff, btype="highpass" if kind == "highpass" else "lowpass", fs=rate, output="sos"), samples, axis=0)
     peak_value = float(np.max(np.abs(samples))) if samples.size else 0.0
     if peak_value:
-        samples *= (10 ** (profile.normalize_dbfs / 20.0)) / peak_value
+        if gain_db is None:
+            samples *= (10 ** (profile.normalize_dbfs / 20.0)) / peak_value
+        else:
+            samples *= 10 ** (gain_db / 20.0)
     if profile.target_sample_rate != rate:
         divisor = gcd(rate, profile.target_sample_rate)
         samples = resample_poly(samples, profile.target_sample_rate // divisor, rate // divisor, axis=0)
         rate = profile.target_sample_rate
     if profile.force_mono and samples.shape[1] > 1:
         samples = np.mean(samples, axis=1, keepdims=True)
+    # Guarantee the requested silent lead-in on the final signal. Resampling,
+    # filtering, gain and mono conversion can all move the first detectable
+    # sample, so measuring the input before those operations is insufficient.
+    if samples.size:
+        final_peak = np.max(np.abs(samples), axis=1)
+        final_active = np.flatnonzero(final_peak >= threshold)
+        if final_active.size:
+            onset_margin = round(rate * profile.onset_margin_ms / 1000.0)
+            missing_preroll = max(0, onset_margin - int(final_active[0]))
+            if missing_preroll:
+                samples = np.pad(samples, ((missing_preroll, 0), (0, 0)))
     if profile.max_duration_seconds is not None:
         if profile.max_duration_seconds <= 0:
             raise ValueError("max_duration_seconds must be positive when supplied")

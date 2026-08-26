@@ -97,6 +97,9 @@ def _domain_route_records(project: Any) -> list[dict[str, Any]]:
     from drum_domain.rig_project import logical_route_variants
 
     records: list[dict[str, Any]] = []
+    physical_decoder_counts: dict[str, int] = {}
+    for decoder in project.source_decoders:
+        physical_decoder_counts[decoder.physical] = physical_decoder_counts.get(decoder.physical, 0) + 1
     for scene, mappings in project.logical_routes.items():
         for decoder in project.source_decoders:
             source_route = mappings[decoder.physical]
@@ -108,9 +111,15 @@ def _domain_route_records(project: Any) -> list[dict[str, Any]]:
                 suffix = "default" if not variant.predicates else "when-" + "-".join(
                     f"{name}-{value}" for name, value in sorted(variant.predicates.items()))
                 sound = variant.logical_target
+                # Keep historical IDs for a single decoder. A physical pad
+                # may also be decoded by several modules, in which case its
+                # source becomes part of the identity to prevent a collision.
+                route_prefix = f"{scene}.{decoder.physical}"
+                if physical_decoder_counts[decoder.physical] > 1:
+                    route_prefix = f"{scene}.{decoder.source}.{decoder.physical}"
                 records.append({
-                    "id": f"{scene}.{decoder.physical}" if isinstance(source_route, str)
-                    else f"{scene}.{decoder.physical}.{suffix}-{index}", "scene": scene,
+                    "id": route_prefix if isinstance(source_route, str)
+                    else f"{route_prefix}.{suffix}-{index}", "scene": scene,
                     "state": {"scene": scene, "defaults": dict(project.defaults)},
                     "state_predicates": dict(variant.predicates),
                     "source": {"id": decoder.source, "endpoint": project.sources[decoder.source].endpoint,

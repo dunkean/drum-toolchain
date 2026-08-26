@@ -1,0 +1,77 @@
+# Offline-only, measured-address-free demonstration of the complete chain.
+# These transport numbers are synthetic and must never be copied to hardware.
+schema_version: 1
+kind: rig-project
+project: complete-chain-simulator
+rig: profiles/physical/greg-hybrid-kit.yaml
+sources:
+  edrumin: {endpoint: SIM_eDRUMin_USB, channel: 3, primary: usb, connection_profile: LIVE_USB_PRIMARY}
+  ddti: {endpoint: SIM_DDTi_USB, channel: 2, primary: usb, connection_profile: LIVE_USB_PRIMARY}
+  ddrum4: {endpoint: SIM_DDrum4_DIN, channel: 1, primary: din, connection_profile: DIN_ONLY}
+connection_profiles:
+  LIVE_USB_PRIMARY: {deduplicate_din_copies: true, usb_sources: true, din_sources: true}
+  DIN_ONLY: {deduplicate_din_copies: false, usb_sources: false, din_sources: true}
+source_decoders:
+  - match: {source: edrumin, type: note, note: 38}
+    emit: {physical: snare.head, expressions: [velocity]}
+  - match: {source: edrumin, type: note, note: 54}
+    emit: {physical: stack.hit, expressions: [velocity]}
+  - match: {source: edrumin, type: note, note: 36}
+    emit: {physical: kick.hit, expressions: [velocity]}
+  - match: {source: ddti, type: note, note: 38}
+    emit: {physical: snare.head, expressions: [velocity]}
+  - match: {source: ddti, type: note, note: 54}
+    emit: {physical: stack.hit, expressions: [velocity]}
+  - match: {source: ddti, type: note, note: 36}
+    emit: {physical: kick.hit, expressions: [velocity]}
+  - match: {source: ddrum4, type: note, note: 40}
+    emit: {physical: snare.head, expressions: [velocity]}
+  - match: {source: ddrum4, type: note, note: 85}
+    emit: {physical: stack.hit, expressions: [velocity]}
+  - match: {source: ddrum4, type: note, note: 36}
+    emit: {physical: kick.hit, expressions: [velocity]}
+physical_events: [snare.head, stack.hit, kick.hit]
+state:
+  scenes: [metalcore, dnb]
+  variables: [vp1_snare]
+  defaults: {scene: metalcore, vp1_snare: 0}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+  vp1_snare: {channels: [14, 15], type: cc, cc: 20}
+logical_routes:
+  metalcore:
+    snare.head:
+      - logical_target: snare.electronic
+        when: {vp1_snare: 1}
+      - logical_target: snare.metalcore
+    stack.hit: perc.acoustic_stack
+    kick.hit: kick.acoustic
+  dnb:
+    snare.head: snare.electronic
+    stack.hit: perc.glitch
+    kick.hit: kick.electronic
+renderers:
+  ddrum4:
+    snare.metalcore: {note: 38}
+    snare.electronic: {note: 40}
+    perc.acoustic_stack: {note: 55}
+    perc.glitch: {note: 86}
+    kick.acoustic: {note: 36}
+    kick.electronic: {note: 42}
+  sd3:
+    snare.metalcore: {note: 38, channel: 10}
+    snare.electronic: {note: 40, channel: 10}
+    perc.acoustic_stack: {note: 55, channel: 10}
+    perc.glitch: {note: 89, channel: 10}
+    kick.acoustic: {note: 36, channel: 10}
+    kick.electronic: {note: 42, channel: 10}
+  drumgizmo:
+    snare.metalcore: {note: 38, channel: 10, instrument: snare, articulation: metalcore}
+    snare.electronic: {note: 40, channel: 10, instrument: snare, articulation: electronic}
+    perc.acoustic_stack: {note: 55, channel: 10, instrument: stack, articulation: hit}
+    perc.glitch: {note: 89, channel: 10, instrument: percussion, articulation: glitch}
+    kick.acoustic: {note: 36, channel: 10, instrument: kick, articulation: acoustic}
+    kick.electronic: {note: 42, channel: 10, instrument: kick, articulation: electronic}
+native_control_map:
+  ddrum_program: {decode_to: scene, source: ddrum4, channel: 1, type: program_change}
+policies: {echo: measured_only, unknown_message: drop_and_count}

@@ -1,0 +1,23 @@
+{
+  "audio_input": "loopback:OUT 1-2 (BEHRINGER UMC 404HD 192k)",
+  "channels": ["left", "right"],
+  "cooldown_ms": 350,
+  "gate_ms": 100,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 200,
+  "requests": [
+    {
+      "articulation": "bow",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "crash_1",
+      "note": 72,
+      "repetitions": 1,
+      "velocities": [111]
+    }
+  ],
+  "sample_rate": 48000,
+  "schema_version": 1,
+  "tail_ms": 5000
+}

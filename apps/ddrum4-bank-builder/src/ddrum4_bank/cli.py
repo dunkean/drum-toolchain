@@ -18,6 +18,7 @@ from .compiler import compile_nested_file, write_compilation
 from .actual_bank import report_actual_bank
 from .hardware import transfer_one_sound
 from .render_compare import compare_renders
+from .capture_package import create_capture_package, resolve_capture_package
 
 
 def _backend(value: str | None) -> Ddrum4EditBackend:
@@ -139,6 +140,22 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--source", required=True, type=Path)
     render.add_argument("--module", required=True, type=Path)
     render.add_argument("--output", required=True, type=Path)
+    capture_package = subparsers.add_parser(
+        "package-capture",
+        help="create an offline DDrum4 candidate package, audition playlists, and routing simulation from a complete capture",
+    )
+    capture_package.add_argument("--library", required=True, type=Path)
+    capture_package.add_argument("--audio-root", required=True, type=Path)
+    capture_package.add_argument("--output-directory", required=True, type=Path)
+    simulate_capture = subparsers.add_parser(
+        "simulate-capture-package",
+        help="resolve one captured source and its DDrum4 return-note candidate; never opens audio or MIDI",
+    )
+    simulate_capture.add_argument("package", type=Path)
+    simulate_capture.add_argument("--instrument", required=True)
+    simulate_capture.add_argument("--articulation", required=True)
+    simulate_capture.add_argument("--velocity", required=True, type=int)
+    simulate_capture.add_argument("--round-robin", type=int)
     return parser
 
 
@@ -208,6 +225,20 @@ def main(argv: list[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(comparison.to_document(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"wrote {args.output}; onset delta {comparison.onset_delta_ms:.2f} ms")
+        return 0
+    if args.command == "package-capture":
+        document = create_capture_package(
+            library_path=args.library, audio_root=args.audio_root,
+            output_directory=args.output_directory,
+        )
+        print(json.dumps(document, indent=2, sort_keys=True))
+        return 0
+    if args.command == "simulate-capture-package":
+        document = resolve_capture_package(
+            args.package, instrument=args.instrument, articulation=args.articulation,
+            velocity=args.velocity, round_robin=args.round_robin,
+        )
+        print(json.dumps(document, indent=2, sort_keys=True))
         return 0
     if args.command == "inspect-settings-backup":
         print(json.dumps(inspect_settings_backup(args.backup).to_document(), indent=2, sort_keys=True))

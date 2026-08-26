@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .audio import analyze_wav
+import numpy as np
+from scipy.io import wavfile
+
+from .audio import _to_float, analyze_wav
 from .library import SampleLibrary
 
 
@@ -32,7 +35,17 @@ def assess_wav(path: Path, policy: CaptureQualityPolicy = CaptureQualityPolicy()
     findings: list[str] = []
     if duration_ms < policy.minimum_duration_ms:
         findings.append("too_short")
-    if float(facts["rms_dbfs"]) <= policy.silence_rms_dbfs:
+    # A retained long recording window deliberately makes the full-file RMS
+    # very low for short one-shots. Test whether any audio is present above
+    # the configured floor instead of rejecting a real hit because its tail
+    # is mostly digital silence.
+    _, raw = wavfile.read(path)
+    samples = _to_float(raw)
+    if samples.ndim == 1:
+        samples = samples[:, None]
+    activity_floor = 10 ** (policy.silence_rms_dbfs / 20.0)
+    active = np.max(np.abs(samples), axis=1) >= activity_floor
+    if not np.any(active):
         findings.append("silent")
     if policy.reject_clipped and bool(facts["clipped"]):
         findings.append("clipped")

@@ -418,6 +418,25 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
     def test_backend_block_parser_is_retained(self) -> None:
         self.assertEqual(encoded_block_count("Total Blocks Count : 00 0C (12)"), 12)
 
+    def test_backend_reads_exact_per_sample_block_allocations(self) -> None:
+        backend = Ddrum4EditBackend(Path("fixture-ddrum4edit.exe"))
+        details = (
+            "Sample (1) Start Block : 00 00 (0) Blocks Count : 00 03 (3) "
+            "Sample (2) Start Block : 00 03 (3) Blocks Count : 00 05 (5)"
+        )
+        with patch.object(Ddrum4EditBackend, "inspect", return_value=details):
+            self.assertEqual(backend.sample_block_counts(Path("fixture.mid")), (3, 5))
+
+    def test_backend_accepts_partial_inspection_after_valid_sound_header(self) -> None:
+        backend = Ddrum4EditBackend(Path("fixture-ddrum4edit.exe"))
+        partial = subprocess.CompletedProcess(
+            [], 217,
+            stdout="Total Blocks Count : 00 0C (12)\nPacket (12)",
+            stderr="EInvalidOp: Invalid floating point operation",
+        )
+        with patch("ddrum4_bank.ddrum4edit_backend.run_edit", return_value=partial):
+            self.assertEqual(backend.encoded_blocks(Path("fixture.mid")), 12)
+
     def test_backend_reads_internal_group_and_number_sound_id(self) -> None:
         backend = Ddrum4EditBackend(Path("fixture-ddrum4edit.exe"))
         with patch.object(Ddrum4EditBackend, "inspect", return_value="Sound Name : 52 49 (RIM_999) Total Blocks Count"):
@@ -444,6 +463,28 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             backend = Ddrum4EditBackend(Path("ddrum4edit.exe"))
             with self.assertRaisesRegex(RuntimeError, "configuration declares output"):
                 backend.build(config, root / "other.mid")
+
+    def test_backend_builds_with_dd4_precision_instead_of_float_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "result.mid"
+            config = root / "fixture.cfg"
+            config.write_text(
+                f"-Begin-Sound-File-Out-\n{output}\n-End-Sound-File-Out-\n",
+                encoding="utf-8",
+            )
+            backend = Ddrum4EditBackend(Path("ddrum4edit.exe"))
+            calls: list[list[str]] = []
+
+            def run(arguments: list[str], *, cwd: Path | None = None) -> str:
+                calls.append(arguments)
+                if "-c" in arguments:
+                    output.write_bytes(b"MThd")
+                return "Total Blocks Count : 00 01 (1)"
+
+            with patch.object(Ddrum4EditBackend, "_run", side_effect=run):
+                backend.build(config, output)
+            self.assertEqual(calls[0][:2], ["--encpre=dd4", "-c"])
 
     def test_snare_config_materializes_velocity_crossfade_without_source_paths(self) -> None:
         self.assertEqual(len(snare_velocity_layers(7)), 7)

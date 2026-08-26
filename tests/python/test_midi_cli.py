@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,6 +13,11 @@ from midi_lab.live_session import LiveSessionError, preview_drumgizmo_session, s
 
 
 class MidiCliTests(unittest.TestCase):
+    @staticmethod
+    def _fixture_executable() -> Path:
+        """Return an executable usable by mocked live-session process tests."""
+        return Path(sys.executable).resolve()
+
     @staticmethod
     def _write_valid_drumgizmo_kit(kit: Path) -> None:
         (kit / "instruments").mkdir(); (kit / "samples").mkdir()
@@ -50,16 +56,17 @@ class MidiCliTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            executable = self._fixture_executable()
             runtime = root / "runtime-profile.yaml"; runtime.write_text("format: rig-runtime-profile/v1\n", encoding="utf-8")
             kit = root / "kit"; kit.mkdir()
             self._write_valid_drumgizmo_kit(kit)
             config = root / "session.json"
             config.write_text(json.dumps({
                 "schema_version": 1, "renderer": "drumgizmo",
-                "converter": {"path": "/bin/true", "arguments": ["--headless"]},
+                "converter": {"path": str(executable), "arguments": ["--headless"]},
                 "runtime_profile": {"path": str(runtime)},
-                "midi_bridge": {"path": "/bin/true"},
-                "drumgizmo": {"path": "/bin/true", "kit_directory": str(kit)},
+                "midi_bridge": {"path": str(executable)},
+                "drumgizmo": {"path": str(executable), "kit_directory": str(kit)},
                 "jack_connections": [{"source": "converter:midi_out", "destination": "drumgizmo:midi_in"}],
             }), encoding="utf-8")
             state_path = root / "state.json"
@@ -78,9 +85,9 @@ class MidiCliTests(unittest.TestCase):
                 return Process()
 
             state = start_drumgizmo_session(config, state_path, confirm_start=True, runner=runner, popen=popen)
-            self.assertEqual(commands[0], (str(Path("/bin/true").resolve()), "--version"))
+            self.assertEqual(commands[0], (str(executable), "--version"))
             self.assertEqual(commands[1], ("jack_connect", "converter:midi_out", "drumgizmo:midi_in"))
-            self.assertEqual(calls[0][0], (str(Path("/bin/true").resolve()), "-e"))
+            self.assertEqual(calls[0][0], (str(executable), "-e"))
             self.assertIn("-I", calls[1][0])
             self.assertIn(f"midimap={(kit / 'midimap.xml').resolve()}", calls[1][0])
             self.assertEqual(calls[2][1]["env"]["DDRUM4_RENDERER_TARGET"], "drumgizmo")
@@ -104,10 +111,10 @@ class MidiCliTests(unittest.TestCase):
                 return 0
 
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); runtime = root / "runtime.yaml"; runtime.write_text("ready\n", encoding="utf-8")
+            root = Path(temporary); executable = self._fixture_executable(); runtime = root / "runtime.yaml"; runtime.write_text("ready\n", encoding="utf-8")
             kit = root / "kit"; kit.mkdir(); self._write_valid_drumgizmo_kit(kit)
             config = root / "session.json"
-            config.write_text(json.dumps({"schema_version": 1, "renderer": "drumgizmo", "converter": {"path": "/bin/true"}, "runtime_profile": {"path": str(runtime)}, "midi_bridge": {"path": "/bin/true"}, "drumgizmo": {"path": "/bin/true", "kit_directory": str(kit)}, "jack_connections": [{"source": "a", "destination": "b"}]}), encoding="utf-8")
+            config.write_text(json.dumps({"schema_version": 1, "renderer": "drumgizmo", "converter": {"path": str(executable)}, "runtime_profile": {"path": str(runtime)}, "midi_bridge": {"path": str(executable)}, "drumgizmo": {"path": str(executable), "kit_directory": str(kit)}, "jack_connections": [{"source": "a", "destination": "b"}]}), encoding="utf-8")
             processes = [Process(1), Process(2), Process(3)]
             created: list[Process] = []
 
@@ -124,13 +131,13 @@ class MidiCliTests(unittest.TestCase):
 
     def test_drumgizmo_session_dry_run_has_no_process_side_effect(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); runtime = root / "runtime.yaml"; runtime.write_text("ready\n", encoding="utf-8")
+            root = Path(temporary); executable = self._fixture_executable(); runtime = root / "runtime.yaml"; runtime.write_text("ready\n", encoding="utf-8")
             kit = root / "kit"; kit.mkdir(); self._write_valid_drumgizmo_kit(kit)
             config = root / "session.json"
             config.write_text(json.dumps({
-                "schema_version": 1, "renderer": "drumgizmo", "converter": {"path": "/bin/true"},
-                "runtime_profile": {"path": str(runtime)}, "midi_bridge": {"path": "/bin/true"},
-                "drumgizmo": {"path": "/bin/true", "kit_directory": str(kit)},
+                "schema_version": 1, "renderer": "drumgizmo", "converter": {"path": str(executable)},
+                "runtime_profile": {"path": str(runtime)}, "midi_bridge": {"path": str(executable)},
+                "drumgizmo": {"path": str(executable), "kit_directory": str(kit)},
                 "jack_connections": [{"source": "a", "destination": "b"}],
             }), encoding="utf-8")
             state_path = root / "state.json"
@@ -138,7 +145,7 @@ class MidiCliTests(unittest.TestCase):
             preview = preview_drumgizmo_session(config, state_path)
 
             self.assertEqual(preview["hardware_io"], "disabled")
-            self.assertEqual(preview["commands"]["a2jmidid"], [str(Path("/bin/true").resolve()), "-e"])
+            self.assertEqual(preview["commands"]["a2jmidid"], [str(executable), "-e"])
             self.assertFalse(state_path.exists())
 
 

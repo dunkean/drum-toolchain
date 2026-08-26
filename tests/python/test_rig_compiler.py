@@ -95,6 +95,25 @@ class RigCompilerTests(unittest.TestCase):
                 compile_project(project, output)
             compile_project(project, output, replace=True)
 
+    def test_compiler_keeps_distinct_records_when_two_modules_decode_one_pad(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["sources"]["ddti"] = {"endpoint": "ddti", "channel": 2, "primary": "usb", "connection_profile": "LIVE"}
+            document["source_decoders"].append({
+                "match": {"source": "ddti", "type": "note", "note": 38},
+                "emit": {"physical": "snare.head", "expressions": ["velocity"]},
+            })
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+            result = validate_project(project)
+
+            ids = [record["id"] for record in result.artifacts["runtime-profile.yaml"]["records"]]
+            self.assertEqual(len(ids), len(set(ids)))
+            self.assertIn("metal.brain.snare.head", ids)
+            self.assertIn("metal.ddti.snare.head", ids)
+
     def test_validation_rejects_domain_decoder_conflict_before_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

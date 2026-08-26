@@ -1,0 +1,34 @@
+{
+  "audio_input": "loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)",
+  "channels": [
+    "left",
+    "right"
+  ],
+  "cooldown_ms": 350,
+  "gate_ms": 10500,
+  "kind": "capture-session",
+  "midi_output": "out_WORLDE 2",
+  "preroll_ms": 200,
+  "requests": [
+    {
+      "articulation": "edge",
+      "channel": 10,
+      "controllers": [],
+      "instrument": "snare_metalcore",
+      "note": 33,
+      "repetitions": 3,
+      "velocities": [
+        20,
+        36,
+        52,
+        68,
+        84,
+        104,
+        124
+      ]
+    }
+  ],
+  "sample_rate": 48000,
+  "schema_version": 1,
+  "tail_ms": 0
+}

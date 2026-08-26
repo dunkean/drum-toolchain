@@ -121,6 +121,8 @@ def materialize_sound_config(
     output_sound: Path,
     sample_files: Sequence[str],
     layer_rows: Sequence[str],
+    variation_layers: Sequence[Sequence[bool]] | None = None,
+    variation_sequences: Sequence[Sequence[bool]] | None = None,
 ) -> Path:
     """Create a non-overwriting config for up to ten local WAV/SMP files.
 
@@ -132,15 +134,38 @@ def materialize_sound_config(
         raise FileExistsError(f"refusing to overwrite configuration: {output_config}")
     if not template.is_file():
         raise FileNotFoundError(f"template configuration not found: {template}")
-    if not sound_name or len(sample_files) != len(layer_rows) or not 1 <= len(sample_files) <= 10:
-        raise ValueError("sound name and 1..10 matching sample files/layer rows are required")
+    if not sound_name or not 1 <= len(sample_files) <= 10 or not 1 <= len(layer_rows) <= 10:
+        raise ValueError("sound name, 1..10 sample files and 1..10 Layer rows are required")
     if any(Path(sample).is_absolute() or Path(sample).name != sample for sample in sample_files):
         raise ValueError("sample file entries must be simple relative filenames")
+    for row in layer_rows:
+        values = row.split()
+        try:
+            sample_index = int(values[0], 16)
+        except (IndexError, ValueError) as error:
+            raise ValueError("each Layer row must begin with a hexadecimal sample index") from error
+        if len(values) != 50 or not 0 <= sample_index < len(sample_files):
+            raise ValueError("each Layer row must contain 50 bytes and reference an available sample")
+    variations = _variation_rows(variation_layers, len(layer_rows), "variation_layers")
+    sequences = _variation_rows(variation_sequences, len(layer_rows), "variation_sequences")
     text = template.read_text(encoding="utf-8", errors="replace")
     layers = [f"L{index:02X} {row} " for index, row in enumerate(layer_rows, 1)]
     text = _replace_section(text, "Layers", "\n".join(layers))
-    enabled = " ".join("01" if index < len(layer_rows) else "00" for index in range(10))
-    text = re.sub(r"(?m)^VL1 .*?$", f"VL1 {enabled} (01 = Layer enabled in this variation)", text)
+    if variations is None:
+        variations = ((True,) * len(layer_rows),)
+    if sequences is None:
+        sequences = tuple((False,) * len(layer_rows) for _ in variations)
+    if len(sequences) != len(variations):
+        raise ValueError("variation_layers and variation_sequences must have the same count")
+    for index in range(10):
+        enabled = _format_variation_row(variations[index] if index < len(variations) else (), len(layer_rows))
+        sequence = _format_variation_row(sequences[index] if index < len(sequences) else (), len(layer_rows))
+        text = re.sub(
+            rf"(?m)^VL{index + 1:X} .*?$",
+            f"VL{index + 1:X} {enabled}" + (" (01 = Layer enabled in this variation)" if index == 0 else ""),
+            text,
+        )
+        text = re.sub(rf"(?m)^VS{index + 1:X} .*?$", f"VS{index + 1:X} {sequence}", text)
     files = "\n".join(f"S{index:02X} {sample}" for index, sample in enumerate(sample_files, 1))
     text = _replace_section(text, "Sample-Files", files)
     text = _replace_section(text, "Sample-Name", sound_name)
@@ -148,6 +173,28 @@ def materialize_sound_config(
     output_config.parent.mkdir(parents=True, exist_ok=True)
     output_config.write_text(text, encoding="utf-8", newline="\n")
     return output_config
+
+
+def _variation_rows(
+    values: Sequence[Sequence[bool]] | None, layer_count: int, field: str,
+) -> tuple[tuple[bool, ...], ...] | None:
+    if values is None:
+        return None
+    if not 1 <= len(values) <= 10:
+        raise ValueError(f"{field} must contain 1..10 variations")
+    result: list[tuple[bool, ...]] = []
+    for variation in values:
+        if len(variation) != layer_count or not all(isinstance(value, bool) for value in variation):
+            raise ValueError(f"each {field} row must contain one boolean per layer")
+        result.append(tuple(variation))
+    return tuple(result)
+
+
+def _format_variation_row(values: Sequence[bool], layer_count: int) -> str:
+    return " ".join(
+        "01" if index < layer_count and index < len(values) and values[index] else "00"
+        for index in range(10)
+    )
 
 
 def _replace_section(text: str, name: str, body: str) -> str:

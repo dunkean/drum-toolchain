@@ -12,9 +12,77 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from control_center import ControlCenter
 from control_center.ddrum4_matrix import UNKNOWN, audition_command, load_kit_matrix
+from control_center.simulator import RigSimulator
+from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
+                                     METALCORE_ELECTRONIC_V1_ADDITIONS)
 
 
 class ControlCenterTests(unittest.TestCase):
+    def test_sd3_campaign_writes_resumable_sampler_session_and_reports_file_progress(self) -> None:
+        campaign = Sd3CaptureCampaign(
+            identifier="sd3_test_kit", sd3_preset="Test MegaKit", midi_output="SD3 input",
+            audio_input="UMC404HD input 1-2", channels=("left", "right"),
+            rows=(CaptureRow("snare_main", "rimshot", 40, (40, 80), 2),),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary) / campaign.identifier
+            campaign.write_new(run)
+            session = json.loads((run / "capture-session.json").read_text(encoding="utf-8"))
+            self.assertEqual(session["kind"], "capture-session")
+            self.assertEqual(session["requests"][0]["note"], 40)
+            self.assertEqual(session["requests"][0]["velocities"], [40, 80])
+            self.assertEqual(campaign.progress(run).captured_takes, 0)
+            raw = run / "raw-wav"; raw.mkdir()
+            (raw / "snare_main__rimshot__v040__rr01_raw.wav").write_bytes(b"raw")
+            progress = Sd3CaptureCampaign.read(run).progress(run)
+            self.assertEqual((progress.captured_takes, progress.total_takes, progress.missing_takes), (1, 4, 3))
+            with self.assertRaisesRegex(FileExistsError, "campaign directory"):
+                campaign.write_new(run)
+
+    def test_campaign_commands_are_ordered_and_capture_is_explicit(self) -> None:
+        run = Path("D:/Studio/drum-runs/sd3_test_kit")
+        center = ControlCenter()
+        with self.assertRaisesRegex(ValueError, "explicit confirmation"):
+            center.sampler_command("capture", run)
+        capture = center.sampler_command("capture", run, confirm_capture=True)
+        self.assertIn("--confirm-capture", capture)
+        self.assertEqual(capture[1:4], ("-m", "drum_sampler.cli", "capture"))
+        quality = center.sampler_command("audit-quality", run)
+        self.assertEqual(quality[1:4], ("-m", "drum_sampler.cli", "audit-quality"))
+        with self.assertRaisesRegex(ValueError, "note map"):
+            center.sampler_command("export-drumgizmo", run)
+
+    def test_v1_electronic_additions_have_unique_raw_capture_cells(self) -> None:
+        filenames = [filename for row in METALCORE_ELECTRONIC_V1_ADDITIONS for filename in row.raw_filenames()]
+        self.assertEqual(len(filenames), len(set(filenames)))
+        self.assertEqual({row.note for row in METALCORE_ELECTRONIC_V1_ADDITIONS} & {26, 47, 68, 85, 93},
+                         {26, 47, 68, 85, 93})
+
+    def test_complete_chain_simulator_traces_ddrum4_return_and_both_software_renderers(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+        simulator.set_state(scene="dnb")
+
+        result = simulator.simulate_pad("ddrum4", 85, 106)
+
+        self.assertEqual(result.physical, "stack.hit")
+        self.assertEqual(result.logical_target, "perc.glitch")
+        messages = {step.stage: step.message for step in result.steps}
+        self.assertEqual(messages["Arduino DDrum4 renderer"]["note"], 86)
+        self.assertEqual(messages["SD3 renderer"]["note"], 89)
+        self.assertEqual(messages["DrumGizmo renderer"]["instrument"], "percussion")
+        self.assertIn("hardware_io", result.to_document())
+
+    def test_complete_chain_simulator_accepts_each_declared_module(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+        raw_notes = {"edrumin": 38, "ddti": 38, "ddrum4": 40}
+
+        results = {source: simulator.simulate_pad(source, note) for source, note in raw_notes.items()}
+
+        self.assertEqual({result.physical for result in results.values()}, {"snare.head"})
+        self.assertEqual({result.logical_target for result in results.values()}, {"snare.metalcore"})
+
     def test_kit_matrix_keeps_unmeasured_memory_unknown_and_marks_missing_wav(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -119,6 +187,23 @@ class ControlCenterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicit executable"):
             center.launch_command("ddrum4ui")
         self.assertEqual(center.launch_command("ddti"), ("ddti-editor",))
+
+    def test_control_center_lists_and_stops_only_processes_it_started(self) -> None:
+        class Process:
+            def __init__(self) -> None:
+                self.running = True
+                self.terminated = False
+            def poll(self) -> None:
+                return None if self.running else 0
+            def terminate(self) -> None:
+                self.terminated = True
+                self.running = False
+        process = Process()
+        center = ControlCenter(launcher=lambda *args, **kwargs: process)
+        center.launch("external", external=Path("sd3-host.exe"))
+        self.assertEqual(center.launched_processes(), (("external:sd3-host.exe:None", True),))
+        self.assertEqual(center.stop_launched_processes(), ("external:sd3-host.exe:None",))
+        self.assertTrue(process.terminated)
 
     def test_converter_launch_sets_profile_environment_and_blocks_duplicate(self) -> None:
         class Process:

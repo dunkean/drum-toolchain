@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import shlex
 import sys
 
 from .service import CommandResult, ControlCenter
 from .ddrum4_matrix import format_matrix, load_kit_matrix
+from .simulator import RigSimulator, SimulationError
 
 
 def _print(result: CommandResult) -> int:
@@ -67,6 +69,15 @@ def main(argv: list[str] | None = None) -> int:
     audition = commands.add_parser("audition-wav", help="explicitly open one local WAV in the OS default player")
     audition.add_argument("wav", type=Path)
     audition.add_argument("--dry-run", action="store_true")
+    simulate = commands.add_parser("simulate", help="offline trace: pad event through DDrum4, SD3, and DrumGizmo")
+    simulate.add_argument("project", type=Path)
+    simulate.add_argument("--source", required=True, help="declared source module, for example edrumin, ddti, or ddrum4")
+    simulate.add_argument("--note", required=True, type=int, help="raw Note On emitted by the selected source")
+    simulate.add_argument("--velocity", type=int, default=100)
+    simulate.add_argument("--scene", help="optional logical scene override")
+    simulate.add_argument("--state", action="append", default=[], metavar="NAME=VALUE",
+                          help="optional virtual-palette override; repeat as needed")
+    simulate.add_argument("--json", action="store_true", help="print the complete machine-readable trace")
     args = parser.parse_args(argv)
     center = ControlCenter(args.toolchain)
     if args.action == "kit-matrix":
@@ -76,6 +87,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.action == "audition-wav":
         return _print(center.audition_wav(args.wav, dry_run=args.dry_run))
+    if args.action == "simulate":
+        try:
+            overrides: dict[str, int] = {}
+            for item in args.state:
+                name, separator, value = item.partition("=")
+                if not separator or not name:
+                    raise SimulationError("--state must use NAME=VALUE")
+                try:
+                    overrides[name] = int(value)
+                except ValueError as error:
+                    raise SimulationError(f"--state {name!r} must have an integer value") from error
+            simulator = RigSimulator.from_path(args.project)
+            simulator.set_state(scene=args.scene, values=overrides)
+            result = simulator.simulate_pad(args.source, args.note, args.velocity)
+        except (OSError, ValueError, SimulationError) as error:
+            parser.error(str(error))
+        print(json.dumps(result.to_document(), indent=2, ensure_ascii=False) if args.json else result.render_text())
+        return 0
     if args.action in {"validate", "report", "compile"}:
         return _print(center.run_rig(args.action, args.project, output=getattr(args, "output", None),
                                      replace=getattr(args, "replace", False), base_dump=getattr(args, "base_dump", None),
