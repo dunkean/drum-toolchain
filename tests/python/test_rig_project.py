@@ -24,7 +24,7 @@ def valid_project() -> dict:
         },
         "connection_profiles": {"LIVE_USB": {"deduplicate_din_copies": True}},
         "source_decoders": [
-            {"match": {"source": "edrumin", "type": "note", "note": 38}, "emit": {"physical": "snare1.head", "expressions": ["velocity", "position"]}},
+            {"match": {"source": "edrumin", "type": "note", "note": 38}, "emit": {"physical": "snare1.head", "expressions": ["velocity"]}},
             {"match": {"source": "edrumin", "type": "note_range", "note_range": [48, 50]}, "emit": {"physical": "tom1.head", "expressions": ["velocity"]}},
             {"match": {"source": "ddti", "type": "cc", "cc": 4}, "emit": {"physical": "hh.opening", "normalize": "cc7"}},
             {"match": {"source": "ddti", "type": "poly_aftertouch", "active_note": True}, "emit": {"physical": "cymbal.choke", "correlate": "source_channel_note"}},
@@ -112,6 +112,25 @@ class RigProjectTests(unittest.TestCase):
         fill_renderers(document)
         document["native_control_map"]["ddrum4_program_change"]["channel"] = 14
         with self.assertRaisesRegex(RigProjectError, "reserved for logical control"):
+            self.load(document)
+
+    def test_rejects_unpaired_aftertouch_correlation_contract(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][3]["emit"].pop("correlate")
+        with self.assertRaisesRegex(RigProjectError, "active_note and correlate"):
+            self.load(document)
+
+    def test_rejects_ambiguous_exact_note_position(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][0]["emit"]["expressions"].append("position")
+        with self.assertRaisesRegex(RigProjectError, "exact Note cannot carry position"):
+            self.load(document)
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][3]["match"].pop("active_note")
+        with self.assertRaisesRegex(RigProjectError, "active_note and correlate"):
             self.load(document)
 
     def test_native_controls_are_addressed_unambiguously(self) -> None:

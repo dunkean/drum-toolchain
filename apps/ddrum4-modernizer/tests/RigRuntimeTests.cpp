@@ -71,5 +71,12 @@ int main() {
   count=drumgizmoRuntime.process("edrumin",{MidiType::NoteOn,1,40,100,116},out);
   assert(count==1 && out[0].data1==50);
   assert(drumgizmoRuntime.process("edrumin",{MidiType::ControlChange,1,4,64,117},out)==0);
+  bool expressionProfileRejected=false;
+  try {
+    (void)loadRuntimeProfile(std::filesystem::path(DDRUM4_TEST_CONFIG_DIR)/"runtime-expression-unsafe.yaml");
+  } catch(const std::exception&) {
+    expressionProfileRejected=true;
+  }
+  assert(expressionProfileRejected);
   std::cout << "rig runtime tests passed\n";
 }

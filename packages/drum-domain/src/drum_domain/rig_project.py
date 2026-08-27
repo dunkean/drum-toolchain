@@ -234,8 +234,14 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
         expressions = set(emit.get("expressions", []))
         if message_type == "cc" and ("velocity" in expressions or emit.get("normalize") != "cc7"):
             _fail(f"source_decoders[{index}]: cc must use normalize: cc7 and cannot emit velocity")
+        if "position" in expressions and message_type == "note":
+            _fail(f"source_decoders[{index}]: exact Note cannot carry position; use a measured range or expression routing")
+        if "position" in expressions and message_type == "note_range" and match["note_range"][0] == match["note_range"][1]:
+            _fail(f"source_decoders[{index}]: positional note_range needs distinct bounds")
         if message_type == "poly_aftertouch" and "velocity" in expressions:
             _fail(f"source_decoders[{index}]: poly_aftertouch cannot emit velocity")
+        if message_type == "poly_aftertouch" and bool(match.get("active_note")) != (emit.get("correlate") == "source_channel_note"):
+            _fail(f"source_decoders[{index}]: active_note and correlate: source_channel_note must be declared together")
         key = (source, message_type, tuple(sorted((key, repr(value)) for key, value in match.items() if key != "source")))
         if key in decoder_keys:
             _fail(f"source_decoders[{index}]: ambiguous duplicate decoder")

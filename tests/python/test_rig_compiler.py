@@ -58,7 +58,7 @@ class RigCompilerTests(unittest.TestCase):
             validated = validate_project(project)
             self.assertEqual(validated.source_sha256, __import__("hashlib").sha256(project.read_bytes()).hexdigest())
             result = compile_project(project, output)
-            self.assertEqual(len(result.artifacts), 11)
+            self.assertEqual(len(result.artifacts), 12)
             report = json.loads((output / "project-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["format"], "rig-project-report/v1")
             self.assertEqual(report["source_sha256"], validated.source_sha256)
@@ -95,6 +95,71 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(virtual_kit["status"], "ready")
             self.assertEqual(virtual_kit["rows"][0]["ddrum4"], {"channel": 10, "note": 36})
             self.assertEqual(virtual_kit["rows"][1]["drumgizmo"]["articulation"], "head")
+            expressions = json.loads((output / "expression-capability-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(expressions["summary"], {
+                "declared_expressions": 0, "supported_expressions": 0, "firmware_unlowerable_routes": 0,
+            })
+
+    def test_expression_decoder_keeps_runtime_and_firmware_planned_with_explicit_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "brain", "type": "cc", "cc": 4},
+                "emit": {"physical": "kick.head", "expressions": ["openness"], "normalize": "cc7"},
+            })
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            result = compile_project(project, root / "out")
+
+            statuses = {entry["name"]: entry["status"] for entry in result.artifacts["project-report.json"]["artifacts"]}
+            self.assertEqual(statuses["runtime-profile"], "planned")
+            self.assertEqual(statuses["firmware-project-mapping"], "planned")
+            self.assertEqual(statuses["expression-capability-report"], "planned")
+            self.assertEqual(statuses["virtual-kit-map"], "planned")
+            report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["expressions"][0]["targets"]["arduino_ddrum4"]["status"], "unsupported")
+            virtual_kit = json.loads((root / "out" / "virtual-kit-map.json").read_text(encoding="utf-8"))
+            expression_row = next(row for row in virtual_kit["rows"] if row["raw_match"]["type"] == "cc")
+            self.assertEqual(expression_row["coverage"], "unsupported")
+            sd3_map = json.loads((root / "out" / "sd3-midimap.json").read_text(encoding="utf-8"))
+            self.assertEqual(sd3_map["status"], "planned")
+            self.assertEqual(len(sd3_map["unsupported_source_expressions"]), 1)
+            self.assertEqual(sd3_map["unsupported_source_expressions"][0]["raw_match"]["type"], "cc")
+
+    def test_live_non_exact_note_route_never_creates_a_flashable_firmware_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["deployment"] = "live"
+            document["control_bus"] = {"endpoint": "reviewed-control-bus", "channel": 15, "status": "user-confirmed"}
+            document["sources"]["ddrum4"] = document["sources"].pop("brain")
+            for decoder in document["source_decoders"]:
+                decoder["match"]["source"] = "ddrum4"
+            document["source_decoders"][0]["match"] = {"source": "brain", "type": "note_range", "note_range": [36, 37]}
+            document["source_decoders"][0]["match"]["source"] = "ddrum4"
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            output = root / "out"
+
+            result = compile_project(project, output)
+
+            statuses = {entry["name"]: entry["status"] for entry in result.artifacts["project-report.json"]["artifacts"]}
+            self.assertEqual(statuses["runtime-profile"], "ready")
+            self.assertEqual(statuses["firmware-project-mapping"], "planned")
+            self.assertEqual(statuses["virtual-kit-map"], "planned")
+            firmware = json.loads((output / "firmware-project-mapping.json").read_text(encoding="utf-8"))
+            self.assertEqual(firmware["hardware_flash"], "disabled")
+            capability = json.loads((output / "expression-capability-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(capability["summary"]["firmware_unlowerable_routes"], 1)
+            virtual_kit = json.loads((output / "virtual-kit-map.json").read_text(encoding="utf-8"))
+            self.assertEqual(virtual_kit["rows"][0]["coverage"], "planned")
+            generator = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(output / "firmware-project-mapping.json"),
+                 "--output-channel", "10", "--output", str(root / "generated_mapping.h")],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(generator.returncode, 2)
+            self.assertIn("verified live flash plan", generator.stderr)
 
     def test_compile_refuses_replace_without_explicit_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,0 +1,19 @@
+# Deliberately invalid as a runnable runtime profile: a common expression
+# routing contract has not been compiled for this CC decoder.
+format: rig-runtime-profile/v1
+status: ready
+state:
+  scenes: [metal]
+  defaults: {scene: metal}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+native_control_map: {}
+policies: {echo: disabled}
+records:
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: cc, cc: 4}
+    emit: {physical: hihat.opening, expressions: [openness], normalize: cc7}
+    physical: hihat.opening
+    logical_target: hihat.opening
+    renderers: {sd3: {note: 42, channel: 10}, drumgizmo: {note: 42, channel: 10, instrument: hihat, articulation: open}}

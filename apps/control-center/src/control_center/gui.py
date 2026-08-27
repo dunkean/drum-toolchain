@@ -24,7 +24,7 @@ def launch() -> int:
         from PySide6.QtGui import QTextCursor
         from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog,
                                        QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                                       QMainWindow, QMessageBox, QPushButton,
+                                       QHeaderView, QMainWindow, QMessageBox, QPushButton,
                                        QSplitter, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
                                        QTextEdit, QVBoxLayout, QWidget)
     except ImportError as error:
@@ -39,6 +39,8 @@ def launch() -> int:
             self._active_simulator_path: Path | None = None
             self.matrix: Ddrum4KitMatrix | None = None
             self._studio_rows = []
+            self._studio_variable_controls: dict[str, QSpinBox] = {}
+            self._studio_state_syncing = False
             self.report_paths: list[Path] = []
             self.campaign_directory: Path | None = None
             self.campaign_process: QProcess | None = None
@@ -344,41 +346,57 @@ def launch() -> int:
             """
             workspace = QWidget()
             layout = QVBoxLayout()
-            title = QLabel("Virtual kit — one physical articulation, one logical sound, three renderer destinations")
-            title.setStyleSheet("font-size: 18px; font-weight: 700;")
+            title = QLabel("Virtual kit & signal simulator")
+            title.setObjectName("workspaceTitle")
             layout.addWidget(title)
             subtitle = QLabel(
-                "SD3 is the reference renderer. The DDrum4 bank and DrumGizmo map are shown beside it so coverage, "
-                "NOTE P destinations and missing mappings are visible before compilation. It always uses the last saved project file; "
-                "unsaved Advanced YAML edits are intentionally not simulated. This workspace never opens MIDI or audio."
+                "Un kit logique, trois renderers. Clique une articulation (double-clic) pour obtenir la trace exacte "
+                "vers la banque DDrum4, SD3 et DrumGizmo. Les cartes sont un simulateur déterministe : aucun MIDI, "
+                "audio ou module matériel n’est ouvert."
             )
             subtitle.setWordWrap(True); layout.addWidget(subtitle)
 
-            controls = QGroupBox("Simulation controls")
+            controls = QGroupBox("Transport de simulation")
             controls_layout = QHBoxLayout()
             self.studio_source = QComboBox()
             self.studio_scene = QComboBox()
             self.studio_velocity = QSpinBox(); self.studio_velocity.setRange(1, 127); self.studio_velocity.setValue(100)
+            self.studio_velocity.setPrefix("V ")
             load = QPushButton("Load virtual kit")
             load.clicked.connect(self.load_virtual_kit_workspace)
-            trigger = QPushButton("Trigger selected pad")
+            trigger = QPushButton("▶ Trigger selected pad")
             trigger.setToolTip("Runs an offline trace with the selected source, state, pad and velocity.")
             trigger.clicked.connect(self.trigger_virtual_kit_pad)
             reset = QPushButton("Reset state")
             reset.clicked.connect(self.reset_virtual_kit_state)
-            panic = QPushButton("Panic (simulated)")
+            panic = QPushButton("● Panic (simulated)")
             panic.setToolTip("Records an offline all-notes-off action. It does not emit MIDI.")
             panic.clicked.connect(self.virtual_kit_panic)
             for label, field in (("Raw source", self.studio_source), ("Scene", self.studio_scene), ("Velocity", self.studio_velocity)):
                 controls_layout.addWidget(QLabel(label + ":")); controls_layout.addWidget(field)
+            for value in (48, 80, 110, 127):
+                velocity = QPushButton(str(value))
+                velocity.setToolTip(f"Set simulation velocity to {value}")
+                velocity.clicked.connect(lambda _=False, v=value: self.studio_velocity.setValue(v))
+                controls_layout.addWidget(velocity)
             controls_layout.addWidget(load); controls_layout.addWidget(trigger); controls_layout.addWidget(reset); controls_layout.addWidget(panic)
             controls.setLayout(controls_layout); layout.addWidget(controls)
             self.studio_source.currentTextChanged.connect(self.refresh_virtual_kit_workspace)
             self.studio_scene.currentTextChanged.connect(self._studio_scene_changed)
 
+            state_group = QGroupBox("Logical state — Scene and virtual palettes")
+            self.studio_variable_holder = QWidget()
+            self.studio_variable_layout = QHBoxLayout()
+            self.studio_variable_layout.setContentsMargins(2, 2, 2, 2)
+            self.studio_variable_layout.addWidget(QLabel("Load a project to expose VP1–VP4 (or its declared state variables)."))
+            self.studio_variable_layout.addStretch(1)
+            self.studio_variable_holder.setLayout(self.studio_variable_layout)
+            state_layout = QVBoxLayout(); state_layout.addWidget(self.studio_variable_holder); state_group.setLayout(state_layout)
+            layout.addWidget(state_group)
+
             body = QSplitter(Qt.Orientation.Horizontal)
             left = QWidget(); left_layout = QVBoxLayout()
-            left_layout.addWidget(QLabel("Pads / articulations — select a row, then trigger it. Raw note is displayed for every declared source."))
+            left_layout.addWidget(QLabel("Pads / articulations — double-click a row to trigger it at the displayed velocity. Raw input notes remain visible for all declared modules."))
             self.virtual_kit_table = QTableWidget(0, 8)
             self.virtual_kit_table.setHorizontalHeaderLabels((
                 "Pad / articulation", "eDRUMin", "DDTi", "DDrum4", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
@@ -386,27 +404,46 @@ def launch() -> int:
             self.virtual_kit_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.virtual_kit_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.virtual_kit_table.cellDoubleClicked.connect(lambda _row, _column: self.trigger_virtual_kit_pad())
+            self.virtual_kit_table.setAlternatingRowColors(True)
+            self.virtual_kit_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.virtual_kit_table.horizontalHeader().setStretchLastSection(True)
             left_layout.addWidget(self.virtual_kit_table)
             coverage = QLabel("Coverage: DDrum4 bank note, SD3 MIDI note and DrumGizmo instrument/articulation must all be declared for a playable logical sound.")
             coverage.setWordWrap(True); left_layout.addWidget(coverage)
             left.setLayout(left_layout); body.addWidget(left)
 
             right = QWidget(); right_layout = QVBoxLayout()
+            flow = QLabel("INPUT  →  LOGICAL KIT  →  DDrum4 BANK  +  SD3  +  DRUMGIZMO")
+            flow.setObjectName("signalFlow")
+            flow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            right_layout.addWidget(flow)
             self.studio_cards: dict[str, QTextEdit] = {}
-            for heading in ("Raw input", "Arduino → DDrum4", "SD3 reference", "DrumGizmo"):
+            cards_row = QHBoxLayout()
+            for heading, object_name in (("Raw input", "rawStage"), ("Arduino → DDrum4", "ddrumStage"),
+                                         ("SD3 reference", "sd3Stage"), ("DrumGizmo", "drumgizmoStage")):
                 card = QGroupBox(heading)
-                card_layout = QVBoxLayout(); output = QTextEdit(); output.setReadOnly(True); output.setMinimumHeight(100)
+                card.setObjectName(object_name)
+                card_layout = QVBoxLayout(); output = QTextEdit(); output.setReadOnly(True); output.setMinimumHeight(235)
                 output.setPlainText("No simulated event yet.")
-                card_layout.addWidget(output); card.setLayout(card_layout); right_layout.addWidget(card)
+                card_layout.addWidget(output); card.setLayout(card_layout)
                 self.studio_cards[heading] = output
+                cards_row.addWidget(card)
+            right_layout.addLayout(cards_row)
+            self.studio_route_summary = QLabel("Select a pad to inspect its three renderer destinations.")
+            self.studio_route_summary.setObjectName("routeSummary")
+            self.studio_route_summary.setWordWrap(True)
+            right_layout.addWidget(self.studio_route_summary)
             right.setLayout(right_layout); body.addWidget(right)
-            body.setStretchFactor(0, 3); body.setStretchFactor(1, 2); layout.addWidget(body, 4)
+            body.setStretchFactor(0, 5); body.setStretchFactor(1, 7); layout.addWidget(body, 5)
 
             log_group = QGroupBox("Event log — offline simulation")
             log_layout = QVBoxLayout()
-            self.virtual_kit_log = QTableWidget(0, 7)
-            self.virtual_kit_log.setHorizontalHeaderLabels(("Time", "Source", "Physical", "Logical", "Velocity", "DDrum4", "SD3 / DrumGizmo"))
+            self.virtual_kit_log = QTableWidget(0, 9)
+            self.virtual_kit_log.setHorizontalHeaderLabels(("Time", "Event", "Input", "Physical", "Logical", "Velocity", "DDrum4", "SD3", "DrumGizmo"))
             self.virtual_kit_log.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self.virtual_kit_log.setAlternatingRowColors(True)
+            self.virtual_kit_log.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.virtual_kit_log.horizontalHeader().setStretchLastSection(True)
             clear_log = QPushButton("Clear event log")
             clear_log.clicked.connect(self.clear_virtual_kit_log)
             log_layout.addWidget(self.virtual_kit_log); log_layout.addWidget(clear_log); log_group.setLayout(log_layout)
@@ -421,6 +458,7 @@ def launch() -> int:
                 simulator = self.current_simulator()
                 self.studio_source.blockSignals(True); self.studio_source.clear(); self.studio_source.addItems(tuple(simulator.project.sources)); self.studio_source.blockSignals(False)
                 self.studio_scene.blockSignals(True); self.studio_scene.clear(); self.studio_scene.addItems(simulator.project.scenes); self.studio_scene.setCurrentText(simulator.state["scene"]); self.studio_scene.blockSignals(False)
+                self._rebuild_studio_variable_controls(simulator)
                 self._load_project_bank_reference(self._active_simulator_path or Path(), simulator.project.raw)
                 self.refresh_virtual_kit_workspace()
                 self.virtual_kit_status.setText("Virtual kit loaded from the same validated rig project as the compiler.")
@@ -436,6 +474,39 @@ def launch() -> int:
             except (OSError, ValueError, SimulationError) as error:
                 self.virtual_kit_status.setText(f"Scene change rejected: {error}")
 
+        def _rebuild_studio_variable_controls(self, simulator: RigSimulator) -> None:
+            """Expose exactly the project’s declared virtual-palette variables.
+
+            The UI deliberately does not assume VP1–VP4 exist: a compact kit
+            may declare one palette, while a larger kit can expose all four.
+            Every control mutates only the offline simulator state.
+            """
+            while self.studio_variable_layout.count():
+                item = self.studio_variable_layout.takeAt(0)
+                if item.widget() is not None:
+                    item.widget().deleteLater()
+            self._studio_variable_controls.clear()
+            if not simulator.project.variables:
+                self.studio_variable_layout.addWidget(QLabel("This project has no virtual-palette variables."))
+            for name in simulator.project.variables:
+                label = QLabel(name.upper() + ":")
+                control = QSpinBox(); control.setRange(0, 127); control.setValue(simulator.state[name]); control.setPrefix("V ")
+                control.setToolTip(f"Offline value for {name}. It is applied to the logical route matrix.")
+                control.valueChanged.connect(lambda value, variable=name: self._studio_variable_changed(variable, value))
+                self.studio_variable_controls[name] = control
+                self.studio_variable_layout.addWidget(label); self.studio_variable_layout.addWidget(control)
+            self.studio_variable_layout.addStretch(1)
+
+        def _studio_variable_changed(self, variable: str, value: int) -> None:
+            if self._studio_state_syncing:
+                return
+            try:
+                self.current_simulator().set_state(values={variable: value})
+                self.refresh_virtual_kit_workspace()
+                self.virtual_kit_status.setText(f"Offline palette state: {variable}={value}.")
+            except (OSError, ValueError, SimulationError) as error:
+                self.virtual_kit_status.setText(f"Virtual-palette change rejected: {error}")
+
         def refresh_virtual_kit_workspace(self) -> None:
             try:
                 simulator = self.current_simulator()
@@ -444,6 +515,12 @@ def launch() -> int:
             scene = self.studio_scene.currentText()
             if scene:
                 simulator.set_state(scene=scene)
+            self._studio_state_syncing = True
+            try:
+                for name, control in self._studio_variable_controls.items():
+                    control.setValue(simulator.state[name])
+            finally:
+                self._studio_state_syncing = False
             self._studio_rows = build_virtual_kit(simulator)
             self.virtual_kit_table.setRowCount(len(self._studio_rows))
             for row, kit_row in enumerate(self._studio_rows):
@@ -487,6 +564,10 @@ def launch() -> int:
             self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer", "DDrum4 audio", "DDrum4 echo guard")))
             self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 audio")))
             self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer", "DrumGizmo audio")))
+            self.studio_route_summary.setText(
+                f"{result.physical}  →  {result.logical_target}  |  source {result.source}, velocity {result.velocity}  |  "
+                "all destinations shown are declared by the saved project"
+            )
             self._append_virtual_kit_event(result)
             self.virtual_kit_status.setText(f"Offline route verified: {result.physical} → {result.logical_target}. No MIDI or audio was emitted.")
 
@@ -509,9 +590,9 @@ def launch() -> int:
             sd3 = self.current_simulator().project.renderers["sd3"][result.logical_target]
             gizmo = self.current_simulator().project.renderers["drumgizmo"][result.logical_target]
             row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
-            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], result.source, result.physical, result.logical_target,
-                      result.velocity, f"C{self.current_simulator().project.ddrum4_output_channel} N{ddrum['note']}",
-                      f"SD3 N{sd3['note']} · {gizmo['instrument']}/{gizmo['articulation']}")
+            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], "Note On", result.source, result.physical,
+                      result.logical_target, result.velocity, f"C{self.current_simulator().project.ddrum4_output_channel} N{ddrum['note']}",
+                      f"C{sd3.get('channel', 10)} N{sd3['note']}", f"{gizmo['instrument']}/{gizmo['articulation']} · N{gizmo['note']}")
             for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
             self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()
 
@@ -526,7 +607,7 @@ def launch() -> int:
 
         def _append_virtual_kit_status(self, source: str, physical: str, detail: str) -> None:
             row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
-            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], source, physical, "—", "—", "—", detail)
+            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], "System", source, physical, "—", "—", "—", "—", detail)
             for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(value))
             self.virtual_kit_log.scrollToBottom()
 
@@ -1005,6 +1086,7 @@ def launch() -> int:
                 self.virtual_kit_log.setRowCount(0)
                 for card in self.studio_cards.values():
                     card.setPlainText("Reload the saved rig project to simulate it.")
+                self.studio_route_summary.setText("Project changed. Reload the saved project before inspecting routes.")
                 self.virtual_kit_status.setText("Project changed. Reload the virtual kit from the saved file.")
 
         def load_simulator_pads(self) -> None:
@@ -1091,21 +1173,31 @@ def launch() -> int:
 
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet("""
-        QMainWindow, QWidget { background: #11161a; color: #e5edf0; font-size: 12px; }
-        QTabWidget::pane, QGroupBox { border: 1px solid #2a3941; border-radius: 7px; margin-top: 9px; }
-        QGroupBox { color: #8eea57; font-weight: 700; padding: 8px; }
-        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-        QTabBar::tab { background: #1a242a; color: #aebec5; padding: 8px 13px; border: 1px solid #2a3941; }
-        QTabBar::tab:selected { background: #20333a; color: #91ec57; }
-        QPushButton { background: #1c2c34; border: 1px solid #3d6973; border-radius: 5px; padding: 6px 10px; color: #dff5f8; }
-        QPushButton:hover { background: #25414b; border-color: #68d6e5; }
-        QPushButton:pressed { background: #162126; }
-        QLineEdit, QComboBox, QSpinBox, QTextEdit, QTableWidget { background: #0d1215; border: 1px solid #31424a; border-radius: 4px; color: #e5edf0; selection-background-color: #285460; }
-        QHeaderView::section { background: #1a262c; color: #a7c0c8; border: none; padding: 5px; font-weight: 700; }
-        QTableWidget::item:selected { background: #214c58; color: white; }
-        QScrollBar:vertical { background: #11161a; width: 10px; } QScrollBar::handle:vertical { background: #34515b; border-radius: 4px; }
+        QMainWindow, QWidget { background: #0b1013; color: #d8e3e7; font-size: 12px; }
+        QLabel#workspaceTitle { color: #eff8fb; font-size: 22px; font-weight: 750; padding: 4px 0; }
+        QLabel#signalFlow { color: #8de85b; font-size: 13px; font-weight: 750; letter-spacing: 1px; background: #101a1e; border: 1px solid #274036; border-radius: 5px; padding: 9px; }
+        QLabel#routeSummary { color: #b9d9df; background: #0e171b; border-left: 3px solid #54c9dc; padding: 9px; }
+        QTabWidget::pane, QGroupBox { border: 1px solid #263940; border-radius: 7px; margin-top: 10px; }
+        QGroupBox { color: #8eea57; font-weight: 700; padding: 9px; background: #0e161a; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        QGroupBox#rawStage { border-color: #357f53; color: #85e7aa; }
+        QGroupBox#ddrumStage { border-color: #bf853c; color: #ffbc59; }
+        QGroupBox#sd3Stage { border-color: #a6912e; color: #f0d84b; }
+        QGroupBox#drumgizmoStage { border-color: #7760ab; color: #c4a3ff; }
+        QTabBar::tab { background: #121d22; color: #9eb3ba; padding: 9px 14px; border: 1px solid #263940; }
+        QTabBar::tab:selected { background: #1a3138; color: #91ec57; }
+        QPushButton { background: #15262d; border: 1px solid #3b6976; border-radius: 5px; padding: 7px 11px; color: #e1f3f6; font-weight: 600; }
+        QPushButton:hover { background: #21414b; border-color: #68d6e5; }
+        QPushButton:pressed { background: #101b20; }
+        QLineEdit, QComboBox, QSpinBox, QTextEdit, QTableWidget { background: #080d10; border: 1px solid #2b4149; border-radius: 4px; color: #e4eef1; selection-background-color: #1f5868; }
+        QTextEdit { padding: 4px; }
+        QHeaderView::section { background: #16252b; color: #a9c6ce; border: none; border-right: 1px solid #29414a; padding: 6px; font-weight: 700; }
+        QTableWidget::item { padding: 3px; border-bottom: 1px solid #142126; }
+        QTableWidget::item:alternate { background: #0c1519; }
+        QTableWidget::item:selected { background: #214f5d; color: white; }
+        QScrollBar:vertical { background: #0b1013; width: 10px; } QScrollBar::handle:vertical { background: #345762; border-radius: 4px; min-height: 22px; }
     """)
-    window = Window(); window.resize(960, 900); window.show()
+    window = Window(); window.resize(1580, 930); window.show()
     return app.exec()
 
 

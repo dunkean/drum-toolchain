@@ -17,6 +17,9 @@ change aucun réglage de module.
 - [x] Le compilateur publie aussi `virtual-kit-map.json`, la table
   état/source/physique/son logique/DDrum4/SD3/DrumGizmo exactement issue des
   routes compilées ; c'est le contrat de parité des trois renderers.
+- [x] `expression-capability-report.json` bloque maintenant tout profil
+  contenant CC ou aftertouch non abaissable : runtime et firmware restent
+  `planned`, et chaque sacrifice (notamment DrumGizmo note-only) est déclaré.
 - [x] Un diagnostic offline « no-pad » parcourt chaque entrée Note, scène,
   état VP connu et contrôle natif déclaré, puis produit un rapport sans ouvrir
   de port MIDI (`drum-control-center diagnose <projet>`). Les CC et

@@ -150,12 +150,17 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
   for(const auto& record:records) {
     if(!record["source"]||!record["match"]||!record["emit"]||!record["scene"]||!record["physical"]||!record["logical_target"]||!record["renderers"]||!record["renderers"][rendererName]) invalid(std::string("runtime record is incomplete for ")+rendererName);
     const auto source=runtimeSource(result,record["source"]); const auto match=record["match"]; const auto emit=record["emit"];
-    RuntimeDecoder decoder; decoder.source=source; decoder.matcher=runtimeMatcher(match["type"].as<std::string>()); decoder.physical=record["physical"].as<std::string>();
+    const auto matcherName=match["type"].as<std::string>();
+    if(matcherName=="cc" || matcherName=="poly_aftertouch")
+      invalid("runtime profile contains an expression decoder; compile a measured common expression-routing contract first");
+    RuntimeDecoder decoder; decoder.source=source; decoder.matcher=runtimeMatcher(matcherName); decoder.physical=record["physical"].as<std::string>();
     if(decoder.matcher==PhysicalMatcher::NoteRange) { const auto range=match["note_range"]; if(!range||range.size()!=2) invalid("runtime note_range needs two values"); decoder.first=midiValue(range[0]); decoder.last=midiValue(range[1]); }
     else if(decoder.matcher==PhysicalMatcher::PolyAftertouch) { decoder.first=match["note"]?midi(match,"note"):255; decoder.last=decoder.first; }
     else { const char* key=decoder.matcher==PhysicalMatcher::ControlChange?"cc":"note"; decoder.first=midi(match,key); decoder.last=decoder.first; }
     if(decoder.first!=255 && decoder.last<decoder.first) invalid("runtime note range is descending");
     if(emit["expressions"]) for(const auto& expression:emit["expressions"]) { const auto value=expression.as<std::string>(); decoder.velocity|=value=="velocity"; decoder.position|=value=="position"; }
+    if(decoder.position && (decoder.matcher!=PhysicalMatcher::NoteRange || decoder.first==decoder.last))
+      invalid("runtime positional decoder requires a non-empty measured note range");
     bool decoderExists=false; for(const auto& existing:result.decoders) if(existing.source==decoder.source&&existing.matcher==decoder.matcher&&existing.first==decoder.first&&existing.last==decoder.last&&existing.physical==decoder.physical) decoderExists=true;
     if(!decoderExists) result.decoders.push_back(std::move(decoder));
     const auto scene=sceneIndex(result,record["scene"].as<std::string>()); const auto physical=record["physical"].as<std::string>(); const auto logical=record["logical_target"].as<std::string>();

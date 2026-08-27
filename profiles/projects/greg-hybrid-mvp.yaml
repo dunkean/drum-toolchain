@@ -43,7 +43,7 @@ connection_profiles:
 # measurement. It must be replaced together with its MEASURE_ME endpoint.
 source_decoders:
   - match: {source: edrumin, type: note, note: 0}
-    emit: {physical: snare_main.head, expressions: [velocity, position]}
+    emit: {physical: snare_main.head, expressions: [velocity]}
   - match: {source: edrumin, type: note, note: 1}
     emit: {physical: stack.bow, expressions: [velocity]}
 
