@@ -6,6 +6,7 @@ device-discovery, or module-memory operations.
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 import yaml
 
@@ -39,6 +40,7 @@ def launch() -> int:
             self._active_simulator_path: Path | None = None
             self.matrix: Ddrum4KitMatrix | None = None
             self._studio_rows = []
+            self._studio_events: list[dict[str, object]] = []
             self._studio_variable_controls: dict[str, QSpinBox] = {}
             self._studio_state_syncing = False
             self.report_paths: list[Path] = []
@@ -446,7 +448,11 @@ def launch() -> int:
             self.virtual_kit_log.horizontalHeader().setStretchLastSection(True)
             clear_log = QPushButton("Clear event log")
             clear_log.clicked.connect(self.clear_virtual_kit_log)
-            log_layout.addWidget(self.virtual_kit_log); log_layout.addWidget(clear_log); log_group.setLayout(log_layout)
+            export_log = QPushButton("Export offline session…")
+            export_log.setToolTip("Writes the exact simulated traces as JSON. It never captures or sends MIDI.")
+            export_log.clicked.connect(self.export_virtual_kit_session)
+            log_actions = QHBoxLayout(); log_actions.addWidget(clear_log); log_actions.addWidget(export_log); log_actions.addStretch(1)
+            log_layout.addWidget(self.virtual_kit_log); log_layout.addLayout(log_actions); log_group.setLayout(log_layout)
             layout.addWidget(log_group, 2)
             self.virtual_kit_status = QLabel("Load a rig project from the editor, then load the virtual kit.")
             layout.addWidget(self.virtual_kit_status)
@@ -594,6 +600,7 @@ def launch() -> int:
                       result.logical_target, result.velocity, f"C{self.current_simulator().project.ddrum4_output_channel} N{ddrum['note']}",
                       f"C{sd3.get('channel', 10)} N{sd3['note']}", f"{gizmo['instrument']}/{gizmo['articulation']} · N{gizmo['note']}")
             for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
+            self._studio_events.append(result.to_document())
             self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()
 
         def reset_virtual_kit_state(self) -> None:
@@ -609,11 +616,36 @@ def launch() -> int:
             row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
             values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], "System", source, physical, "—", "—", "—", "—", detail)
             for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(value))
+            self._studio_events.append({"kind": "drum-chain-simulation-status/v1", "hardware_io": "disabled",
+                                        "source": source, "physical": physical, "detail": detail})
             self.virtual_kit_log.scrollToBottom()
 
         def clear_virtual_kit_log(self) -> None:
             self.virtual_kit_log.setRowCount(0)
+            self._studio_events.clear()
             self.virtual_kit_status.setText("Offline event log cleared.")
+
+        def export_virtual_kit_session(self) -> None:
+            """Persist only the already-produced offline trace, never MIDI data from a port."""
+            if not self._studio_events:
+                self.virtual_kit_status.setText("Trigger at least one simulated event before exporting a session.")
+                return
+            filename, _ = QFileDialog.getSaveFileName(self, "Export offline simulation session", "simulation-session.json",
+                                                       "JSON (*.json)")
+            if not filename:
+                return
+            try:
+                simulator = self.current_simulator()
+                output = Path(filename)
+                payload = {
+                    "kind": "drum-chain-simulation-session/v1", "hardware_io": "disabled",
+                    "project": simulator.project.project, "state": dict(simulator.state),
+                    "events": self._studio_events,
+                }
+                output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot export simulation session", str(error)); return
+            self.virtual_kit_status.setText(f"Offline simulation session exported: {output}")
 
         def _campaign_workspace(self) -> QWidget:
             workspace = QWidget()
@@ -1081,6 +1113,7 @@ def launch() -> int:
             self._active_simulator = None
             self._active_simulator_path = None
             self._studio_rows = []
+            self._studio_events.clear()
             if hasattr(self, "virtual_kit_table"):
                 self.virtual_kit_table.setRowCount(0)
                 self.virtual_kit_log.setRowCount(0)
