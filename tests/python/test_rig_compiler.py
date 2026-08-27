@@ -408,7 +408,9 @@ class RigCompilerTests(unittest.TestCase):
             document = yaml.safe_load(project.read_text(encoding="utf-8"))
             manifest = root / "bank.yaml"
             manifest.write_text(yaml.safe_dump({"bank": {"id": "fixture-bank", "midi_channel": 10},
-                                                "sounds": [{"note_base": 36, "note_p": 1},
+                                                "sounds": [{"note_base": 36, "note_p": 1,
+                                                            "variations": [{"number": 1, "name": "Main"}],
+                                                            "layers": [{"position": 1, "velocity": 100, "sample": 1}]},
                                                            {"note_base": 38, "note_p": 1}]}, sort_keys=False), encoding="utf-8")
             document["ddrum4_bank"] = {"manifest": "bank.yaml", "bank_id": "fixture-bank",
                                        "reports": ["reports/actual-bank.json"]}
@@ -422,7 +424,9 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(bank["bank_reference"]["playable_notes"], [36, 38])
             virtual_kit = json.loads((root / "out" / "virtual-kit-map.json").read_text(encoding="utf-8"))
             self.assertEqual(virtual_kit["rows"][0]["ddrum4"],
-                             {"channel": 10, "note": 36, "slot": 1, "sound_id": None, "note_p": 1})
+                             {"channel": 10, "note": 36, "slot": 1, "sound_id": None, "note_p": 1,
+                              "variations": [{"number": 1, "name": "Main"}],
+                              "layer_candidates": [{"layer": 1, "velocity": 100, "sample": 1}]})
 
     def test_linked_bank_rejects_bad_hash_channel_and_renderer_note(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

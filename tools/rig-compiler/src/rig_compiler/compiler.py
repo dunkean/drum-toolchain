@@ -473,8 +473,27 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
         for slot, sound in enumerate(bank_sounds, start=1):
             base, width = sound.get("note_base"), sound.get("note_p")
             if isinstance(base, int) and isinstance(width, int) and base <= ddrum["note"] < base + width:
+                note_p = ddrum["note"] - base + 1
                 ddrum_target.update({"slot": slot, "sound_id": sound.get("sound_id", sound.get("id")),
-                                     "note_p": ddrum["note"] - base + 1})
+                                     "note_p": note_p})
+                variations = sound.get("variations")
+                if isinstance(variations, list):
+                    ddrum_target["variations"] = [
+                        {key: item[key] for key in ("number", "name") if key in item}
+                        for item in variations if isinstance(item, dict) and isinstance(item.get("number"), int)
+                    ]
+                layers = sound.get("layers")
+                if isinstance(layers, list):
+                    candidates = []
+                    for index, layer in enumerate(layers, start=1):
+                        if not isinstance(layer, dict) or layer.get("position") != note_p:
+                            continue
+                        candidate = {"layer": index}
+                        for key in ("source", "velocity", "variation", "pitch", "rr", "sample"):
+                            if key in layer:
+                                candidate["round_robin" if key == "rr" else key] = layer[key]
+                        candidates.append(candidate)
+                    ddrum_target["layer_candidates"] = candidates
                 break
         matcher = route["match"].get("type")
         firmware_reason = _firmware_lowering_reason(route)
