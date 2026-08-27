@@ -170,6 +170,8 @@ class ControlCenterTests(unittest.TestCase):
         self.assertTrue(all(row.complete for row in rows))
         self.assertEqual(rows[0].physical, "kick.hit")
         self.assertEqual(rows[0].raw_notes, {"ddrum4": 0, "ddti": 0, "edrumin": 0})
+        self.assertEqual((rows[0].ddrum4_slot, rows[0].ddrum4_sound_id, rows[0].ddrum4_note_p),
+                         (1, "KICK_981", 1))
 
     def test_installed_r15_matrix_exposes_shared_crash_variations_without_extra_samples(self) -> None:
         manifest = Path(__file__).resolve().parents[3] / "profiles" / "banks" / "metalcore-r15-installed.yaml"

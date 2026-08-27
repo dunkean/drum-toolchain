@@ -448,7 +448,10 @@ def launch() -> int:
             self.virtual_kit_table.setRowCount(len(self._studio_rows))
             for row, kit_row in enumerate(self._studio_rows):
                 logical = kit_row.logical_sound or "MISSING"
-                ddrum_text = f"C{simulator.project.ddrum4_output_channel} · note {kit_row.ddrum4_note}" if kit_row.ddrum4_note is not None else "MISSING"
+                ddrum_text = (f"S{kit_row.ddrum4_slot} {kit_row.ddrum4_sound_id} · P{kit_row.ddrum4_note_p} · "
+                              f"C{simulator.project.ddrum4_output_channel} N{kit_row.ddrum4_note}"
+                              if kit_row.ddrum4_note is not None and kit_row.ddrum4_sound_id else
+                              (f"C{simulator.project.ddrum4_output_channel} · note {kit_row.ddrum4_note}" if kit_row.ddrum4_note is not None else "MISSING"))
                 sd3_text = f"C{kit_row.sd3_channel} · note {kit_row.sd3_note}" if kit_row.sd3_note is not None else "MISSING"
                 gizmo_text = (f"{kit_row.drumgizmo_instrument} / {kit_row.drumgizmo_articulation} · note {kit_row.drumgizmo_note}"
                               if kit_row.drumgizmo_note is not None and kit_row.drumgizmo_instrument and kit_row.drumgizmo_articulation else "MISSING")

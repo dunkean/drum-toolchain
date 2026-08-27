@@ -49,6 +49,8 @@ class MatrixSound:
     slot: int
     sound_id: str | None = None
     source: str | None = None
+    note_base: int | None = None
+    note_p: int | None = None
     layers: tuple[MatrixLayer, ...] = ()
     encoded_blocks: int | None = None
     mem_left_delta_blocks: int | None = None
@@ -59,6 +61,9 @@ class MatrixSound:
     def layer_count(self) -> int | None:
         return len(self.layers) if self.sound_id is not None else None
 
+    def contains_note(self, note: int) -> bool:
+        return self.note_base is not None and self.note_p is not None and self.note_base <= note < self.note_base + self.note_p
+
 
 @dataclass(frozen=True)
 class Ddrum4KitMatrix:
@@ -68,6 +73,9 @@ class Ddrum4KitMatrix:
 
     def sound(self, slot: int) -> MatrixSound:
         return self.sounds[slot - 1]
+
+    def sound_for_note(self, note: int) -> MatrixSound | None:
+        return next((sound for sound in self.sounds if sound.contains_note(note)), None)
 
 
 def _document(path: Path) -> dict[str, Any]:
@@ -136,8 +144,15 @@ def _layers(value: object, base: Path) -> tuple[MatrixLayer, ...]:
 
 def _sound(value: dict[str, Any], slot: int, base: Path) -> MatrixSound:
     sound_id = _text(value.get("sound_id")) or _text(value.get("id"))
+    note_base = _blocks(value.get("note_base"), "note_base")
+    note_p = _blocks(value.get("note_p"), "note_p")
+    if (note_base is None) != (note_p is None):
+        raise ValueError("note_base and note_p must be declared together")
+    if note_base is not None and (note_base > 127 or note_p is None or not 1 <= note_p <= 128 - note_base):
+        raise ValueError("note_base/note_p must describe a MIDI range within 0..127")
     return MatrixSound(
         slot=slot, sound_id=sound_id, source=_text(value.get("source")) or _text(value.get("instrument")),
+        note_base=note_base, note_p=note_p,
         layers=_layers(value.get("layers"), base),
         encoded_blocks=_blocks(value.get("encoded_blocks"), "encoded_blocks"),
         mem_left_delta_blocks=_blocks(value.get("mem_left_delta_blocks", value.get("measured_mem_left_delta_blocks")), "mem_left_delta_blocks"),
