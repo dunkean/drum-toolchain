@@ -18,6 +18,7 @@ from control_center.simulator import RigSimulator
 from control_center.virtual_kit import build_virtual_kit
 from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
                                      METALCORE_ELECTRONIC_V1_ADDITIONS)
+from midi_lab.traces import MidiTrace, TraceEvent
 
 
 class ControlCenterTests(unittest.TestCase):
@@ -43,6 +44,31 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual({item["id"] for item in document["inputs"]}, {"ddrum4", "ddti", "edrumin"})
         self.assertIn("SIM_", document["inputs"][0]["declared_endpoint"])
         self.assertIn("Do not copy any `SIM_*`", guide_text)
+
+    def test_live_measurement_campaign_reviews_only_unambiguous_isolated_note_traces(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            campaign.write_new(root)
+            first = next(decoder for decoder in campaign.project.source_decoders if decoder.message_type == "note")
+            first_path = root / campaign.trace_relative_path(first.source, first.physical)
+            first_path.parent.mkdir()
+            MidiTrace("captured source", (TraceEvent(0, "note_on", 12, 36, 100),)).write(first_path)
+            initial = LiveMeasurementCampaign.read(root).review_traces(root)
+            observed = next(row for row in initial["rows"] if row["id"] == f"{first.source}.{first.physical}")
+            self.assertEqual(observed, {"id": f"{first.source}.{first.physical}",
+                                        "trace": campaign.trace_relative_path(first.source, first.physical),
+                                        "status": "observed", "channel": 12, "note": 36})
+            self.assertEqual(initial["status"], "incomplete")
+            for index, decoder in enumerate((item for item in campaign.project.source_decoders if item.message_type == "note"), start=1):
+                path = root / campaign.trace_relative_path(decoder.source, decoder.physical)
+                path.parent.mkdir(exist_ok=True)
+                MidiTrace("captured source", (TraceEvent(0, "note_on", 1, index, 100),)).write(path)
+            complete = campaign.review_traces(root)
+
+        self.assertEqual(complete["status"], "capture-complete-not-live")
+        self.assertTrue(all(row["status"] == "observed" for row in complete["rows"]))
 
     def test_sd3_campaign_writes_resumable_sampler_session_and_reports_file_progress(self) -> None:
         campaign = Sd3CaptureCampaign(

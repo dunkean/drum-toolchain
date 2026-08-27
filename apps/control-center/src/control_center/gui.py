@@ -181,10 +181,13 @@ def launch() -> int:
             create_measurement = QPushButton("Create live measurement campaign…")
             create_measurement.setToolTip("Writes a checklist and no MIDI/firmware data. It never converts SIM_* addresses into live mappings.")
             create_measurement.clicked.connect(self.create_live_measurement_campaign)
+            review_measurement = QPushButton("Review captured live traces…")
+            review_measurement.setToolTip("Reads isolated trace files only. It never writes a live profile or opens a MIDI port.")
+            review_measurement.clicked.connect(self.review_live_measurement_campaign)
             inspect_ports = QPushButton("Inspect visible MIDI ports (read-only)")
             inspect_ports.setToolTip("Lists OS-visible MIDI names only. It does not open, send to, or bind any MIDI port.")
             inspect_ports.clicked.connect(self.inspect_visible_midi_ports)
-            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(inspect_ports)
+            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(review_measurement); readiness_layout.addWidget(inspect_ports)
             readiness_page.setLayout(readiness_layout)
             editor_tabs.addTab(readiness_page, "Validation & deployment")
             layout.addWidget(editor_tabs)
@@ -756,6 +759,27 @@ def launch() -> int:
             lines.extend(["", "Outputs:"])
             lines.extend(f"• {name}" for name in inventory["outputs"])
             lines.extend(["", "Validate a physical cable and capture a trace before adding any name to deployment: live."])
+            self.editor_readiness.setPlainText("\n".join(lines))
+
+        def review_live_measurement_campaign(self) -> None:
+            """Render a read-only completeness report for one campaign folder."""
+            directory = QFileDialog.getExistingDirectory(self, "Select live measurement campaign directory")
+            if not directory:
+                return
+            try:
+                review = LiveMeasurementCampaign.read(Path(directory)).review_traces(Path(directory))
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot review measurement campaign", str(error)); return
+            rows = review["rows"]
+            observed = sum(row["status"] == "observed" for row in rows)
+            lines = [f"Live trace review: {observed}/{len(rows)} isolated routes observed", f"Status: {review['status']}", ""]
+            for row in rows:
+                if row["status"] == "observed":
+                    lines.append(f"PASS {row['id']} — C{row['channel']} N{row['note']}")
+                else:
+                    lines.append(f"{str(row['status']).upper()} {row['id']} — {row.get('reason', 'review required')}")
+            lines.extend(["", str(review["next"]),
+                          "This report is evidence only; it does not modify the rig or authorize a firmware flash."])
             self.editor_readiness.setPlainText("\n".join(lines))
 
         def save_editor_project(self) -> None:

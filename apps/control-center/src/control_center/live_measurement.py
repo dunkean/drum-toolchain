@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from drum_domain.rig_project import RigProject, load_rig_project
+from midi_lab.traces import MidiTrace
 
 
 def discover_midi_port_inventory(
@@ -68,6 +69,17 @@ class LiveMeasurementCampaign:
                 ],
                 "status": "needs-live-measurement",
             })
+        trace_requests = [
+            {
+                "id": f"{decoder.source}.{decoder.physical}",
+                "source": decoder.source,
+                "physical": decoder.physical,
+                "trace": self.trace_relative_path(decoder.source, decoder.physical),
+                "acceptance": "one isolated Note On address (channel + note); record expressions separately",
+                "status": "pending",
+            }
+            for decoder in self.project.source_decoders if decoder.message_type == "note"
+        ]
         state_actions = []
         for scene, actions in self.project.ddrum_state_actions.items():
             for index, action in enumerate(actions, start=1):
@@ -85,6 +97,7 @@ class LiveMeasurementCampaign:
             "target_deployment": "live",
             "do_not_copy_simulation_addresses": True,
             "inputs": inputs,
+            "trace_requests": trace_requests,
             "control_bus": ({"declared_endpoint": self.project.control_bus["endpoint"],
                              "declared_channel": self.project.control_bus["channel"],
                              "status": self.project.control_bus["status"],
@@ -117,6 +130,72 @@ class LiveMeasurementCampaign:
         lines.extend(f"1. {step}" for step in document["flash_gate"])  # type: ignore[index]
         lines.append("")
         return "\n".join(lines)
+
+    @staticmethod
+    def trace_relative_path(source: str, physical: str) -> str:
+        """Stable relative location for one intentionally isolated hit trace."""
+        safe_physical = physical.replace(".", "-")
+        return f"traces/{source}__{safe_physical}.jsonl"
+
+    @classmethod
+    def read(cls, directory: Path) -> "LiveMeasurementCampaign":
+        """Reload a campaign and reject a changed source project before review."""
+        plan = directory.resolve() / "live-measurement-plan.json"
+        try:
+            document = json.loads(plan.read_text(encoding="utf-8"))
+            source = Path(document["source_project"])
+            expected = document["source_sha256"]
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+            raise ValueError(f"invalid live measurement campaign: {plan}") from error
+        if not isinstance(expected, str):
+            raise ValueError("live measurement campaign has no source SHA-256")
+        campaign = cls.from_path(source)
+        if campaign.project_sha256 != expected:
+            raise ValueError("source rig project changed since this measurement campaign was created")
+        return campaign
+
+    def review_traces(self, directory: Path) -> dict[str, object]:
+        """Review isolated capture files without changing the rig project.
+
+        A route becomes *observed* only when an isolated trace contains one
+        unambiguous Note On address.  A review is evidence for a later human
+        edit of ``deployment: live``; it never writes that profile itself.
+        """
+        rows = []
+        for decoder in self.project.source_decoders:
+            if decoder.message_type != "note":
+                continue
+            relative = self.trace_relative_path(decoder.source, decoder.physical)
+            trace_path = directory / relative
+            if not trace_path.is_file():
+                rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
+                             "status": "missing", "reason": "capture one isolated hit"})
+                continue
+            try:
+                trace = MidiTrace.read(trace_path)
+                addresses = {(event.channel, event.data1) for event in trace.events
+                             if event.message_type == "note_on" and event.channel is not None
+                             and event.data1 is not None and event.data2 is not None and event.data2 > 0}
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
+                             "status": "invalid", "reason": str(error)})
+                continue
+            if len(addresses) != 1:
+                rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
+                             "status": "ambiguous" if addresses else "empty",
+                             "addresses": [{"channel": channel, "note": note} for channel, note in sorted(addresses)],
+                             "reason": "one isolated Note On address is required"})
+                continue
+            channel, note = next(iter(addresses))
+            rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
+                         "status": "observed", "channel": channel, "note": note})
+        passed = bool(rows) and all(row["status"] == "observed" for row in rows)
+        return {"kind": "drum-live-measurement-review/v1", "hardware_io": "disabled",
+                "source_project": str(self.project_path), "source_sha256": self.project_sha256,
+                "status": "capture-complete-not-live" if passed else "incomplete",
+                "rows": rows,
+                "next": ("review every observed address, then manually create a deployment: live project"
+                         if passed else "capture or re-capture every non-observed trace")}
 
     def write_new(self, directory: Path) -> tuple[Path, Path]:
         """Write a new offline plan without overwriting an existing campaign."""

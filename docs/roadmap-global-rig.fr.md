@@ -57,6 +57,9 @@ change aucun réglage de module.
 - [x] Le Control Center crée une campagne de mesures versionnée depuis le
   projet sauvegardé : checklist des entrées, état DDrum4 et control-bus, hash
   du projet source, et interdiction explicite de recopier les adresses `SIM_*`.
+- [x] Cette campagne relit les traces isolées et refuse une adresse absente ou
+  ambiguë ; même une campagne complète ne crée pas automatiquement un profil
+  live ni un firmware flashable.
 - [ ] Créer une copie `deployment: live` du projet, avec les noms de ports
   réellement observés, les canaux de sortie des trois modules et le canal
   global DDrum4 identique à son entrée (`C12` aujourd'hui).
