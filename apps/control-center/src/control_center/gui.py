@@ -18,6 +18,7 @@ from .simulator import RigSimulator, SimulationError
 from .virtual_kit import build_virtual_kit
 from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS,
                        METALCORE_ELECTRONIC_V1_ADDITIONS)
+from .live_measurement import LiveMeasurementCampaign
 
 
 def launch() -> int:
@@ -177,7 +178,10 @@ def launch() -> int:
             self.editor_readiness.setPlainText("Load a rig project, then inspect readiness.")
             inspect_readiness = QPushButton("Inspect compiler / firmware readiness")
             inspect_readiness.clicked.connect(self.inspect_editor_readiness)
-            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness)
+            create_measurement = QPushButton("Create live measurement campaign…")
+            create_measurement.setToolTip("Writes a checklist and no MIDI/firmware data. It never converts SIM_* addresses into live mappings.")
+            create_measurement.clicked.connect(self.create_live_measurement_campaign)
+            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement)
             readiness_page.setLayout(readiness_layout)
             editor_tabs.addTab(readiness_page, "Validation & deployment")
             layout.addWidget(editor_tabs)
@@ -715,6 +719,28 @@ def launch() -> int:
                 self.editor_readiness.setPlainText(f"Readiness inspection failed: {error}")
             finally:
                 temporary.unlink(missing_ok=True)
+
+        def create_live_measurement_campaign(self) -> None:
+            """Create the hand-off folder needed before a measured live profile.
+
+            This intentionally consumes the saved project only: an unsaved
+            YAML buffer cannot be mistaken for an observed hardware contract.
+            """
+            try:
+                project = self._selected_simulator_project_path()
+            except SimulationError as error:
+                QMessageBox.warning(self, "Cannot create measurement campaign", str(error)); return
+            directory = QFileDialog.getExistingDirectory(self, "Select empty live measurement campaign directory")
+            if not directory:
+                return
+            try:
+                plan, guide = LiveMeasurementCampaign.from_path(project).write_new(Path(directory))
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot create measurement campaign", str(error)); return
+            self.editor_readiness.setPlainText(
+                f"Live measurement campaign created.\n\nPlan: {plan}\nGuide: {guide}\n\n"
+                "It is a checklist only: no MIDI port, DDrum4 state, or Arduino firmware was touched."
+            )
 
         def save_editor_project(self) -> None:
             try:

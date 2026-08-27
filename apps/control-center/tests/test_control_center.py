@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from control_center import ControlCenter
 from control_center.ddrum4_matrix import UNKNOWN, audition_command, load_kit_matrix
+from control_center.live_measurement import LiveMeasurementCampaign
 from control_center.simulator import RigSimulator
 from control_center.virtual_kit import build_virtual_kit
 from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
@@ -20,6 +21,22 @@ from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
 
 
 class ControlCenterTests(unittest.TestCase):
+    def test_live_measurement_campaign_records_requirements_without_promoting_simulation_addresses(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        with tempfile.TemporaryDirectory() as temporary:
+            plan, guide = campaign.write_new(Path(temporary))
+            document = json.loads(plan.read_text(encoding="utf-8"))
+            guide_text = guide.read_text(encoding="utf-8")
+
+        self.assertEqual(document["kind"], "drum-live-measurement-campaign/v1")
+        self.assertEqual(document["hardware_io"], "disabled")
+        self.assertTrue(document["do_not_copy_simulation_addresses"])
+        self.assertEqual(document["target_deployment"], "live")
+        self.assertEqual({item["id"] for item in document["inputs"]}, {"ddrum4", "ddti", "edrumin"})
+        self.assertIn("SIM_", document["inputs"][0]["declared_endpoint"])
+        self.assertIn("Do not copy any `SIM_*`", guide_text)
+
     def test_sd3_campaign_writes_resumable_sampler_session_and_reports_file_progress(self) -> None:
         campaign = Sd3CaptureCampaign(
             identifier="sd3_test_kit", sd3_preset="Test MegaKit", midi_output="SD3 input",
