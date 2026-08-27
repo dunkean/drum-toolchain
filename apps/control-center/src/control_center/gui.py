@@ -122,7 +122,16 @@ def launch() -> int:
             self.visual_sounds.itemChanged.connect(lambda _: self._sync_visual_project("sounds"))
             self.visual_sounds.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
             self.visual_sounds.horizontalHeader().setStretchLastSection(True)
-            editor_tabs.addTab(self.visual_sounds, "Sounds and renderer map")
+            sounds_page = QWidget(); sounds_layout = QVBoxLayout(); sounds_layout.addWidget(self.visual_sounds)
+            sound_actions = QHBoxLayout()
+            add_sound = QPushButton("Add logical sound…"); add_sound.clicked.connect(self.add_visual_sound)
+            duplicate_sound = QPushButton("Duplicate selected sound…"); duplicate_sound.clicked.connect(self.duplicate_visual_sound)
+            remove_sound = QPushButton("Delete selected sound…"); remove_sound.clicked.connect(self.delete_visual_sound)
+            for button in (add_sound, duplicate_sound, remove_sound):
+                sound_actions.addWidget(button)
+            sound_actions.addStretch(1); sounds_layout.addLayout(sound_actions)
+            sounds_page.setLayout(sounds_layout)
+            editor_tabs.addTab(sounds_page, "Sounds and renderer map")
             self.visual_routes = QTableWidget(0, 3)
             self.visual_routes.setHorizontalHeaderLabels(("Scene", "Physical pad / articulation", "Logical sound"))
             self.visual_routes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -384,6 +393,95 @@ def launch() -> int:
                     raise ValueError("Advanced YAML is not a project mapping")
                 return str(document["state"]["defaults"]["scene"])
             return self.visual_routes.item(row, 0).text()
+
+        def _selected_visual_sound(self) -> str:
+            row = self.visual_sounds.currentRow()
+            if row < 0 or self.visual_sounds.item(row, 0) is None:
+                raise ValueError("select a logical sound first")
+            return self.visual_sounds.item(row, 0).text()
+
+        @staticmethod
+        def _route_uses_logical_sound(value: object, logical_sound: str) -> bool:
+            if value == logical_sound:
+                return True
+            if isinstance(value, list):
+                return any(isinstance(item, dict) and item.get("logical_target") == logical_sound for item in value)
+            return False
+
+        def _apply_visual_project_document(self, document: dict[str, object], message: str) -> None:
+            """Refresh all editable views after a structural project edit."""
+            self._visual_project_syncing = True
+            try:
+                self.project_document.setPlainText(yaml.safe_dump(document, sort_keys=False, allow_unicode=True))
+                self._populate_visual_project_tables(document)
+                self._refresh_visual_sound_bank_facts()
+            finally:
+                self._visual_project_syncing = False
+            self.editor_status.setText(message + " Validate before saving.")
+
+        def add_visual_sound(self) -> None:
+            self._copy_visual_sound("Add logical sound", "Logical sound identifier:", None)
+
+        def duplicate_visual_sound(self) -> None:
+            try:
+                source = self._selected_visual_sound()
+            except ValueError as error:
+                QMessageBox.warning(self, "Duplicate logical sound", str(error)); return
+            self._copy_visual_sound("Duplicate logical sound", "New logical sound identifier:", source)
+
+        def _copy_visual_sound(self, title: str, prompt: str, source: str | None) -> None:
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict) or not isinstance(document.get("renderers"), dict):
+                    raise ValueError("Advanced YAML is not a project renderer mapping")
+                suggested = f"{source}.copy" if source else "new.sound"
+                logical, accepted = QInputDialog.getText(self, title, prompt, text=suggested)
+                if not accepted:
+                    return
+                logical = logical.strip()
+                if not logical:
+                    raise ValueError("logical sound identifier cannot be empty")
+                renderers = document["renderers"]
+                known = set().union(*(set(items) for items in renderers.values() if isinstance(items, dict)))
+                if logical in known:
+                    raise ValueError(f"logical sound {logical!r} already exists")
+                for target in ("ddrum4", "sd3", "drumgizmo"):
+                    target_map = renderers.get(target)
+                    if not isinstance(target_map, dict):
+                        raise ValueError(f"renderer {target!r} is missing")
+                    target_map[logical] = deepcopy(target_map[source]) if source is not None else {}
+                message = f"Logical sound {logical!r} duplicated from {source!r}." if source else f"Logical sound {logical!r} added."
+                self._apply_visual_project_document(document, message)
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, title, str(error))
+
+        def delete_visual_sound(self) -> None:
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                logical = self._selected_visual_sound()
+                uses = [
+                    f"{scene}.{physical}"
+                    for scene, mappings in document.get("logical_routes", {}).items() if isinstance(mappings, dict)
+                    for physical, target in mappings.items()
+                    if self._route_uses_logical_sound(target, logical)
+                ]
+                if uses:
+                    raise ValueError(f"{logical!r} is still used by: {', '.join(uses)}")
+                answer = QMessageBox.question(self, "Delete logical sound", f"Delete {logical!r} from all three renderer maps?")
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                renderers = document.get("renderers", {})
+                if not isinstance(renderers, dict):
+                    raise ValueError("project renderers must be a mapping")
+                for target in ("ddrum4", "sd3", "drumgizmo"):
+                    target_map = renderers.get(target)
+                    if isinstance(target_map, dict):
+                        target_map.pop(logical, None)
+                self._apply_visual_project_document(document, f"Logical sound {logical!r} deleted.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Delete logical sound", str(error))
 
         def _apply_scene_document(self, document: dict[str, object], message: str) -> None:
             """Refresh all visual tables after a structural scene edit.
