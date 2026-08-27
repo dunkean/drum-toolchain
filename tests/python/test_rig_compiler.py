@@ -58,7 +58,7 @@ class RigCompilerTests(unittest.TestCase):
             validated = validate_project(project)
             self.assertEqual(validated.source_sha256, __import__("hashlib").sha256(project.read_bytes()).hexdigest())
             result = compile_project(project, output)
-            self.assertEqual(len(result.artifacts), 10)
+            self.assertEqual(len(result.artifacts), 11)
             report = json.loads((output / "project-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["format"], "rig-project-report/v1")
             self.assertEqual(report["source_sha256"], validated.source_sha256)
@@ -90,6 +90,11 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(drumgizmo["mappings"][0]["instrument"], "kick")
             self.assertEqual(drumgizmo_note_overrides(output / "drumgizmo-midimap.json"),
                              {("kick", "hit"): 36, ("snare", "head"): 38})
+            virtual_kit = json.loads((output / "virtual-kit-map.json").read_text(encoding="utf-8"))
+            self.assertEqual(virtual_kit["format"], "virtual-kit-map/v1")
+            self.assertEqual(virtual_kit["status"], "ready")
+            self.assertEqual(virtual_kit["rows"][0]["ddrum4"], {"channel": 10, "note": 36})
+            self.assertEqual(virtual_kit["rows"][1]["drumgizmo"]["articulation"], "head")
 
     def test_compile_refuses_replace_without_explicit_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

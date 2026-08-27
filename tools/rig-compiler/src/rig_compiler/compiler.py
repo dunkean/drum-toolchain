@@ -199,7 +199,8 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "runtime-profile": "planned" if unresolved else "ready", "ddrum4-routing-plan": "planned",
         "ddrum4-routing-contract": "planned", "firmware-project-mapping": "ready" if live_ready else ("planned" if unresolved else ("simulation-only" if deployment == "simulation" else "planned")),
         "sd3-midimap": "user-confirmed", "drumgizmo-midimap": "planned" if unresolved else "ready", "sd3-megakit-map": "user-confirmed",
-        "ddrum4-bank-plan": "planned", "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
+        "ddrum4-bank-plan": "planned", "virtual-kit-map": "planned" if unresolved else "ready",
+        "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
     }
     report = {**provenance, "format": "rig-project-report/v1", "project": document.get("project", "unnamed-rig"),
               "artifacts": [{"name": key, "status": value} for key, value in report_status.items()],
@@ -257,17 +258,44 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
             **({"reports": reference["reports"]} if "reports" in reference else {}),
         }
     markdown = _megakit_markdown(digest, routes)
+    virtual_kit = _virtual_kit_map(provenance, document, routes, report_status["virtual-kit-map"])
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
         "ddrum4-routing-contract.json": contract, "firmware-project-mapping.json": firmware,
         "sd3-midimap.json": note_map("sd3", "sd3"),
         "drumgizmo-midimap.json": note_map("drumgizmo", "drumgizmo"), "sd3-megakit-map.md": markdown,
-        "ddrum4-bank-plan.yaml": bank,
+        "ddrum4-bank-plan.yaml": bank, "virtual-kit-map.json": virtual_kit,
         # This is intentionally a declarative request, never a sysex/dump artifact.
         "ddti-preset.yaml": {**provenance, "format": "ddti-preset/v1", "status": report_status["ddti-preset"],
                                    "reason": "base dump hash recorded; manual staging remains planned" if document.get("ddti_base_dump") else "--base-dump is required; no transferable dump was generated",
                                    "transferable_dump": False},
     }
+
+
+def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], routes: list[dict[str, Any]],
+                     status: str) -> dict[str, Any]:
+    """Emit a renderer-parity artifact from the exact compiled route records.
+
+    It intentionally records one state-qualified source route per row.  This
+    avoids hiding a Scene/VP variation behind a prettified single-pad table and
+    gives the desktop UI a stable, compiler-owned contract to display.
+    """
+    rows = []
+    for route in routes:
+        ddrum, sd3, gizmo = (route["renderers"][name] for name in ("ddrum4", "sd3", "drumgizmo"))
+        rows.append({
+            "id": route["id"], "scene": route["scene"], "state_predicates": route["state_predicates"],
+            "source": route["source"]["id"], "raw_match": route["match"], "physical": route["physical"],
+            "logical_sound": route["logical_target"],
+            "ddrum4": {"channel": document["ddrum4_output_channel"], "note": ddrum["note"]},
+            "sd3": {"channel": sd3.get("channel", 10), "note": sd3["note"]},
+            "drumgizmo": {"channel": gizmo.get("channel", 10), "note": gizmo["note"],
+                           "instrument": gizmo["instrument"], "articulation": gizmo["articulation"]},
+            "coverage": "complete",
+        })
+    return {**provenance, "format": "virtual-kit-map/v1", "status": status,
+            "project": document.get("project", "unnamed-rig"), "deployment": document.get("deployment"),
+            "state": document["state"], "rows": rows, "hardware_io": "disabled"}
 
 
 def _megakit_markdown(digest: str, routes: list[dict[str, Any]]) -> str:

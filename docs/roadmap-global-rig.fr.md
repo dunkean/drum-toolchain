@@ -14,6 +14,9 @@ change aucun réglage de module.
   physique sélectionne un son logique, puis montre côte à côte les trois
   destinations DDrum4, SD3 et DrumGizmo, avec vélocité, scène, journal et
   panic uniquement simulés.
+- [x] Le compilateur publie aussi `virtual-kit-map.json`, la table
+  état/source/physique/son logique/DDrum4/SD3/DrumGizmo exactement issue des
+  routes compilées ; c'est le contrat de parité des trois renderers.
 - [x] Un diagnostic offline « no-pad » parcourt chaque entrée Note, scène,
   état VP connu et contrôle natif déclaré, puis produit un rapport sans ouvrir
   de port MIDI (`drum-control-center diagnose <projet>`). Les CC et
