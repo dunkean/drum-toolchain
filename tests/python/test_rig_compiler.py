@@ -173,6 +173,36 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(generator.returncode, 2)
             self.assertIn("verified live flash plan", generator.stderr)
 
+    def test_live_planned_or_sysex_state_action_never_creates_a_flashable_firmware_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["deployment"] = "live"
+            document["control_bus"] = {"endpoint": "reviewed-control-bus", "channel": 15, "status": "user-confirmed"}
+            document["sources"]["ddrum4"] = document["sources"].pop("brain")
+            for decoder in document["source_decoders"]:
+                decoder["match"]["source"] = "ddrum4"
+            for action, expected in (
+                ({"type": "program_change", "status": "planned", "channel": 10, "program": 0}, "action status is 'planned'"),
+                ({"type": "sysex", "status": "measured", "data": [1, 2, 3]}, "Uno mapping supports reviewed Program Change actions only"),
+            ):
+                document["ddrum_state_actions"] = {"metal": [action]}
+                project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+                output = root / f"out-{action['type']}-{action['status']}"
+                result = compile_project(project, output)
+                statuses = {entry["name"]: entry["status"] for entry in result.artifacts["project-report.json"]["artifacts"]}
+                self.assertEqual(statuses["firmware-project-mapping"], "planned")
+                firmware = json.loads((output / "firmware-project-mapping.json").read_text(encoding="utf-8"))
+                self.assertEqual(firmware["hardware_flash"], "disabled")
+                self.assertEqual(firmware["lowering_blockers"], [{"id": "ddrum_state_actions.metal[0]", "reason": expected}])
+                generator = subprocess.run(
+                    [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(output / "firmware-project-mapping.json"),
+                     "--output-channel", "10", "--output", str(root / "generated_mapping.h")],
+                    capture_output=True, text=True, check=False)
+                self.assertEqual(generator.returncode, 2)
+                self.assertIn("verified live flash plan", generator.stderr)
+
     def test_compile_refuses_replace_without_explicit_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -187,6 +187,28 @@ def _firmware_lowering_reason(record: dict[str, Any]) -> str | None:
     return None
 
 
+def _firmware_action_lowering_blockers(document: dict[str, Any]) -> list[dict[str, str]]:
+    """Return state-action facts the Uno generator cannot safely lower.
+
+    The Python compiler is the flash gate.  It must not label a live mapping
+    ready and rely on ``generate_mapping.py`` to discover a planned action or
+    unsupported SysEx later in the workflow.
+    """
+    blockers: list[dict[str, str]] = []
+    for scene, actions in document.get("ddrum_state_actions", {}).items():
+        if not isinstance(actions, list):
+            continue  # Domain validation reports malformed documents first.
+        for index, action in enumerate(actions):
+            if not isinstance(action, dict):
+                continue
+            identifier = f"ddrum_state_actions.{scene}[{index}]"
+            if action.get("status") not in {"measured", "user-confirmed"}:
+                blockers.append({"id": identifier, "reason": f"action status is {action.get('status')!r}"})
+            elif action.get("type") != "program_change":
+                blockers.append({"id": identifier, "reason": "Uno mapping supports reviewed Program Change actions only"})
+    return blockers
+
+
 def _expression_route(document: dict[str, Any], record: dict[str, Any]) -> dict[str, Any] | None:
     """Find the explicit contract for a raw CC/aftertouch route, if any."""
     expressions = record["emit"].get("expressions", ())
@@ -295,7 +317,12 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         provenance["base_dump"] = document["ddti_base_dump"]
     unresolved = _has_unresolved_values(document)
     expression_report = _expression_capability_report(document, routes, provenance)
-    firmware_unlowerable = bool(expression_report["firmware_unlowerable_routes"])
+    firmware_lowering_blockers = [
+        {"id": row["id"], "reason": row["reason"]}
+        for row in expression_report["firmware_unlowerable_routes"]
+    ]
+    firmware_lowering_blockers.extend(_firmware_action_lowering_blockers(document))
+    firmware_unlowerable = bool(firmware_lowering_blockers)
     runtime_expressions_unlowered = any(
         _runtime_expression_reason(document, record, target) is not None
         for target in ("sd3", "drumgizmo") for record in routes
@@ -363,6 +390,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "native_control_map": document["native_control_map"],
         "ddrum_state_actions": document.get("ddrum_state_actions", {}),
         "records": routes,
+        "lowering_blockers": firmware_lowering_blockers,
         "hardware_flash": "ready" if live_ready else "disabled",
     }
     def note_map(target: str, renderer: str) -> dict[str, Any]:
