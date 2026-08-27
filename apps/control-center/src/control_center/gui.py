@@ -151,7 +151,13 @@ def launch() -> int:
             self.visual_actions.setHorizontalHeaderLabels(("Scene", "Native action", "Channel", "Program", "Status", "Description"))
             self.visual_actions.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.visual_actions.itemChanged.connect(lambda _: self._sync_visual_project("actions"))
-            editor_tabs.addTab(self.visual_actions, "DDrum4 kit / palette actions")
+            actions_page = QWidget(); actions_layout = QVBoxLayout(); actions_layout.addWidget(self.visual_actions)
+            action_buttons = QHBoxLayout()
+            add_action = QPushButton("Add DDrum4 Program action…"); add_action.clicked.connect(self.add_visual_action)
+            remove_action = QPushButton("Delete selected action…"); remove_action.clicked.connect(self.delete_visual_action)
+            action_buttons.addWidget(add_action); action_buttons.addWidget(remove_action); action_buttons.addStretch(1)
+            actions_layout.addLayout(action_buttons); actions_page.setLayout(actions_layout)
+            editor_tabs.addTab(actions_page, "DDrum4 kit / palette actions")
             self.visual_sources = QTableWidget(0, 4)
             self.visual_sources.setHorizontalHeaderLabels(("Module", "Endpoint", "Raw channel", "Primary input"))
             self.visual_sources.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -306,11 +312,13 @@ def launch() -> int:
             action_rows = []
             for scene, actions in document.get("ddrum_state_actions", {}).items():
                 if isinstance(actions, list):
-                    for action in actions:
-                        if isinstance(action, dict): action_rows.append((scene, action.get("type", "—"), action.get("channel", "—"), action.get("program", "—"), action.get("status", "—"), action.get("description", "")))
+                    for index, action in enumerate(actions):
+                        if isinstance(action, dict):
+                            action_rows.append((scene, index, action.get("type", "—"), action.get("channel", "—"), action.get("program", "—"), action.get("status", "—"), action.get("description", "")))
+            self._visual_action_rows = [(scene, index) for scene, index, *_ in action_rows]
             self.visual_actions.setRowCount(len(action_rows))
             for row, values in enumerate(action_rows):
-                for column, value in enumerate(values):
+                for column, value in enumerate(values[0:1] + values[2:]):
                     item = QTableWidgetItem(str(value))
                     if column < 2:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -482,6 +490,59 @@ def launch() -> int:
                 self._apply_visual_project_document(document, f"Logical sound {logical!r} deleted.")
             except (TypeError, ValueError, KeyError) as error:
                 QMessageBox.warning(self, "Delete logical sound", str(error))
+
+        def add_visual_action(self) -> None:
+            """Append one deliberately unconfirmed Program Change action to a Scene."""
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                scenes = document["state"]["scenes"]
+                if not isinstance(scenes, list) or not scenes:
+                    raise ValueError("project has no declared scenes")
+                current = self._selected_visual_scene()
+                scene, accepted = QInputDialog.getItem(self, "Add DDrum4 Program action", "Scene:", scenes,
+                                                       max(0, scenes.index(current) if current in scenes else 0), False)
+                if not accepted:
+                    return
+                output_channel = document.get("ddrum4_output_channel")
+                if not isinstance(output_channel, int):
+                    raise ValueError("ddrum4_output_channel must be an integer")
+                actions = document.setdefault("ddrum_state_actions", {})
+                if not isinstance(actions, dict):
+                    raise ValueError("ddrum_state_actions must be a mapping")
+                scene_actions = actions.setdefault(scene, [])
+                if not isinstance(scene_actions, list):
+                    raise ValueError(f"ddrum_state_actions.{scene} must be a list")
+                scene_actions.append({
+                    "type": "program_change", "status": "planned", "channel": output_channel, "program": 0,
+                    "description": "New action — verify on the DDrum4 before marking user-confirmed.",
+                })
+                self._apply_visual_project_document(document, f"Unconfirmed DDrum4 Program action added to {scene!r}.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Add DDrum4 Program action", str(error))
+
+        def delete_visual_action(self) -> None:
+            try:
+                row = self.visual_actions.currentRow()
+                if row < 0 or row >= len(getattr(self, "_visual_action_rows", ())):
+                    raise ValueError("select a DDrum4 action first")
+                scene, index = self._visual_action_rows[row]
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                actions = document.get("ddrum_state_actions", {})
+                if not isinstance(actions, dict) or not isinstance(actions.get(scene), list) or index >= len(actions[scene]):
+                    raise ValueError("selected action no longer exists in Advanced YAML")
+                answer = QMessageBox.question(self, "Delete DDrum4 action", f"Delete action {index + 1} from {scene!r}?")
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                del actions[scene][index]
+                if not actions[scene]:
+                    del actions[scene]
+                self._apply_visual_project_document(document, f"DDrum4 action deleted from {scene!r}.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Delete DDrum4 action", str(error))
 
         def _apply_scene_document(self, document: dict[str, object], message: str) -> None:
             """Refresh all visual tables after a structural scene edit.
