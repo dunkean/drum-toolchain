@@ -167,6 +167,18 @@ def launch() -> int:
             self.project_document = QTextEdit(); self.project_document.setAcceptRichText(False)
             self.project_document.setPlaceholderText("Advanced YAML source.")
             editor_tabs.addTab(self.project_document, "Advanced YAML")
+            readiness_page = QWidget(); readiness_layout = QVBoxLayout()
+            readiness_layout.addWidget(QLabel(
+                "Readiness is calculated from the YAML currently shown above. It validates and compiles only a temporary local copy; "
+                "it never opens a MIDI port, builds/flashes Arduino firmware, or changes the DDrum4."
+            ))
+            self.editor_readiness = QTextEdit(); self.editor_readiness.setReadOnly(True)
+            self.editor_readiness.setPlainText("Load a rig project, then inspect readiness.")
+            inspect_readiness = QPushButton("Inspect compiler / firmware readiness")
+            inspect_readiness.clicked.connect(self.inspect_editor_readiness)
+            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness)
+            readiness_page.setLayout(readiness_layout)
+            editor_tabs.addTab(readiness_page, "Validation & deployment")
             layout.addWidget(editor_tabs)
             validate = QPushButton("Validate project")
             validate.clicked.connect(self.validate_editor_project)
@@ -657,6 +669,51 @@ def launch() -> int:
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Project validation failed", str(error)); return
             self.editor_status.setText("Valid project. Safe to save or compile.")
+
+        def inspect_editor_readiness(self) -> None:
+            """Explain compiler/flash gates for the exact unsaved editor text.
+
+            A sibling temporary file preserves relative references (especially
+            ``ddrum4_bank.manifest``) while making this a strictly offline
+            preview.  The result is deliberately not a substitute for a live
+            hardware measurement or an Arduino flash.
+            """
+            path = Path(self.editor_project.text().strip())
+            if not path.is_file():
+                self.editor_readiness.setPlainText("Select an existing rig project first.")
+                return
+            temporary = path.with_suffix(path.suffix + ".readiness.tmp")
+            try:
+                if temporary.exists():
+                    raise ValueError(f"remove stale readiness file first: {temporary}")
+                temporary.write_text(self.project_document.toPlainText(), encoding="utf-8", newline="\n")
+                from rig_compiler.compiler import validate_project
+                compilation = validate_project(temporary)
+                report = compilation.artifacts["project-report.json"]
+                firmware = compilation.artifacts["firmware-project-mapping.json"]
+                statuses = {item["name"]: item["status"] for item in report["artifacts"]}
+                lines = [
+                    f"Project: {report['project']}",
+                    f"Deployment: {report['deployment']}",
+                    f"Firmware mapping: {statuses['firmware-project-mapping']}",
+                    f"Arduino flash gate: {firmware['hardware_flash']}",
+                    f"Runtime profile: {statuses['runtime-profile']}",
+                    f"Virtual-kit parity map: {statuses['virtual-kit-map']}",
+                    "",
+                ]
+                blockers = firmware.get("lowering_blockers", [])
+                if blockers:
+                    lines.append("Firmware blockers:")
+                    lines.extend(f"• {item['id']}: {item['reason']}" for item in blockers)
+                elif firmware["hardware_flash"] != "ready":
+                    lines.append("Firmware is not flashable. Check deployment=live, measured values, and exact Note decoders.")
+                else:
+                    lines.append("Firmware mapping is ready to generate. Flash still requires the separate hardware review gate.")
+                self.editor_readiness.setPlainText("\n".join(lines))
+            except (ImportError, OSError, ValueError) as error:
+                self.editor_readiness.setPlainText(f"Readiness inspection failed: {error}")
+            finally:
+                temporary.unlink(missing_ok=True)
 
         def save_editor_project(self) -> None:
             try:
