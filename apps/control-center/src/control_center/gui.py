@@ -5,6 +5,7 @@ device-discovery, or module-memory operations.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 import json
 from pathlib import Path
@@ -121,7 +122,17 @@ def launch() -> int:
             self.visual_routes.setHorizontalHeaderLabels(("Scene", "Physical pad / articulation", "Logical sound"))
             self.visual_routes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.visual_routes.itemChanged.connect(lambda _: self._sync_visual_project("routes"))
-            editor_tabs.addTab(self.visual_routes, "Scenes and palettes")
+            routes_page = QWidget(); routes_layout = QVBoxLayout(); routes_layout.addWidget(self.visual_routes)
+            scene_actions = QHBoxLayout()
+            add_scene = QPushButton("Add scene…"); add_scene.clicked.connect(self.add_visual_scene)
+            duplicate_scene = QPushButton("Duplicate selected scene…"); duplicate_scene.clicked.connect(self.duplicate_visual_scene)
+            rename_scene = QPushButton("Rename selected scene…"); rename_scene.clicked.connect(self.rename_visual_scene)
+            remove_scene = QPushButton("Delete selected scene…"); remove_scene.clicked.connect(self.delete_visual_scene)
+            for button in (add_scene, duplicate_scene, rename_scene, remove_scene):
+                scene_actions.addWidget(button)
+            scene_actions.addStretch(1); routes_layout.addLayout(scene_actions)
+            routes_page.setLayout(routes_layout)
+            editor_tabs.addTab(routes_page, "Scenes and palettes")
             self.visual_actions = QTableWidget(0, 6)
             self.visual_actions.setHorizontalHeaderLabels(("Scene", "Native action", "Channel", "Program", "Status", "Description"))
             self.visual_actions.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -303,6 +314,109 @@ def launch() -> int:
                 self._populate_visual_project_tables(yaml.safe_load(self.project_document.toPlainText()))
                 self._visual_project_syncing = False
                 self.editor_status.setText(f"Table edit rejected: {error}")
+
+        def _selected_visual_scene(self) -> str:
+            row = self.visual_routes.currentRow()
+            if row < 0 or self.visual_routes.item(row, 0) is None:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                return str(document["state"]["defaults"]["scene"])
+            return self.visual_routes.item(row, 0).text()
+
+        def _apply_scene_document(self, document: dict[str, object], message: str) -> None:
+            """Refresh all visual tables after a structural scene edit.
+
+            Structural edits use the same Advanced YAML source as scalar table
+            edits. Validation remains explicit before saving, so creating a
+            Scene cannot trigger a compile or a MIDI message.
+            """
+            self._visual_project_syncing = True
+            try:
+                self.project_document.setPlainText(yaml.safe_dump(document, sort_keys=False, allow_unicode=True))
+                self._populate_visual_project_tables(document)
+            finally:
+                self._visual_project_syncing = False
+            self.editor_status.setText(message + " Validate before saving.")
+
+        def add_visual_scene(self) -> None:
+            self._copy_visual_scene("Add scene", "New scene identifier:", self._selected_visual_scene())
+
+        def duplicate_visual_scene(self) -> None:
+            source = self._selected_visual_scene()
+            self._copy_visual_scene("Duplicate scene", "New scene identifier:", source, source)
+
+        def _copy_visual_scene(self, title: str, prompt: str, source_scene: str, suggested: str | None = None) -> None:
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                scenes = document["state"]["scenes"]
+                if source_scene not in scenes:
+                    raise ValueError(f"unknown source scene {source_scene!r}")
+                name, accepted = QInputDialog.getText(self, title, prompt, text=suggested or f"{source_scene}.copy")
+                if not accepted:
+                    return
+                name = name.strip()
+                if not name:
+                    raise ValueError("scene identifier cannot be empty")
+                if name in scenes:
+                    raise ValueError(f"scene {name!r} already exists")
+                scenes.append(name)
+                document["logical_routes"][name] = deepcopy(document["logical_routes"][source_scene])
+                actions = document.setdefault("ddrum_state_actions", {})
+                if source_scene in actions:
+                    actions[name] = deepcopy(actions[source_scene])
+                self._apply_scene_document(document, f"Scene {name!r} created from {source_scene!r}.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, title, str(error))
+
+        def rename_visual_scene(self) -> None:
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                old = self._selected_visual_scene()
+                new, accepted = QInputDialog.getText(self, "Rename scene", "Scene identifier:", text=old)
+                if not accepted or new.strip() == old:
+                    return
+                new = new.strip()
+                scenes = document["state"]["scenes"]
+                if not new:
+                    raise ValueError("scene identifier cannot be empty")
+                if new in scenes:
+                    raise ValueError(f"scene {new!r} already exists")
+                scenes[scenes.index(old)] = new
+                document["logical_routes"][new] = document["logical_routes"].pop(old)
+                actions = document.setdefault("ddrum_state_actions", {})
+                if old in actions:
+                    actions[new] = actions.pop(old)
+                if document["state"]["defaults"]["scene"] == old:
+                    document["state"]["defaults"]["scene"] = new
+                self._apply_scene_document(document, f"Scene {old!r} renamed to {new!r}.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Rename scene", str(error))
+
+        def delete_visual_scene(self) -> None:
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                name = self._selected_visual_scene()
+                scenes = document["state"]["scenes"]
+                if len(scenes) <= 1:
+                    raise ValueError("the only scene cannot be deleted")
+                if name == document["state"]["defaults"]["scene"]:
+                    raise ValueError("select another default scene before deleting this scene")
+                answer = QMessageBox.question(self, "Delete scene", f"Delete scene {name!r} and all of its route variants?")
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                scenes.remove(name)
+                del document["logical_routes"][name]
+                document.get("ddrum_state_actions", {}).pop(name, None)
+                self._apply_scene_document(document, f"Scene {name!r} deleted.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Delete scene", str(error))
 
         def _validate_editor_text(self) -> None:
             path = Path(self.editor_project.text().strip())
