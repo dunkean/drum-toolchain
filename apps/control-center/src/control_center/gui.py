@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
+from hashlib import sha256
 import json
 from pathlib import Path
 import yaml
@@ -748,6 +749,10 @@ def launch() -> int:
                 "audio ou module matériel n’est ouvert."
             )
             subtitle.setWordWrap(True); layout.addWidget(subtitle)
+            self.studio_project_identity = QLabel("No active saved rig project.")
+            self.studio_project_identity.setObjectName("projectIdentity")
+            self.studio_project_identity.setWordWrap(True)
+            layout.addWidget(self.studio_project_identity)
 
             controls = QGroupBox("Transport de simulation")
             controls_layout = QHBoxLayout()
@@ -801,10 +806,10 @@ def launch() -> int:
 
             body = QSplitter(Qt.Orientation.Horizontal)
             left = QWidget(); left_layout = QVBoxLayout()
-            left_layout.addWidget(QLabel("Pads / articulations — double-click a row to trigger it at the displayed velocity. Raw input notes remain visible for all declared modules."))
-            self.virtual_kit_table = QTableWidget(0, 8)
+            left_layout.addWidget(QLabel("Pads / articulations — use ▶ (or double-click a row) to route that articulation at the selected velocity. Raw input notes remain visible for all declared modules."))
+            self.virtual_kit_table = QTableWidget(0, 9)
             self.virtual_kit_table.setHorizontalHeaderLabels((
-                "Pad / articulation", "eDRUMin", "DDTi", "DDrum4", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
+                "Trigger", "Pad / articulation", "eDRUMin", "DDTi", "DDrum4", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
             ))
             self.virtual_kit_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.virtual_kit_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -871,16 +876,21 @@ def launch() -> int:
                 self._refresh_studio_expression_choices(simulator)
                 self._load_project_bank_reference(self._active_simulator_path or Path(), simulator.project.raw)
                 self.refresh_virtual_kit_workspace()
-                self.virtual_kit_status.setText("Virtual kit loaded from the same validated rig project as the compiler.")
+                active_path = self._active_simulator_path
+                if active_path is not None:
+                    digest = sha256(active_path.read_bytes()).hexdigest()[:12]
+                    self.studio_project_identity.setText(f"ACTIVE SAVED PROJECT  ·  {active_path}  ·  SHA-256 {digest}")
+                self.virtual_kit_status.setText("Virtual kit loaded from the same saved rig project as the compiler.")
             except (OSError, ValueError, SimulationError) as error:
                 QMessageBox.warning(self, "Cannot load virtual kit", str(error))
 
         def _studio_scene_changed(self, scene: str) -> None:
-            if not scene:
+            if not scene or self._studio_state_syncing:
                 return
             try:
-                self.current_simulator().set_state(scene=scene)
-                self.refresh_virtual_kit_workspace()
+                simulator = self.current_simulator()
+                scene_index = simulator.project.scenes.index(scene)
+                self._apply_virtual_logical_control("scene", scene_index)
             except (OSError, ValueError, SimulationError) as error:
                 self.virtual_kit_status.setText(f"Scene change rejected: {error}")
 
@@ -934,11 +944,59 @@ def launch() -> int:
             if self._studio_state_syncing:
                 return
             try:
-                self.current_simulator().set_state(values={variable: value})
-                self.refresh_virtual_kit_workspace()
-                self.virtual_kit_status.setText(f"Offline palette state: {variable}={value}.")
+                self._apply_virtual_logical_control(variable, value)
             except (OSError, ValueError, SimulationError) as error:
                 self.virtual_kit_status.setText(f"Virtual-palette change rejected: {error}")
+
+        def _apply_virtual_logical_control(self, target: str, value: int) -> None:
+            """Apply one visible Scene/VP control through the declared protocol.
+
+            This is intentionally not a direct state mutation when a protocol
+            exists: the operator sees the exact PC/CC command, control-bus
+            safety status, and any DDrum4 reconciliation action in the same
+            trace as a pad hit.  Sparse/offline projects without a protocol
+            remain inspectable, but are labelled as local-only state edits.
+            """
+            simulator = self.current_simulator()
+            control = simulator.project.logical_control_protocol.get(target)
+            if control is None:
+                if target == "scene":
+                    simulator.set_state(scene=simulator.project.scenes[value])
+                else:
+                    simulator.set_state(values={target: value})
+                self.refresh_virtual_kit_workspace()
+                self._append_virtual_kit_status("Local state", target, f"{target}={value}; no logical MIDI control is declared")
+                self.virtual_kit_status.setText(f"Local-only state: {target}={value}. No MIDI control is declared.")
+                return
+            channel = control["channels"][0]
+            message_type = control["type"]
+            data1 = value if message_type == "program_change" else control["cc"]
+            result = simulator.simulate_logical_control("simulator", channel, message_type, data1, value)
+            self._present_virtual_state_change(target, result)
+            self.refresh_virtual_kit_workspace()
+
+        def _present_virtual_state_change(self, target: str, result: object) -> None:
+            """Render a state-command trace in the four simulator stages."""
+            by_stage = {step.stage: step for step in result.steps}
+            self.studio_cards["Raw input"].setPlainText(
+                self._format_studio_card(by_stage, ("logical control", "Arduino state"))
+            )
+            self.studio_cards["Arduino → DDrum4"].setPlainText(
+                self._format_studio_card(by_stage, ("control bus", "Arduino DDrum4 state"))
+            )
+            state_text = "Logical state is shared by all renderer resolutions; no hit was triggered."
+            self.studio_cards["SD3 reference"].setPlainText(state_text)
+            self.studio_cards["DrumGizmo"].setPlainText(state_text)
+            state = getattr(result, "state")
+            event_name = "Scene" if target == "scene" else "Palette"
+            self.studio_route_summary.setText(
+                f"{event_name} control applied  |  " + " · ".join(f"{name}={value}" for name, value in state.items()) +
+                "  |  subsequent pad hits resolve through this logical-kit state"
+            )
+            self._append_virtual_state_event(event_name, target, result)
+            self.virtual_kit_status.setText(
+                f"Offline {event_name.lower()} control traced. No MIDI, SysEx, or hardware action was emitted."
+            )
 
         def refresh_virtual_kit_workspace(self) -> None:
             try:
@@ -967,9 +1025,14 @@ def launch() -> int:
                               if kit_row.drumgizmo_note is not None and kit_row.drumgizmo_instrument and kit_row.drumgizmo_articulation else "MISSING")
                 values = (kit_row.physical, kit_row.raw_notes.get("edrumin", "—"), kit_row.raw_notes.get("ddti", "—"),
                           kit_row.raw_notes.get("ddrum4", "—"), logical, ddrum_text, sd3_text, gizmo_text)
-                for column, value in enumerate(values):
+                trigger = QPushButton("▶")
+                trigger.setObjectName("padTrigger")
+                trigger.setToolTip(f"Simulate {kit_row.physical} at the selected velocity")
+                trigger.clicked.connect(lambda _=False, index=row: (self.virtual_kit_table.selectRow(index), self.trigger_virtual_kit_pad()))
+                self.virtual_kit_table.setCellWidget(row, 0, trigger)
+                for column, value in enumerate(values, start=1):
                     item = QTableWidgetItem(str(value))
-                    if column != 0:
+                    if column != 1:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     if value == "MISSING":
                         item.setBackground(Qt.GlobalColor.darkRed)
@@ -994,15 +1057,15 @@ def launch() -> int:
                 QMessageBox.warning(self, "Cannot trigger virtual pad", str(error)); return
             by_stage = {step.stage: step for step in result.steps}
             self.studio_cards["Raw input"].setPlainText(self._format_studio_card(by_stage, ("raw MIDI", "source profile", "logical state", "logical sound")))
-            self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer", "DDrum4 audio", "DDrum4 echo guard")))
-            self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 audio")))
-            self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer", "DrumGizmo audio")))
+            self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer", "DDrum4 declared target", "DDrum4 echo guard")))
+            self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 declared target")))
+            self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer", "DrumGizmo declared target")))
             self.studio_route_summary.setText(
                 f"{result.physical}  →  {result.logical_target}  |  source {result.source}, velocity {result.velocity}  |  "
-                "all destinations shown are declared by the saved project"
+                "three declared destinations resolved; this offline trace does not prove audio playback"
             )
             self._append_virtual_kit_event(result)
-            self.virtual_kit_status.setText(f"Offline route verified: {result.physical} → {result.logical_target}. No MIDI or audio was emitted.")
+            self.virtual_kit_status.setText(f"Offline route resolved: {result.physical} → {result.logical_target}. No MIDI or audio was emitted.")
 
         def trigger_virtual_expression(self) -> None:
             data = self.studio_expression.currentData()
@@ -1020,7 +1083,7 @@ def launch() -> int:
             by_stage = {step.stage: step for step in result.steps}
             self.studio_cards["Raw input"].setPlainText(self._format_studio_card(by_stage, ("raw MIDI", "source profile", "logical state", "logical sound")))
             self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer",)))
-            self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 audio")))
+            self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 declared target")))
             self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer",)))
             self.studio_route_summary.setText(
                 f"{physical} expression  |  source {result.source}, value {result.velocity}  |  "
@@ -1065,6 +1128,31 @@ def launch() -> int:
             row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
             values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], result.raw_type, result.source, result.physical,
                       result.logical_target, result.velocity, ddrum, sd3, gizmo)
+            for column, value in enumerate(values):
+                self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
+            self._studio_events.append(result.to_document())
+            self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()
+
+        def _append_virtual_state_event(self, event_name: str, target: str, result: object) -> None:
+            """Keep control changes in the same chronological session as hits.
+
+            The DDrum4 column preserves the declared Program Change/SysEx
+            action (including its confirmation status).  SD3 and DrumGizmo do
+            not receive a synthetic MIDI event: they share the selected
+            logical state and will use it on the next triggered pad.
+            """
+            by_stage = {step.stage: step for step in result.steps}
+            ddrum_step = by_stage.get("Arduino DDrum4 state")
+            ddrum_message = getattr(ddrum_step, "message", None)
+            if ddrum_message:
+                ddrum = " · ".join(f"{key}={value}" for key, value in ddrum_message.items())
+            else:
+                ddrum = getattr(ddrum_step, "detail", "no DDrum4 action")
+            state = getattr(result, "state")
+            state_text = " · ".join(f"{name}={value}" for name, value in state.items())
+            row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
+            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], event_name, getattr(result, "source"), target,
+                      state_text, "—", ddrum, "logical state", "logical state")
             for column, value in enumerate(values):
                 self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
             self._studio_events.append(result.to_document())
@@ -1589,14 +1677,36 @@ def launch() -> int:
             self.log.setPlainText(report.render_text())
 
         def current_simulator(self) -> RigSimulator:
-            path_text = self.project.text().strip() or self.editor_project.text().strip()
-            if not path_text:
-                raise SimulationError("select a rig project first")
-            path = Path(path_text).resolve()
+            path = self._selected_simulator_project_path()
             if self._active_simulator is None or self._active_simulator_path != path:
                 self._active_simulator = RigSimulator.from_path(path)
                 self._active_simulator_path = path
             return self._active_simulator
+
+        def _selected_simulator_project_path(self) -> Path:
+            """Return exactly one saved source of truth for compile and simulate.
+
+            The former UI let the legacy rig selector and the editor selector
+            point at different YAML files.  That made a clean simulator trace
+            potentially describe a different kit from the editor.  A saved
+            editor buffer is therefore required when it is the selected
+            project, and divergent selectors are rejected instead of guessed.
+            """
+            editor_text = self.editor_project.text().strip()
+            project_text = self.project.text().strip()
+            if not editor_text and not project_text:
+                raise SimulationError("select a rig project first")
+            editor_path = Path(editor_text).resolve() if editor_text else None
+            project_path = Path(project_text).resolve() if project_text else None
+            if editor_path is not None and project_path is not None and editor_path != project_path:
+                raise SimulationError("editor project and simulator project differ; load one saved project before simulating")
+            path = editor_path or project_path
+            assert path is not None
+            if not path.is_file():
+                raise SimulationError(f"rig project does not exist: {path}")
+            if editor_path == path and self.project_document.toPlainText() != path.read_text(encoding="utf-8"):
+                raise SimulationError("the kit editor has unsaved changes; save it before loading the simulator")
+            return path
 
         def reset_simulator(self) -> None:
             self._invalidate_simulator_workspace()
@@ -1620,6 +1730,7 @@ def launch() -> int:
                     card.setPlainText("Reload the saved rig project to simulate it.")
                 self.studio_route_summary.setText("Project changed. Reload the saved project before inspecting routes.")
                 self.virtual_kit_status.setText("Project changed. Reload the virtual kit from the saved file.")
+                self.studio_project_identity.setText("No active saved rig project. Save and reload before simulation.")
 
         def load_simulator_pads(self) -> None:
             try:
@@ -1707,6 +1818,7 @@ def launch() -> int:
     app.setStyleSheet("""
         QMainWindow, QWidget { background: #0b1013; color: #d8e3e7; font-size: 12px; }
         QLabel#workspaceTitle { color: #eff8fb; font-size: 22px; font-weight: 750; padding: 4px 0; }
+        QLabel#projectIdentity { color: #7faeb8; background: #0d171b; border: 1px solid #28434c; border-radius: 4px; padding: 6px; }
         QLabel#signalFlow { color: #8de85b; font-size: 13px; font-weight: 750; letter-spacing: 1px; background: #101a1e; border: 1px solid #274036; border-radius: 5px; padding: 9px; }
         QLabel#routeSummary { color: #b9d9df; background: #0e171b; border-left: 3px solid #54c9dc; padding: 9px; }
         QTabWidget::pane, QGroupBox { border: 1px solid #263940; border-radius: 7px; margin-top: 10px; }
@@ -1716,6 +1828,7 @@ def launch() -> int:
         QGroupBox#ddrumStage { border-color: #bf853c; color: #ffbc59; }
         QGroupBox#sd3Stage { border-color: #a6912e; color: #f0d84b; }
         QGroupBox#drumgizmoStage { border-color: #7760ab; color: #c4a3ff; }
+        QPushButton#padTrigger { min-width: 28px; padding: 3px 6px; color: #8eea57; border-color: #357f53; }
         QTabBar::tab { background: #121d22; color: #9eb3ba; padding: 9px 14px; border: 1px solid #263940; }
         QTabBar::tab:selected { background: #1a3138; color: #91ec57; }
         QPushButton { background: #15262d; border: 1px solid #3b6976; border-radius: 5px; padding: 7px 11px; color: #e1f3f6; font-weight: 600; }

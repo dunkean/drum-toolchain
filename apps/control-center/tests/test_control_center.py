@@ -74,6 +74,8 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(messages["SD3 renderer"]["note"], 89)
         self.assertEqual(messages["DrumGizmo renderer"]["instrument"], "percussion")
         self.assertIn("hardware_io", result.to_document())
+        self.assertTrue(result.to_document()["route_resolved"])
+        self.assertFalse(result.renders_audio)
 
     def test_complete_chain_simulator_accepts_each_declared_module(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"

@@ -44,7 +44,10 @@ class SimulationResult:
     state: Mapping[str, Any]
     steps: tuple[TraceStep, ...]
     raw_type: str = "note_on"
-    renders_audio: bool = True
+    # This class only proves a declared route.  It never opens an engine,
+    # device, or module, therefore it must never be interpreted as audio
+    # verification.
+    renders_audio: bool = False
 
     def to_document(self) -> dict[str, Any]:
         return {
@@ -56,6 +59,7 @@ class SimulationResult:
                     {"type": self.raw_type, "data1": self.raw_note, "value": self.velocity}),
             "physical": self.physical,
             "logical_target": self.logical_target,
+            "route_resolved": True,
             "renders_audio": self.renders_audio,
             "state": dict(self.state),
             "trace": [step.to_document() for step in self.steps],
@@ -210,14 +214,14 @@ class RigSimulator:
         ddrum_message = {"type": "note_on", "channel": ddrum_channel, "note": ddrum["note"], "velocity": velocity}
         steps.extend((
             TraceStep("Arduino DDrum4 renderer", "writes the converted event to DDrum4 MIDI IN", ddrum_message),
-            TraceStep("DDrum4 audio", f"Local Off: the returned note renders {logical}"),
+            TraceStep("DDrum4 declared target", f"Local Off is declared; DDrum4 would receive {logical} when live"),
             TraceStep("DDrum4 echo guard", "suppresses the expected returned DDrum4 MIDI OUT echo", ddrum_message),
         ))
         sd3 = self.project.renderers["sd3"][logical]
         sd3_message = {"type": "note_on", "channel": sd3.get("channel", 10), "note": sd3["note"], "velocity": velocity}
         steps.extend((
             TraceStep("SD3 renderer", "sends the canonical MegaKit MIDI event", sd3_message),
-            TraceStep("SD3 audio", f"MegaKit renders {logical}"),
+            TraceStep("SD3 declared target", f"The selected SD3 kit would receive {logical} when its runtime is live"),
         ))
         drumgizmo = self.project.renderers["drumgizmo"][logical]
         drumgizmo_message = {
@@ -226,7 +230,7 @@ class RigSimulator:
         }
         steps.extend((
             TraceStep("DrumGizmo renderer", "sends the declared note-only kit event", drumgizmo_message),
-            TraceStep("DrumGizmo audio", f"Kit renders {drumgizmo['instrument']}/{drumgizmo['articulation']}"),
+            TraceStep("DrumGizmo declared target", f"The selected kit would receive {drumgizmo['instrument']}/{drumgizmo['articulation']} when live"),
         ))
         return SimulationResult(source, note, velocity, physical, logical, dict(self._state), tuple(steps))
 
@@ -275,7 +279,7 @@ class RigSimulator:
                 TraceStep("SD3 renderer", f"{sd3_status} passthrough expression route", {
                     "type": "control_change", "channel": sd3_event["channel"], "cc": sd3_event["cc"], "value": value,
                 }),
-                TraceStep("SD3 audio", f"MegaKit updates {physical} openness without triggering a new hit"),
+                TraceStep("SD3 declared target", f"The selected SD3 kit would receive {physical} openness without a new hit"),
                 TraceStep("DrumGizmo renderer", "unsupported: declared DrumGizmo map is note-only", expression["targets"]["drumgizmo"]),
             ))
         else:
