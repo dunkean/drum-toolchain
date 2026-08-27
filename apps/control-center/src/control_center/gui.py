@@ -5,12 +5,14 @@ device-discovery, or module-memory operations.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 import yaml
 
 from .ddrum4_matrix import Ddrum4KitMatrix, MatrixLayer, UNKNOWN, load_kit_matrix
 from .service import ControlCenter
 from .simulator import RigSimulator, SimulationError
+from .virtual_kit import build_virtual_kit
 from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS,
                        METALCORE_ELECTRONIC_V1_ADDITIONS)
 
@@ -21,7 +23,7 @@ def launch() -> int:
         from PySide6.QtCore import QProcess
         from PySide6.QtGui import QTextCursor
         from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog,
-                                       QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+                                       QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                        QMainWindow, QMessageBox, QPushButton,
                                        QSplitter, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
                                        QTextEdit, QVBoxLayout, QWidget)
@@ -36,12 +38,14 @@ def launch() -> int:
             self._active_simulator: RigSimulator | None = None
             self._active_simulator_path: Path | None = None
             self.matrix: Ddrum4KitMatrix | None = None
+            self._studio_rows = []
             self.report_paths: list[Path] = []
             self.campaign_directory: Path | None = None
             self.campaign_process: QProcess | None = None
             self.setWindowTitle("Drum Control Center — offline")
             tabs = QTabWidget()
             tabs.addTab(self._project_editor_workspace(), "Kit, MIDI map, and palettes")
+            tabs.addTab(self._virtual_kit_workspace(), "Virtual kit & simulator")
             tabs.addTab(self._campaign_workspace(), "SD3 capture campaign")
             layout = QVBoxLayout()
             self.project = QLineEdit()
@@ -154,6 +158,7 @@ def launch() -> int:
                 self._load_project_bank_reference(path, document)
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Cannot load rig project", str(error)); return
+            self._invalidate_simulator_workspace()
             self.project.setText(str(path))
             self.editor_status.setText("Loaded and validated. Edit, validate, then save.")
 
@@ -326,8 +331,205 @@ def launch() -> int:
                 temporary.replace(path)
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Cannot save rig project", str(error)); return
+            self._invalidate_simulator_workspace()
             self.project.setText(str(path))
             self.editor_status.setText("Saved validated project. Compile explicitly to generate PC/Arduino artifacts.")
+
+        def _virtual_kit_workspace(self) -> QWidget:
+            """Visual operator workspace for one logical kit and its three renderers.
+
+            This deliberately remains an offline control surface.  It uses the
+            same rig-project selected in the editor, so the three output cards
+            cannot silently display a different mapping from the compiler.
+            """
+            workspace = QWidget()
+            layout = QVBoxLayout()
+            title = QLabel("Virtual kit — one physical articulation, one logical sound, three renderer destinations")
+            title.setStyleSheet("font-size: 18px; font-weight: 700;")
+            layout.addWidget(title)
+            subtitle = QLabel(
+                "SD3 is the reference renderer. The DDrum4 bank and DrumGizmo map are shown beside it so coverage, "
+                "NOTE P destinations and missing mappings are visible before compilation. It always uses the last saved project file; "
+                "unsaved Advanced YAML edits are intentionally not simulated. This workspace never opens MIDI or audio."
+            )
+            subtitle.setWordWrap(True); layout.addWidget(subtitle)
+
+            controls = QGroupBox("Simulation controls")
+            controls_layout = QHBoxLayout()
+            self.studio_source = QComboBox()
+            self.studio_scene = QComboBox()
+            self.studio_velocity = QSpinBox(); self.studio_velocity.setRange(1, 127); self.studio_velocity.setValue(100)
+            load = QPushButton("Load virtual kit")
+            load.clicked.connect(self.load_virtual_kit_workspace)
+            trigger = QPushButton("Trigger selected pad")
+            trigger.setToolTip("Runs an offline trace with the selected source, state, pad and velocity.")
+            trigger.clicked.connect(self.trigger_virtual_kit_pad)
+            reset = QPushButton("Reset state")
+            reset.clicked.connect(self.reset_virtual_kit_state)
+            panic = QPushButton("Panic (simulated)")
+            panic.setToolTip("Records an offline all-notes-off action. It does not emit MIDI.")
+            panic.clicked.connect(self.virtual_kit_panic)
+            for label, field in (("Raw source", self.studio_source), ("Scene", self.studio_scene), ("Velocity", self.studio_velocity)):
+                controls_layout.addWidget(QLabel(label + ":")); controls_layout.addWidget(field)
+            controls_layout.addWidget(load); controls_layout.addWidget(trigger); controls_layout.addWidget(reset); controls_layout.addWidget(panic)
+            controls.setLayout(controls_layout); layout.addWidget(controls)
+            self.studio_source.currentTextChanged.connect(self.refresh_virtual_kit_workspace)
+            self.studio_scene.currentTextChanged.connect(self._studio_scene_changed)
+
+            body = QSplitter(Qt.Orientation.Horizontal)
+            left = QWidget(); left_layout = QVBoxLayout()
+            left_layout.addWidget(QLabel("Pads / articulations — select a row, then trigger it. Raw note is displayed for every declared source."))
+            self.virtual_kit_table = QTableWidget(0, 8)
+            self.virtual_kit_table.setHorizontalHeaderLabels((
+                "Pad / articulation", "eDRUMin", "DDTi", "DDrum4", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
+            ))
+            self.virtual_kit_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.virtual_kit_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            self.virtual_kit_table.cellDoubleClicked.connect(lambda _row, _column: self.trigger_virtual_kit_pad())
+            left_layout.addWidget(self.virtual_kit_table)
+            coverage = QLabel("Coverage: DDrum4 bank note, SD3 MIDI note and DrumGizmo instrument/articulation must all be declared for a playable logical sound.")
+            coverage.setWordWrap(True); left_layout.addWidget(coverage)
+            left.setLayout(left_layout); body.addWidget(left)
+
+            right = QWidget(); right_layout = QVBoxLayout()
+            self.studio_cards: dict[str, QTextEdit] = {}
+            for heading in ("Raw input", "Arduino → DDrum4", "SD3 reference", "DrumGizmo"):
+                card = QGroupBox(heading)
+                card_layout = QVBoxLayout(); output = QTextEdit(); output.setReadOnly(True); output.setMinimumHeight(100)
+                output.setPlainText("No simulated event yet.")
+                card_layout.addWidget(output); card.setLayout(card_layout); right_layout.addWidget(card)
+                self.studio_cards[heading] = output
+            right.setLayout(right_layout); body.addWidget(right)
+            body.setStretchFactor(0, 3); body.setStretchFactor(1, 2); layout.addWidget(body, 4)
+
+            log_group = QGroupBox("Event log — offline simulation")
+            log_layout = QVBoxLayout()
+            self.virtual_kit_log = QTableWidget(0, 7)
+            self.virtual_kit_log.setHorizontalHeaderLabels(("Time", "Source", "Physical", "Logical", "Velocity", "DDrum4", "SD3 / DrumGizmo"))
+            self.virtual_kit_log.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            clear_log = QPushButton("Clear event log")
+            clear_log.clicked.connect(self.clear_virtual_kit_log)
+            log_layout.addWidget(self.virtual_kit_log); log_layout.addWidget(clear_log); log_group.setLayout(log_layout)
+            layout.addWidget(log_group, 2)
+            self.virtual_kit_status = QLabel("Load a rig project from the editor, then load the virtual kit.")
+            layout.addWidget(self.virtual_kit_status)
+            workspace.setLayout(layout)
+            return workspace
+
+        def load_virtual_kit_workspace(self) -> None:
+            try:
+                simulator = self.current_simulator()
+                self.studio_source.blockSignals(True); self.studio_source.clear(); self.studio_source.addItems(tuple(simulator.project.sources)); self.studio_source.blockSignals(False)
+                self.studio_scene.blockSignals(True); self.studio_scene.clear(); self.studio_scene.addItems(simulator.project.scenes); self.studio_scene.setCurrentText(simulator.state["scene"]); self.studio_scene.blockSignals(False)
+                self._load_project_bank_reference(self._active_simulator_path or Path(), simulator.project.raw)
+                self.refresh_virtual_kit_workspace()
+                self.virtual_kit_status.setText("Virtual kit loaded from the same validated rig project as the compiler.")
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot load virtual kit", str(error))
+
+        def _studio_scene_changed(self, scene: str) -> None:
+            if not scene:
+                return
+            try:
+                self.current_simulator().set_state(scene=scene)
+                self.refresh_virtual_kit_workspace()
+            except (OSError, ValueError, SimulationError) as error:
+                self.virtual_kit_status.setText(f"Scene change rejected: {error}")
+
+        def refresh_virtual_kit_workspace(self) -> None:
+            try:
+                simulator = self.current_simulator()
+            except (OSError, ValueError, SimulationError):
+                return
+            scene = self.studio_scene.currentText()
+            if scene:
+                simulator.set_state(scene=scene)
+            self._studio_rows = build_virtual_kit(simulator)
+            self.virtual_kit_table.setRowCount(len(self._studio_rows))
+            for row, kit_row in enumerate(self._studio_rows):
+                logical = kit_row.logical_sound or "MISSING"
+                ddrum_text = f"C{simulator.project.ddrum4_output_channel} · note {kit_row.ddrum4_note}" if kit_row.ddrum4_note is not None else "MISSING"
+                sd3_text = f"C{kit_row.sd3_channel} · note {kit_row.sd3_note}" if kit_row.sd3_note is not None else "MISSING"
+                gizmo_text = (f"{kit_row.drumgizmo_instrument} / {kit_row.drumgizmo_articulation} · note {kit_row.drumgizmo_note}"
+                              if kit_row.drumgizmo_note is not None and kit_row.drumgizmo_instrument and kit_row.drumgizmo_articulation else "MISSING")
+                values = (kit_row.physical, kit_row.raw_notes.get("edrumin", "—"), kit_row.raw_notes.get("ddti", "—"),
+                          kit_row.raw_notes.get("ddrum4", "—"), logical, ddrum_text, sd3_text, gizmo_text)
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column != 0:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if value == "MISSING":
+                        item.setBackground(Qt.GlobalColor.darkRed)
+                    self.virtual_kit_table.setItem(row, column, item)
+            self.virtual_kit_table.resizeColumnsToContents()
+            if self.virtual_kit_table.rowCount() and self.virtual_kit_table.currentRow() < 0:
+                self.virtual_kit_table.selectRow(0)
+
+        def trigger_virtual_kit_pad(self) -> None:
+            row = self.virtual_kit_table.currentRow()
+            if row < 0 or row >= len(self._studio_rows):
+                self.virtual_kit_status.setText("Select a declared pad/articulation first."); return
+            source = self.studio_source.currentText()
+            kit_row = self._studio_rows[row]
+            if source not in kit_row.raw_notes:
+                self.virtual_kit_status.setText(f"{kit_row.physical} has no exact Note-On decoder for {source}."); return
+            try:
+                simulator = self.current_simulator()
+                simulator.set_state(scene=self.studio_scene.currentText() or None)
+                result = simulator.simulate_pad(source, kit_row.raw_notes[source], self.studio_velocity.value())
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot trigger virtual pad", str(error)); return
+            by_stage = {step.stage: step for step in result.steps}
+            self.studio_cards["Raw input"].setPlainText(self._format_studio_card(by_stage, ("raw MIDI", "source profile", "logical state", "logical sound")))
+            self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer", "DDrum4 audio", "DDrum4 echo guard")))
+            self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 audio")))
+            self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer", "DrumGizmo audio")))
+            self._append_virtual_kit_event(result)
+            self.virtual_kit_status.setText(f"Offline route verified: {result.physical} → {result.logical_target}. No MIDI or audio was emitted.")
+
+        @staticmethod
+        def _format_studio_card(by_stage: dict[str, object], stages: tuple[str, ...]) -> str:
+            lines: list[str] = []
+            for name in stages:
+                step = by_stage.get(name)
+                if step is None:
+                    continue
+                detail = getattr(step, "detail")
+                message = getattr(step, "message")
+                lines.append(name + "\n" + detail)
+                if message:
+                    lines.append("  " + " · ".join(f"{key}={value}" for key, value in message.items()))
+            return "\n\n".join(lines) or "No declared destination."
+
+        def _append_virtual_kit_event(self, result: object) -> None:
+            ddrum = self.current_simulator().project.renderers["ddrum4"][result.logical_target]
+            sd3 = self.current_simulator().project.renderers["sd3"][result.logical_target]
+            gizmo = self.current_simulator().project.renderers["drumgizmo"][result.logical_target]
+            row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
+            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], result.source, result.physical, result.logical_target,
+                      result.velocity, f"C{self.current_simulator().project.ddrum4_output_channel} N{ddrum['note']}",
+                      f"SD3 N{sd3['note']} · {gizmo['instrument']}/{gizmo['articulation']}")
+            for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
+            self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()
+
+        def reset_virtual_kit_state(self) -> None:
+            self.reset_simulator()
+            self.load_virtual_kit_workspace()
+            self.virtual_kit_status.setText("State reset to the rig project defaults. No MIDI was sent.")
+
+        def virtual_kit_panic(self) -> None:
+            self._append_virtual_kit_status("Panic", "All Notes Off", "simulation only")
+            self.virtual_kit_status.setText("Panic recorded in the simulator only. No hardware MIDI was emitted.")
+
+        def _append_virtual_kit_status(self, source: str, physical: str, detail: str) -> None:
+            row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
+            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], source, physical, "—", "—", "—", detail)
+            for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(value))
+            self.virtual_kit_log.scrollToBottom()
+
+        def clear_virtual_kit_log(self) -> None:
+            self.virtual_kit_log.setRowCount(0)
+            self.virtual_kit_status.setText("Offline event log cleared.")
 
         def _campaign_workspace(self) -> QWidget:
             workspace = QWidget()
@@ -584,6 +786,16 @@ def launch() -> int:
             self.sim_pad_group = QGroupBox("Virtual pads — load a project to populate")
             self.sim_pad_grid = QGridLayout(); self.sim_pad_group.setLayout(self.sim_pad_grid)
             layout.addWidget(self.sim_pad_group)
+            expressions = QGroupBox("Expression simulator — CC / aftertouch")
+            expressions_layout = QHBoxLayout()
+            self.sim_expression_type = QLineEdit("cc")
+            self.sim_expression_data1 = QSpinBox(); self.sim_expression_data1.setRange(0, 127); self.sim_expression_data1.setValue(4)
+            self.sim_expression_value = QSpinBox(); self.sim_expression_value.setRange(0, 127); self.sim_expression_value.setValue(64)
+            expression_button = QPushButton("Simulate expression")
+            expression_button.clicked.connect(self.simulate_expression)
+            for label, field in (("Type:", self.sim_expression_type), ("CC / note:", self.sim_expression_data1), ("Value:", self.sim_expression_value)):
+                expressions_layout.addWidget(QLabel(label)); expressions_layout.addWidget(field)
+            expressions_layout.addWidget(expression_button); expressions.setLayout(expressions_layout); layout.addWidget(expressions)
             controls = QGroupBox("Logical control bus — PC/external → Arduino → DDrum4")
             controls_layout = QVBoxLayout()
             controls_layout.addWidget(QLabel(
@@ -738,6 +950,20 @@ def launch() -> int:
                 QMessageBox.warning(self, "Cannot simulate logical control", str(error)); return
             self.log.setPlainText(result.render_text())
 
+        def simulate_expression(self) -> None:
+            if not self.project.text() and not self.editor_project.text():
+                self.log.setPlainText("Select a rig project first."); return
+            try:
+                simulator = self.current_simulator()
+                simulator.set_state(scene=self.sim_scene.text() or None)
+                result = simulator.simulate_expression(
+                    self.sim_source.text().strip(), self.sim_expression_type.text().strip(),
+                    self.sim_expression_data1.value(), self.sim_expression_value.value(),
+                )
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot simulate expression", str(error)); return
+            self.log.setPlainText(result.render_text())
+
         def run_offline_diagnostic(self) -> None:
             if not self.project.text() and not self.editor_project.text():
                 self.log.setPlainText("Select a rig project first."); return
@@ -758,9 +984,25 @@ def launch() -> int:
             return self._active_simulator
 
         def reset_simulator(self) -> None:
+            self._invalidate_simulator_workspace()
+            self.log.setPlainText("Simulator state reset to the project defaults. No MIDI was sent.")
+
+        def _invalidate_simulator_workspace(self) -> None:
+            """Discard every cached/offline view after a saved project change.
+
+            The compiler reads the project file, never the Advanced-YAML text
+            buffer. Clearing all derived simulator data here prevents a same
+            path save from being presented as if it still used old routes.
+            """
             self._active_simulator = None
             self._active_simulator_path = None
-            self.log.setPlainText("Simulator state reset to the project defaults. No MIDI was sent.")
+            self._studio_rows = []
+            if hasattr(self, "virtual_kit_table"):
+                self.virtual_kit_table.setRowCount(0)
+                self.virtual_kit_log.setRowCount(0)
+                for card in self.studio_cards.values():
+                    card.setPlainText("Reload the saved rig project to simulate it.")
+                self.virtual_kit_status.setText("Project changed. Reload the virtual kit from the saved file.")
 
         def load_simulator_pads(self) -> None:
             try:
@@ -845,6 +1087,21 @@ def launch() -> int:
                 self.refresh_application_status()
 
     app = QApplication.instance() or QApplication([])
+    app.setStyleSheet("""
+        QMainWindow, QWidget { background: #11161a; color: #e5edf0; font-size: 12px; }
+        QTabWidget::pane, QGroupBox { border: 1px solid #2a3941; border-radius: 7px; margin-top: 9px; }
+        QGroupBox { color: #8eea57; font-weight: 700; padding: 8px; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+        QTabBar::tab { background: #1a242a; color: #aebec5; padding: 8px 13px; border: 1px solid #2a3941; }
+        QTabBar::tab:selected { background: #20333a; color: #91ec57; }
+        QPushButton { background: #1c2c34; border: 1px solid #3d6973; border-radius: 5px; padding: 6px 10px; color: #dff5f8; }
+        QPushButton:hover { background: #25414b; border-color: #68d6e5; }
+        QPushButton:pressed { background: #162126; }
+        QLineEdit, QComboBox, QSpinBox, QTextEdit, QTableWidget { background: #0d1215; border: 1px solid #31424a; border-radius: 4px; color: #e5edf0; selection-background-color: #285460; }
+        QHeaderView::section { background: #1a262c; color: #a7c0c8; border: none; padding: 5px; font-weight: 700; }
+        QTableWidget::item:selected { background: #214c58; color: white; }
+        QScrollBar:vertical { background: #11161a; width: 10px; } QScrollBar::handle:vertical { background: #34515b; border-radius: 4px; }
+    """)
     window = Window(); window.resize(960, 900); window.show()
     return app.exec()
 

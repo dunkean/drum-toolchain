@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from control_center import ControlCenter
 from control_center.ddrum4_matrix import UNKNOWN, audition_command, load_kit_matrix
 from control_center.simulator import RigSimulator
+from control_center.virtual_kit import build_virtual_kit
 from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
                                      METALCORE_ELECTRONIC_V1_ADDITIONS)
 
@@ -121,7 +122,7 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(result.message, {"type": "program_change", "channel": 12, "data1": 1, "value": 1})
         self.assertFalse(any(step.stage == "Arduino DDrum4 state" for step in result.steps))
 
-    def test_offline_diagnostic_never_silently_skips_cc_or_aftertouch_decoders(self) -> None:
+    def test_offline_diagnostic_fails_expression_paths_without_shared_renderer_support(self) -> None:
         source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "cc-and-aftertouch.yaml"
@@ -133,12 +134,16 @@ class ControlCenterTests(unittest.TestCase):
                  "emit": {"physical": "snare.head", "expressions": ["pressure"]}},
             ))
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-            report = RigSimulator.from_path(project).run_offline_diagnostic()
+            simulator = RigSimulator.from_path(project)
+            report = simulator.run_offline_diagnostic()
+            cc = simulator.simulate_expression("edrumin", "cc", 4, 64)
 
         self.assertFalse(report.passed)
         failed = {case.identifier for case in report.cases if not case.passed}
-        self.assertIn("decoder.010.edrumin.cc", failed)
-        self.assertIn("decoder.011.ddti.poly_aftertouch", failed)
+        self.assertIn("cc.edrumin.n004.metalcore.vp1_snare0", failed)
+        self.assertIn("poly_aftertouch.ddti.n038.metalcore.vp1_snare0", failed)
+        self.assertFalse(cc.renders_audio)
+        self.assertEqual(cc.to_document()["raw"], {"type": "control_change", "data1": 4, "value": 64})
 
     def test_r15_simulator_covers_ten_sounds_from_each_of_three_modules(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
@@ -156,6 +161,15 @@ class ControlCenterTests(unittest.TestCase):
                              if step.stage == "Arduino DDrum4 renderer") for result in results}
             self.assertEqual(rendered, expected_ddrum)
             self.assertEqual(channels, {12})
+
+    def test_virtual_kit_is_complete_for_installed_r15_simulation(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        rows = build_virtual_kit(RigSimulator.from_path(project))
+
+        self.assertEqual(len(rows), 10)
+        self.assertTrue(all(row.complete for row in rows))
+        self.assertEqual(rows[0].physical, "kick.hit")
+        self.assertEqual(rows[0].raw_notes, {"ddrum4": 0, "ddti": 0, "edrumin": 0})
 
     def test_installed_r15_matrix_exposes_shared_crash_variations_without_extra_samples(self) -> None:
         manifest = Path(__file__).resolve().parents[3] / "profiles" / "banks" / "metalcore-r15-installed.yaml"

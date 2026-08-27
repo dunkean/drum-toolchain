@@ -78,6 +78,15 @@ def main(argv: list[str] | None = None) -> int:
     simulate.add_argument("--state", action="append", default=[], metavar="NAME=VALUE",
                           help="optional virtual-palette override; repeat as needed")
     simulate.add_argument("--json", action="store_true", help="print the complete machine-readable trace")
+    expression = commands.add_parser("simulate-expression", help="offline trace: declared CC or poly-aftertouch through the logical chain")
+    expression.add_argument("project", type=Path)
+    expression.add_argument("--source", required=True)
+    expression.add_argument("--type", dest="message_type", choices=("cc", "poly_aftertouch"), required=True)
+    expression.add_argument("--data1", required=True, type=int, help="CC address or aftertouch note")
+    expression.add_argument("--value", type=int, default=64)
+    expression.add_argument("--scene")
+    expression.add_argument("--state", action="append", default=[], metavar="NAME=VALUE")
+    expression.add_argument("--json", action="store_true", help="print the complete machine-readable trace")
     control = commands.add_parser("simulate-control", help="offline trace: Scene/VP command through Arduino DDrum4 reconciliation")
     control.add_argument("project", type=Path)
     control.add_argument("--source", choices=("pc", "external", "simulator"), default="pc")
@@ -125,6 +134,21 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, SimulationError) as error:
             parser.error(str(error))
         print(json.dumps(result.to_document(), indent=2, ensure_ascii=False) if args.json else result.render_text())
+        return 0
+    if args.action == "simulate-expression":
+        try:
+            overrides: dict[str, int] = {}
+            for item in args.state:
+                name, separator, value = item.partition("=")
+                if not separator or not name:
+                    raise SimulationError("--state must use NAME=VALUE")
+                overrides[name] = int(value)
+            simulator = RigSimulator.from_path(args.project)
+            simulator.set_state(scene=args.scene, values=overrides)
+            result = simulator.simulate_expression(args.source, args.message_type, args.data1, args.value)
+        except (OSError, ValueError, SimulationError) as error:
+            parser.error(str(error))
+        print(json.dumps(result.to_document(), indent=2, ensure_ascii=True) if args.json else result.render_text())
         return 0
     if args.action == "diagnose":
         try:

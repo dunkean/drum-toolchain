@@ -10,12 +10,16 @@ change aucun réglage de module.
 - [x] Un modèle unique `Physical → Logical → DDrum4 / SD3 / DrumGizmo`.
 - [x] Un Control Center capable de charger, modifier visuellement, valider et
   compiler un projet rig sans ouvrir de port MIDI.
-- [x] Un simulateur offline de notes, scènes et Virtual Palettes, avec une
-  trace des trois renderers.
+- [x] Un workspace visuel « Virtual kit & simulator » : une articulation
+  physique sélectionne un son logique, puis montre côte à côte les trois
+  destinations DDrum4, SD3 et DrumGizmo, avec vélocité, scène, journal et
+  panic uniquement simulés.
 - [x] Un diagnostic offline « no-pad » parcourt chaque entrée Note, scène,
   état VP connu et contrôle natif déclaré, puis produit un rapport sans ouvrir
-  de port MIDI (`drum-control-center diagnose <projet>`). Tout décodeur CC ou
-  aftertouch non encore simulé échoue explicitement : aucun faux PASS.
+  de port MIDI (`drum-control-center diagnose <projet>`). Les CC et
+  aftertouch déclarés sont aussi signalés explicitement comme échec tant
+  qu'une politique commune PC/Arduino/DDrum4/DrumGizmo n'est pas compilée :
+  aucun faux PASS ni Note-On synthétique.
 - [x] Une matrice lisible de la banque r15 installée, y compris les layers,
   positions, vélocités, variations, pitch et round robin.
 - [x] Les Program Change natifs sont des correspondances exactes
@@ -58,6 +62,15 @@ change aucun réglage de module.
 - [ ] Compléter le MegaKit SD3 et le kit DrumGizmo à partir des captures.
 - [ ] Autoriser explicitement le mode MIDI live du convertisseur seulement
   après ces mesures.
+
+## Prochain incrément de contrat — expressions communes
+
+- [ ] Définir puis compiler une politique unique CC4, position, pression et
+  choke pour les trois cibles. Cette politique devra inclure le ledger
+  `source/channel/note` pour `active_note` / `source_channel_note`, les
+  sorties SD3 prouvées et le comportement DDrum4/DrumGizmo réellement
+  supporté. Le simulateur et le diagnostic resteront volontairement négatifs
+  jusque-là.
 
 ## Règle de flash
 

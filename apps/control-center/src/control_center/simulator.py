@@ -34,7 +34,7 @@ class TraceStep:
 
 @dataclass(frozen=True)
 class SimulationResult:
-    """The logical state and all renderer destinations for one virtual hit."""
+    """The logical state and declared renderer handling for one raw MIDI event."""
 
     source: str
     raw_note: int
@@ -43,22 +43,29 @@ class SimulationResult:
     logical_target: str
     state: Mapping[str, Any]
     steps: tuple[TraceStep, ...]
+    raw_type: str = "note_on"
+    renders_audio: bool = True
 
     def to_document(self) -> dict[str, Any]:
         return {
             "kind": "drum-chain-simulation/v1",
             "hardware_io": "disabled",
             "source": self.source,
-            "raw": {"note": self.raw_note, "velocity": self.velocity},
+            "raw": ({"type": "note_on", "note": self.raw_note, "velocity": self.velocity}
+                    if self.raw_type == "note_on" else
+                    {"type": self.raw_type, "data1": self.raw_note, "value": self.velocity}),
             "physical": self.physical,
             "logical_target": self.logical_target,
+            "renders_audio": self.renders_audio,
             "state": dict(self.state),
             "trace": [step.to_document() for step in self.steps],
         }
 
     def render_text(self) -> str:
         lines = [
-            f"{self.source} raw note {self.raw_note}, velocity {self.velocity}",
+            (f"{self.source} raw note {self.raw_note}, velocity {self.velocity}"
+             if self.raw_type == "note_on" else
+             f"{self.source} raw {self.raw_type} {self.raw_note}, value {self.velocity}"),
             f"physical: {self.physical}",
             "state: " + ", ".join(f"{name}={value}" for name, value in self.state.items()),
             f"logical sound: {self.logical_target}",
@@ -223,6 +230,46 @@ class RigSimulator:
         ))
         return SimulationResult(source, note, velocity, physical, logical, dict(self._state), tuple(steps))
 
+    def simulate_expression(self, source: str, message_type: str, data1: int, value: int = 64) -> SimulationResult:
+        """Inspect a declared expression without inventing renderer support.
+
+        The current project compiler can lower only exact Note decoders to the
+        Arduino.  A raw CC/aftertouch trace is still useful to inspect a
+        source profile, but it is deliberately *not* a proof that either the
+        DDrum4 bridge or the PC runtime implements a shared expression policy.
+        """
+        if source not in self.project.sources:
+            raise SimulationError(f"unknown source module {source!r}")
+        if message_type not in {"cc", "poly_aftertouch"}:
+            raise SimulationError("expression type must be cc or poly_aftertouch")
+        if type(data1) is not int or type(value) is not int or not 0 <= data1 <= 127 or not 0 <= value <= 127:
+            raise SimulationError("expression data must be MIDI bytes")
+        decoder = self._expression_decoder(source, message_type, data1)
+        if decoder is None:
+            raise SimulationError(f"{source} {message_type} {data1} has no declared physical-pad decoder")
+        if message_type == "poly_aftertouch" and decoder.match.get("active_note"):
+            raise SimulationError(
+                "poly_aftertouch with active_note requires a live note ledger; "
+                "the offline simulator cannot assert source_channel_note correlation"
+            )
+        physical = decoder.physical
+        logical = self._logical_target(physical)
+        source_channel = self.project.sources[source].channel
+        raw_type = "control_change" if message_type == "cc" else "poly_aftertouch"
+        steps: list[TraceStep] = [
+            TraceStep("raw MIDI", f"{source} emits its unchanged expression", {
+                "type": raw_type, "channel": source_channel, "data1": data1, "value": value,
+            }),
+            TraceStep("source profile", f"{source} {message_type} {data1} resolves to {physical}"),
+            TraceStep("logical state", "Scene and virtual palettes select the current logical sound", dict(self._state)),
+            TraceStep("logical sound", logical),
+            TraceStep("Arduino DDrum4 renderer", "unsupported: the verified firmware-project generator lowers exact Note decoders only"),
+            TraceStep("SD3 renderer", "unverified here: the runtime has target-specific CC/aftertouch behavior, not a shared declared expression contract"),
+            TraceStep("DrumGizmo renderer", "unsupported: the declared DrumGizmo map is note-only"),
+        ]
+        return SimulationResult(source, data1, value, physical, logical, dict(self._state), tuple(steps),
+                                raw_type=raw_type, renders_audio=False)
+
     def simulate_logical_control(
         self, source: str, channel: int, message_type: str, data1: int, value: int = 0,
     ) -> StateChangeResult:
@@ -325,28 +372,29 @@ class RigSimulator:
         Cartesian product of arbitrary MIDI VP values.
         """
         cases: list[DiagnosticCase] = []
-        for decoder_index, decoder in enumerate(self.project.source_decoders, start=1):
-            if decoder.message_type not in {"note", "note_range"}:
-                cases.append(DiagnosticCase(
-                    f"decoder.{decoder_index:03d}.{decoder.source}.{decoder.message_type}", False,
-                    f"offline diagnostic does not yet exercise declared {decoder.message_type} decoder; no false PASS is emitted",
-                ))
         for scene, values in self._diagnostic_state_vectors():
             for decoder in self.project.source_decoders:
-                if decoder.message_type not in {"note", "note_range"}:
-                    continue
-                notes = (decoder.match["note"],) if decoder.message_type == "note" else range(
-                    decoder.match["note_range"][0], decoder.match["note_range"][1] + 1)
-                for note in notes:
-                    identifier = self._diagnostic_id("pad", decoder.source, note, scene, values)
-                    candidate = RigSimulator(self.project)
-                    try:
-                        candidate.set_state(scene=scene, values=values)
-                        result = candidate.simulate_pad(decoder.source, note)
-                        cases.append(DiagnosticCase(identifier, True,
-                            f"{result.physical} -> {result.logical_target}; DDrum4/SD3/DrumGizmo declared"))
-                    except SimulationError as error:
-                        cases.append(DiagnosticCase(identifier, False, str(error)))
+                if decoder.message_type in {"note", "note_range"}:
+                    notes = (decoder.match["note"],) if decoder.message_type == "note" else range(
+                        decoder.match["note_range"][0], decoder.match["note_range"][1] + 1)
+                    for note in notes:
+                        identifier = self._diagnostic_id("pad", decoder.source, note, scene, values)
+                        candidate = RigSimulator(self.project)
+                        try:
+                            candidate.set_state(scene=scene, values=values)
+                            result = candidate.simulate_pad(decoder.source, note)
+                            cases.append(DiagnosticCase(identifier, True,
+                                f"{result.physical} -> {result.logical_target}; DDrum4/SD3/DrumGizmo declared"))
+                        except SimulationError as error:
+                            cases.append(DiagnosticCase(identifier, False, str(error)))
+                elif decoder.message_type in {"cc", "poly_aftertouch"}:
+                    data1 = decoder.match["cc"] if decoder.message_type == "cc" else decoder.match.get("note", 0)
+                    identifier = self._diagnostic_id(decoder.message_type, decoder.source, data1, scene, values)
+                    reason = ("firmware-project generation supports exact Note decoders only; "
+                              "CC/poly-aftertouch has no shared PC/Arduino/DDrum4/DrumGizmo policy")
+                    if decoder.message_type == "poly_aftertouch" and decoder.match.get("active_note"):
+                        reason += "; active_note/source_channel_note correlation also needs a live ledger"
+                    cases.append(DiagnosticCase(identifier, False, reason))
         for index, scene in enumerate(self.project.scenes):
             candidate = RigSimulator(self.project)
             identifier = f"logical.scene.pc{index:03d}"
@@ -419,6 +467,16 @@ class RigSimulator:
                 low, high = decoder.match["note_range"]
                 if low <= note <= high:
                     return decoder
+        return None
+
+    def _expression_decoder(self, source: str, message_type: str, data1: int):
+        for decoder in self.project.source_decoders:
+            if decoder.source != source or decoder.message_type != message_type:
+                continue
+            if message_type == "cc" and decoder.match["cc"] == data1:
+                return decoder
+            if message_type == "poly_aftertouch" and not decoder.match.get("active_note") and ("note" not in decoder.match or decoder.match["note"] == data1):
+                return decoder
         return None
 
     def _logical_target(self, physical: str) -> str:
