@@ -384,6 +384,8 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
     for name, native in document["native_control_map"].items():
         if native["decode_to"] not in control_targets:
             _fail(f"native control {name}: unknown state target {native['decode_to']!r}")
+        if native["decode_to"] == "scene" and native.get("value") not in range(len(scenes)):
+            _fail(f"native control {name}: scene value must be an index of declared state.scenes")
         if native.get("channel") in (14, 15):
             _fail(f"native control {name}: channels 14 and 15 are reserved for logical control")
         native_type = native["type"]

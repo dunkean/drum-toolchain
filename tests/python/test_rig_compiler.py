@@ -331,7 +331,7 @@ class RigCompilerTests(unittest.TestCase):
             self.assertIn("const NativeControlRoute NATIVE_CONTROLS[] PROGMEM", generated)
             self.assertIn("{10, NativeControlType::ProgramChange, 0, 0, 0},", generated)
             self.assertIn("constexpr size_t NATIVE_CONTROL_COUNT = 1;", generated)
-            self.assertIn("constexpr LogicalControlConfig LOGICAL_CONTROLS = {20, 255, 255, 255};", generated)
+            self.assertIn("constexpr LogicalControlConfig LOGICAL_CONTROLS = {20, 255, 255, 255, 1};", generated)
             self.assertIn("constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};", generated)
             runtime = yaml.safe_load((output / "runtime-profile.yaml").read_text(encoding="utf-8"))
             self.assertEqual(runtime["hardware_io"], "logical-control-only")

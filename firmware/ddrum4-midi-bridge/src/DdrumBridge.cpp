@@ -121,6 +121,7 @@ void DdrumBridge::rememberPrimaryHit(uint8_t inputChannel, uint8_t inputNote, co
 
 bool DdrumBridge::validConfig() const {
   if (config_.outputChannel < 1 || config_.outputChannel > 16) return false;
+  if (!config_.logicalControls.sceneCount || config_.initialState.scene >= config_.logicalControls.sceneCount) return false;
   if (config_.noteRouteCount && !config_.noteRoutes) return false;
   if (config_.relayProgramChannelCount && !config_.relayProgramChannels) return false;
   if (config_.stateRouteCount && !config_.stateRoutes) return false;
@@ -152,7 +153,7 @@ bool DdrumBridge::validConfig() const {
     if (state.inputChannel < 1 || state.inputChannel > 16 || state.inputNote > 127 ||
         state.outputNote > 127 || state.inputVelocityMin > 127 || state.inputVelocityMax > 127 ||
         state.outputVelocityMin > 127 || state.outputVelocityMax > 127 ||
-        (state.scene != 0xff && state.scene > 127) ||
+        (state.scene != 0xff && state.scene >= config_.logicalControls.sceneCount) ||
         (state.vp1 != 0xff && state.vp1 > 127) ||
         (state.vp2 != 0xff && state.vp2 > 127) ||
         (state.vp3 != 0xff && state.vp3 > 127) ||
@@ -162,10 +163,16 @@ bool DdrumBridge::validConfig() const {
     NativeControlRoute control = readNativeControl(i);
     if (control.sourceChannel < 1 || control.sourceChannel > 16 || control.address > 127 || control.target > 4 || control.value > 127 ||
         (control.type != NativeControlType::ProgramChange && control.type != NativeControlType::ControlChange && control.type != NativeControlType::NoteOn)) return false;
+    if (control.target == 0 && control.value >= config_.logicalControls.sceneCount) return false;
     for (size_t j = i + 1; j < config_.nativeControlCount; ++j) {
       NativeControlRoute other = readNativeControl(j);
       if (control.sourceChannel == other.sourceChannel && control.type == other.type && control.address == other.address) return false;
     }
+  }
+  for (size_t i = 0; i < config_.stateActionCount; ++i) {
+    const DdrumStateAction action = readStateAction(i);
+    if (action.scene >= config_.logicalControls.sceneCount || !action.event.channel || action.event.channel > 16 ||
+        (uint8_t)action.event.type > (uint8_t)MidiEventType::ProgramChange || action.event.data1 > 127 || action.event.data2 > 127) return false;
   }
   const uint8_t controls[] = {config_.logicalControls.vp1Cc, config_.logicalControls.vp2Cc,
                               config_.logicalControls.vp3Cc, config_.logicalControls.vp4Cc};
@@ -336,6 +343,15 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   }
 
   if (isExpectedEcho(input, nowMs)) return 0;
+
+  // Reserved logical Program Changes use scene indexes, not arbitrary MIDI
+  // program numbers. Consume an out-of-range command rather than leaving the
+  // bridge in a state for which no route or action was generated.
+  if ((input.channel == 14 || input.channel == 15) && input.type == MidiEventType::ProgramChange &&
+      input.data1 >= config_.logicalControls.sceneCount) {
+    ++ignoredMessages_;
+    return 0;
+  }
 
   // Logical controls update state and reconcile only declared native output.
   const LogicalState priorState = logicalState_;

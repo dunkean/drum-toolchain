@@ -163,6 +163,11 @@ class RigProjectTests(unittest.TestCase):
         document["native_control_map"]["ddrum4_program_change"].pop("program")
         with self.assertRaisesRegex(RigProjectError, "program"):
             self.load(document)
+        document = valid_project()
+        fill_renderers(document)
+        document["native_control_map"]["ddrum4_program_change"]["value"] = 2
+        with self.assertRaisesRegex(RigProjectError, "scene value"):
+            self.load(document)
 
     def test_routes_support_non_overlapping_scene_vp_variants_with_a_fallback(self) -> None:
         document = valid_project()

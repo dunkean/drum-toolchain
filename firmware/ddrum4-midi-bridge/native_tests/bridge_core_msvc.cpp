@@ -125,7 +125,12 @@ void test_realtime_preserves_running_status() {
 }
 
 void test_logical_controls_are_state_only_on_reserved_channels() {
-  DdrumBridge bridge(config);
+  const BridgeConfig sceneConfig = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false},
+      routes, 4, true, nullptr, {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
+      {0, 1, 2, 3, 10},
+  };
+  DdrumBridge bridge(sceneConfig);
   MidiEvent output{};
   require(bridge.process({MidiEventType::ProgramChange, 14, 9, 0}, &output, 1) == 0,
           "Scene control escaped to renderer");
@@ -185,6 +190,7 @@ void test_state_route_and_ledger_keep_the_primary_hit() {
   const BridgeConfig stateful = {
       10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false},
       routes, 4, false, nullptr, {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, stateRoutes, 2,
+      {0, 1, 2, 3, 10},
   };
   DdrumBridge bridge(stateful);
   MidiEvent output{};

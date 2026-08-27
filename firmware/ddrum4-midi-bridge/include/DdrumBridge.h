@@ -120,6 +120,9 @@ struct LogicalControlConfig {
   uint8_t vp2Cc = 1;
   uint8_t vp3Cc = 2;
   uint8_t vp4Cc = 3;
+  // Program Change on the reserved logical channels is an index into the
+  // declared Scene array. It must never create a state which has no route.
+  uint8_t sceneCount = 1;
 };
 
 // Native DDrum4 state messages are decoded separately from the stable CH14/15

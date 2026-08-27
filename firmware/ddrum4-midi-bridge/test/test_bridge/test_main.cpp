@@ -124,12 +124,26 @@ void test_bypass_preserves_release_wire_semantics() {
 }
 
 void test_logical_controls_update_reserved_channel_state() {
-  DdrumBridge bridge(config);
+  static const BridgeConfig sceneConfig = {
+      10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
+      sizeof(routes) / sizeof(routes[0]), true, nullptr,
+      {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
+      {0, 1, 2, 3, 9},
+  };
+  DdrumBridge bridge(sceneConfig);
   MidiEvent output;
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 14, 8, 0}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ControlChange, 15, 3, 5}, &output, 1));
   TEST_ASSERT_EQUAL_UINT8(8, bridge.logicalState().scene);
   TEST_ASSERT_EQUAL_UINT8(5, bridge.logicalState().vp4);
+}
+
+void test_out_of_range_logical_program_is_dropped_without_changing_scene() {
+  DdrumBridge bridge(config);
+  MidiEvent output;
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::ProgramChange, 15, 1, 0}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.logicalState().scene);
+  TEST_ASSERT_EQUAL_UINT32(1, bridge.ignoredMessages());
 }
 
 void test_logical_controls_use_the_generated_cc_addresses() {
@@ -157,7 +171,7 @@ void test_native_controls_update_state_without_rendering_a_hit() {
       10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes,
       sizeof(routes) / sizeof(routes[0]), false, nullptr,
       {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, nullptr, 0,
-      {20, 21, 22, 23}, nativeControls, 3,
+      {20, 21, 22, 23, 2}, nativeControls, 3,
   };
   DdrumBridge bridge(nativeConfig);
   MidiEvent output;
@@ -301,6 +315,7 @@ int main(int, char**) {
   RUN_TEST(test_ddrum_one_shot_policy_drops_note_off_but_keeps_aftertouch);
   RUN_TEST(test_bypass_preserves_release_wire_semantics);
   RUN_TEST(test_logical_controls_update_reserved_channel_state);
+  RUN_TEST(test_out_of_range_logical_program_is_dropped_without_changing_scene);
   RUN_TEST(test_logical_controls_use_the_generated_cc_addresses);
   RUN_TEST(test_native_controls_update_state_without_rendering_a_hit);
   RUN_TEST(test_unmapped_native_program_cannot_create_an_invalid_scene);
