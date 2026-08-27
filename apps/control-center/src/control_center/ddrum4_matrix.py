@@ -34,6 +34,7 @@ class MatrixLayer:
     variation: tuple[int, ...] = ()
     pitch: int | None = None
     round_robin: int | None = None
+    sample: int | None = None
 
     @property
     def resource_status(self) -> str:
@@ -51,6 +52,8 @@ class MatrixSound:
     source: str | None = None
     note_base: int | None = None
     note_p: int | None = None
+    physical_channel: str | None = None
+    variations: tuple[tuple[int, str | None], ...] = ()
     layers: tuple[MatrixLayer, ...] = ()
     encoded_blocks: int | None = None
     mem_left_delta_blocks: int | None = None
@@ -61,6 +64,17 @@ class MatrixSound:
     def layer_count(self) -> int | None:
         return len(self.layers) if self.sound_id is not None else None
 
+    @property
+    def unique_sample_count(self) -> int | None:
+        """Count explicitly numbered encoded samples, not mapping rows.
+
+        Repeated sample identifiers are legitimate: a pitch-shifted variation
+        can reuse one stored sample in more than one mapping row.
+        """
+        if not self.layers or any(layer.sample is None for layer in self.layers):
+            return None
+        return len({layer.sample for layer in self.layers})
+
     def contains_note(self, note: int) -> bool:
         return self.note_base is not None and self.note_p is not None and self.note_base <= note < self.note_base + self.note_p
 
@@ -70,6 +84,13 @@ class Ddrum4KitMatrix:
     manifest: Path
     sounds: tuple[MatrixSound, ...]
     report_paths: tuple[Path, ...]
+    bank_id: str | None = None
+    bank_status: str | None = None
+    capacity_blocks: int | None = None
+    used_blocks: int | None = None
+    free_blocks: int | None = None
+    midi_channel: int | None = None
+    local_control: str | None = None
 
     def sound(self, slot: int) -> MatrixSound:
         return self.sounds[slot - 1]
@@ -138,7 +159,29 @@ def _layers(value: object, base: Path) -> tuple[MatrixLayer, ...]:
             status=_text(item.get("status")), provenance=_text(item.get("provenance")),
             position=optional_int("position"), velocity=optional_int("velocity"),
             variation=tuple(variation), pitch=optional_int("pitch"), round_robin=optional_int("rr"),
+            sample=optional_int("sample"),
         ))
+    return tuple(parsed)
+
+
+def _variations(value: object) -> tuple[tuple[int, str | None], ...]:
+    """Keep declared variation labels without pretending they are WAV copies."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("variations must be a list when declared")
+    parsed: list[tuple[int, str | None]] = []
+    declared_numbers: set[int] = set()
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("number"), int):
+            raise ValueError("each variation must declare an integer number")
+        number = item["number"]
+        if not 1 <= number <= 10:
+            raise ValueError("variation number must be 1..10")
+        if number in declared_numbers:
+            raise ValueError("variation numbers must be unique within a Sound")
+        declared_numbers.add(number)
+        parsed.append((number, _text(item.get("name"))))
     return tuple(parsed)
 
 
@@ -153,11 +196,20 @@ def _sound(value: dict[str, Any], slot: int, base: Path) -> MatrixSound:
     return MatrixSound(
         slot=slot, sound_id=sound_id, source=_text(value.get("source")) or _text(value.get("instrument")),
         note_base=note_base, note_p=note_p,
+        physical_channel=_text(value.get("physical_channel")), variations=_variations(value.get("variations")),
         layers=_layers(value.get("layers"), base),
         encoded_blocks=_blocks(value.get("encoded_blocks"), "encoded_blocks"),
         mem_left_delta_blocks=_blocks(value.get("mem_left_delta_blocks", value.get("measured_mem_left_delta_blocks")), "mem_left_delta_blocks"),
         status=_text(value.get("status")), provenance=_text(value.get("provenance")),
     )
+
+
+def _midi_channel(value: object) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or not 1 <= value <= 16:
+        raise ValueError("midi_channel must be 1..16 when declared")
+    return value
 
 
 def _declared_sounds(document: dict[str, Any]) -> list[dict[str, Any]]:
@@ -204,7 +256,8 @@ def load_kit_matrix(manifest: Path, reports: Iterable[Path] = ()) -> Ddrum4KitMa
     """
     manifest = manifest.resolve()
     report_paths = tuple(path.resolve() for path in reports)
-    declared = [_sound(item, index, manifest.parent) for index, item in enumerate(_declared_sounds(_document(manifest)), 1)]
+    document = _document(manifest)
+    declared = [_sound(item, index, manifest.parent) for index, item in enumerate(_declared_sounds(document), 1)]
     facts = _reports(report_paths)
     merged: list[MatrixSound] = []
     for row in declared:
@@ -214,13 +267,28 @@ def load_kit_matrix(manifest: Path, reports: Iterable[Path] = ()) -> Ddrum4KitMa
             observed = _sound(report_document, row.slot, report_path.parent)
             row = replace(row,
                 source=row.source or observed.source, layers=row.layers or observed.layers,
+                physical_channel=row.physical_channel or observed.physical_channel,
+                variations=row.variations or observed.variations,
                 encoded_blocks=observed.encoded_blocks if observed.encoded_blocks is not None else row.encoded_blocks,
                 mem_left_delta_blocks=(observed.mem_left_delta_blocks if observed.mem_left_delta_blocks is not None else row.mem_left_delta_blocks),
                 status=row.status or observed.status, provenance=row.provenance or observed.provenance)
         merged.append(row)
     while len(merged) < MAX_SOUNDS:
         merged.append(MatrixSound(slot=len(merged) + 1, status=MISSING))
-    return Ddrum4KitMatrix(manifest, tuple(merged), report_paths)
+    bank = document.get("bank") if isinstance(document.get("bank"), dict) else {}
+    capacity_blocks = _blocks(bank.get("capacity_blocks"), "capacity_blocks")
+    used_blocks = _blocks(bank.get("used_blocks"), "used_blocks")
+    free_blocks = _blocks(bank.get("free_blocks"), "free_blocks")
+    if (capacity_blocks is not None and used_blocks is not None and free_blocks is not None
+            and capacity_blocks != used_blocks + free_blocks):
+        raise ValueError("bank capacity_blocks must equal used_blocks + free_blocks")
+    return Ddrum4KitMatrix(
+        manifest, tuple(merged), report_paths,
+        bank_id=_text(bank.get("id")), bank_status=_text(bank.get("status")),
+        capacity_blocks=capacity_blocks, used_blocks=used_blocks, free_blocks=free_blocks,
+        midi_channel=_midi_channel(bank.get("midi_channel")),
+        local_control=_text(bank.get("local_control")),
+    )
 
 
 def audition_command(wav: Path, platform: str | None = None) -> tuple[str, ...]:

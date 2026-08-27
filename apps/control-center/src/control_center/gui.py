@@ -68,7 +68,6 @@ def launch() -> int:
             compile_button = QPushButton("Compile offline artifacts"); compile_button.clicked.connect(self.compile_project)
             layout.addWidget(compile_button)
             layout.addWidget(self._simulation_panel())
-            layout.addWidget(self._matrix_panel())
             launch_ddti = QPushButton("Launch DDTi Editor")
             launch_ddti.setToolTip("Explicitly launches the existing DDTi editor; it does not connect to MIDI here.")
             launch_ddti.clicked.connect(lambda: self.launch_target("ddti")); layout.addWidget(launch_ddti)
@@ -143,6 +142,7 @@ def launch() -> int:
             self.visual_sources.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.visual_sources.itemChanged.connect(lambda _: self._sync_visual_project("sources"))
             editor_tabs.addTab(self.visual_sources, "Modules and MIDI map")
+            editor_tabs.addTab(self._matrix_panel(), "DDrum4 bank — slots, layers, variations")
             self.project_document = QTextEdit(); self.project_document.setAcceptRichText(False)
             self.project_document.setPlaceholderText("Advanced YAML source.")
             editor_tabs.addTab(self.project_document, "Advanced YAML")
@@ -199,6 +199,8 @@ def launch() -> int:
             self.matrix = None
             self.matrix_table.clearContents(); self.matrix_table.setRowCount(10)
             self.layer_table.clearContents(); self.layer_table.setRowCount(0)
+            self.bank_summary.setText("No DDrum4 bank loaded. Select a local manifest or load a rig project that declares ddrum4_bank.")
+            self.bank_action_status.setText("No bank actions available until a local manifest is loaded.")
             if clear_reference:
                 self.report_paths = []
                 self.manifest.clear()
@@ -1129,9 +1131,15 @@ def launch() -> int:
             return panel
 
         def _matrix_panel(self) -> QGroupBox:
-            panel = QGroupBox("DDrum4 kit matrix — selected local files only")
+            panel = QGroupBox("DDrum4 bank inventory — selected local files only")
             panel.setToolTip("Read-only manifest/report inspection. No MIDI, SysEx, device discovery, or module-memory query.")
             layout = QVBoxLayout()
+            self.bank_summary = QLabel("Load a rig project or select a local manifest. This view never reads the module.")
+            self.bank_summary.setWordWrap(True)
+            layout.addWidget(self.bank_summary)
+            self.bank_action_status = QLabel("Bank actions are local: selecting or auditioning a WAV never sends MIDI or SysEx.")
+            self.bank_action_status.setWordWrap(True)
+            layout.addWidget(self.bank_action_status)
             self.manifest = QLineEdit()
             manifest_button = QPushButton("Select manifest…"); manifest_button.clicked.connect(self.select_manifest)
             row = QHBoxLayout(); row.addWidget(QLabel("Manifest:")); row.addWidget(self.manifest); row.addWidget(manifest_button)
@@ -1141,15 +1149,22 @@ def launch() -> int:
             row = QHBoxLayout(); row.addWidget(QLabel("Reports:")); row.addWidget(self.reports); row.addWidget(reports_button)
             layout.addLayout(row)
             load = QPushButton("Load 10-slot matrix"); load.clicked.connect(self.load_matrix); layout.addWidget(load)
-            self.matrix_table = QTableWidget(10, 8)
-            self.matrix_table.setHorizontalHeaderLabels(("Slot", "Sound ID", "Source", "Layers", "Encoded blocks", "MEM.LEFT Δ", "Status", "Provenance"))
+            self.matrix_table = QTableWidget(10, 13)
+            self.matrix_table.setHorizontalHeaderLabels((
+                "Slot", "Physical channel", "Sound ID", "NOTE base", "NOTE P", "Source", "Mapping rows",
+                "Unique samples", "Encoded blocks", "MEM.LEFT Δ", "Status", "Variations", "Provenance",
+            ))
             self.matrix_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.matrix_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.matrix_table.itemSelectionChanged.connect(self.show_layers)
-            self.layer_table = QTableWidget(0, 11)
-            self.layer_table.setHorizontalHeaderLabels(("Layer", "Position", "Velocity", "Variation", "Pitch", "RR", "WAV", "Resource", "Source", "Status", "Provenance"))
+            self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.matrix_table.horizontalHeader().setStretchLastSection(True)
+            self.layer_table = QTableWidget(0, 12)
+            self.layer_table.setHorizontalHeaderLabels(("Mapping row", "Position", "Velocity", "Variation", "Pitch", "RR", "Sample", "WAV", "Resource", "Source", "Status", "Provenance"))
             self.layer_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.layer_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            self.layer_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.layer_table.horizontalHeader().setStretchLastSection(True)
             split = QSplitter(Qt.Orientation.Vertical); split.addWidget(self.matrix_table); split.addWidget(self.layer_table); layout.addWidget(split)
             self.audition = QPushButton("Audition selected WAV")
             self.audition.setToolTip("Explicitly opens the selected local WAV in the operating system default player.")
@@ -1182,19 +1197,36 @@ def launch() -> int:
         def load_matrix(self) -> None:
             if not self.manifest.text():
                 self._clear_matrix()
-                self.log.setPlainText("Select a DDrum4 manifest first."); return
+                self.bank_action_status.setText("Select a DDrum4 manifest first."); return
             self._clear_matrix(clear_reference=False)
             try:
                 matrix = load_kit_matrix(Path(self.manifest.text()), self.report_paths)
             except ValueError as error:
+                self.bank_action_status.setText(f"Cannot load bank: {error}")
                 QMessageBox.warning(self, "Cannot load DDrum4 matrix", str(error)); return
             self.matrix = matrix
             for row, sound in enumerate(matrix.sounds):
-                values = (sound.slot, sound.sound_id or "missing", sound.source, sound.layer_count,
-                          sound.encoded_blocks, sound.mem_left_delta_blocks, sound.status, sound.provenance)
+                variations = ", ".join(
+                    f"V{number}" + (f" · {name}" if name else "")
+                    for number, name in sound.variations
+                )
+                values = (sound.slot, sound.physical_channel, sound.sound_id or "missing", sound.note_base,
+                          sound.note_p, sound.source, sound.layer_count, sound.unique_sample_count,
+                          sound.encoded_blocks, sound.mem_left_delta_blocks, sound.status, variations, sound.provenance)
                 for column, value in enumerate(values): self.matrix_table.setItem(row, column, self._cell(value))
             self.layer_table.setRowCount(0)
-            self.log.setPlainText("Loaded selected manifest and reports. MEM.LEFT is 'unknown' unless explicitly reported.")
+            capacity = f"{matrix.capacity_blocks} blocks capacity" if matrix.capacity_blocks is not None else "capacity unknown"
+            used = f"{matrix.used_blocks} used" if matrix.used_blocks is not None else "used memory unknown"
+            free = f"{matrix.free_blocks} free" if matrix.free_blocks is not None else "free memory unknown"
+            identity = matrix.bank_id or Path(self.manifest.text()).stem
+            midi = f"MIDI channel {matrix.midi_channel}" if matrix.midi_channel is not None else "MIDI channel unknown"
+            local = f"Local control {matrix.local_control}" if matrix.local_control is not None else "Local control unknown"
+            self.bank_summary.setText(
+                f"Bank: {identity} · {matrix.bank_status or UNKNOWN} · {midi}; {local} · {capacity}; {used}; {free}. "
+                "Encoded blocks are declared build facts; MEM.LEFT Δ is shown only when explicitly measured. "
+                "A variation is a routing choice, not automatically a copied WAV."
+            )
+            self.bank_action_status.setText("Loaded selected local manifest and reports. MEM.LEFT Δ remains unknown until explicitly measured.")
 
         def show_layers(self) -> None:
             if self.matrix is None or self.matrix_table.currentRow() < 0: return
@@ -1202,22 +1234,23 @@ def launch() -> int:
             self.layer_table.setRowCount(len(layers))
             for row, layer in enumerate(layers):
                 values = (layer.index, layer.position, layer.velocity,
-                          "/".join(str(value) for value in layer.variation) if layer.variation else None,
-                          layer.pitch, layer.round_robin, layer.wav, layer.resource_status,
+                          "/".join(str(value) for value in layer.variation) if layer.variation else "not declared",
+                          layer.pitch, layer.round_robin, layer.sample, layer.wav, layer.resource_status,
                           layer.source, layer.status, layer.provenance)
                 for column, value in enumerate(values): self.layer_table.setItem(row, column, self._cell(value))
 
         def audition_layer(self) -> None:
             if self.matrix is None or self.matrix_table.currentRow() < 0 or self.layer_table.currentRow() < 0:
-                self.log.setPlainText("Select a matrix slot and a declared WAV layer first."); return
+                self.bank_action_status.setText("Select a Sound slot and a declared WAV mapping first."); return
             layer: MatrixLayer = self.matrix.sound(self.matrix_table.currentRow() + 1).layers[self.layer_table.currentRow()]
             if layer.wav is None:
-                self.log.setPlainText("The selected layer has no declared WAV file."); return
+                self.bank_action_status.setText("The selected mapping has no declared WAV file."); return
             try:
                 result = self.center.audition_wav(layer.wav)
             except (FileNotFoundError, ValueError) as error:
+                self.bank_action_status.setText(f"Cannot audition WAV: {error}")
                 QMessageBox.warning(self, "Cannot audition WAV", str(error)); return
-            self.log.setPlainText("Opened selected WAV explicitly: " + " ".join(result.command))
+            self.bank_action_status.setText("Opened selected WAV explicitly in the operating-system player: " + " ".join(result.command))
 
         def run(self, action: str) -> None:
             if not self.project.text(): self.log.setPlainText("Select a rig project first."); return

@@ -204,10 +204,14 @@ class ControlCenterTests(unittest.TestCase):
         manifest = Path(__file__).resolve().parents[3] / "profiles" / "banks" / "metalcore-r15-installed.yaml"
         matrix = load_kit_matrix(manifest)
         crash = next(sound for sound in matrix.sounds if sound.sound_id == "CYMB_982")
+        self.assertEqual((matrix.bank_id, matrix.capacity_blocks, matrix.free_blocks),
+                         ("metalcore-r15-installed", 8120, 83))
         self.assertEqual(crash.encoded_blocks, 1038)
+        self.assertEqual((crash.physical_channel, crash.note_base, crash.note_p), ("CYMBAL_1", 56, 8))
+        self.assertEqual(crash.variations, ((1, "Crash"), (2, "Crash High"), (3, "Crash Low")))
         self.assertEqual(crash.layers[2].variation, (2,))
-        self.assertEqual((crash.layers[2].pitch, crash.layers[2].source, crash.layers[2].velocity),
-                         (3, "crash high shared", 68))
+        self.assertEqual((crash.layers[2].pitch, crash.layers[2].source, crash.layers[2].velocity, crash.layers[2].sample),
+                         (3, "crash high shared", 68, 1))
 
     def test_kit_matrix_keeps_unmeasured_memory_unknown_and_marks_missing_wav(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -241,6 +245,36 @@ class ControlCenterTests(unittest.TestCase):
             self.assertEqual(sound.encoded_blocks, 124)
             self.assertIsNone(sound.mem_left_delta_blocks)
             self.assertEqual(sound.layers[0].resource_status, "missing")
+
+    def test_kit_matrix_rejects_inconsistent_bank_capacity_or_variation_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "kit.yaml"
+            manifest.write_text("""bank: {capacity_blocks: 10, used_blocks: 7, free_blocks: 2, midi_channel: 12}
+sounds:
+  - sound_id: KICK_981
+    variations: [{number: 1}, {number: 1}]
+""", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "variation numbers"):
+                load_kit_matrix(manifest)
+            manifest.write_text("""bank: {capacity_blocks: 10, used_blocks: 7, free_blocks: 2, midi_channel: 12}
+sounds: []
+""", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "capacity_blocks"):
+                load_kit_matrix(manifest)
+
+    def test_kit_matrix_keeps_shared_sample_mappings_distinct_from_unique_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "kit.yaml"
+            manifest.write_text("""sounds:
+  - sound_id: CYMB_981
+    layers:
+      - {sample: 1, variation: [1]}
+      - {sample: 1, variation: [2], pitch: 3}
+      - {sample: 2, variation: [1, 2]}
+""", encoding="utf-8")
+            sound = load_kit_matrix(manifest).sound(1)
+            self.assertEqual((sound.layer_count, sound.unique_sample_count), (3, 2))
 
     def test_default_player_command_is_platform_specific_and_wav_only(self) -> None:
         self.assertEqual(audition_command(Path("take.wav"), "win32"),
