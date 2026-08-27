@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from control_center import ControlCenter
 from control_center.ddrum4_matrix import UNKNOWN, audition_command, load_kit_matrix
-from control_center.live_measurement import LiveMeasurementCampaign
+from control_center.live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
 from control_center.simulator import RigSimulator
 from control_center.virtual_kit import build_virtual_kit
 from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
@@ -21,6 +21,13 @@ from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
 
 
 class ControlCenterTests(unittest.TestCase):
+    def test_midi_port_inventory_is_read_only_and_keeps_input_output_direction(self) -> None:
+        inventory = discover_midi_port_inventory(lambda: ("UMC MIDI In", "eDrumIn BLACK"),
+                                                 lambda: ("UMC MIDI Out", "TriggerIO"))
+
+        self.assertEqual(inventory, {"inputs": ("UMC MIDI In", "eDrumIn BLACK"),
+                                     "outputs": ("UMC MIDI Out", "TriggerIO")})
+
     def test_live_measurement_campaign_records_requirements_without_promoting_simulation_addresses(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         campaign = LiveMeasurementCampaign.from_path(project)

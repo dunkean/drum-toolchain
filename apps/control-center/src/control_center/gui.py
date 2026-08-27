@@ -18,7 +18,7 @@ from .simulator import RigSimulator, SimulationError
 from .virtual_kit import build_virtual_kit
 from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS,
                        METALCORE_ELECTRONIC_V1_ADDITIONS)
-from .live_measurement import LiveMeasurementCampaign
+from .live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
 
 
 def launch() -> int:
@@ -181,7 +181,10 @@ def launch() -> int:
             create_measurement = QPushButton("Create live measurement campaign…")
             create_measurement.setToolTip("Writes a checklist and no MIDI/firmware data. It never converts SIM_* addresses into live mappings.")
             create_measurement.clicked.connect(self.create_live_measurement_campaign)
-            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement)
+            inspect_ports = QPushButton("Inspect visible MIDI ports (read-only)")
+            inspect_ports.setToolTip("Lists OS-visible MIDI names only. It does not open, send to, or bind any MIDI port.")
+            inspect_ports.clicked.connect(self.inspect_visible_midi_ports)
+            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(inspect_ports)
             readiness_page.setLayout(readiness_layout)
             editor_tabs.addTab(readiness_page, "Validation & deployment")
             layout.addWidget(editor_tabs)
@@ -741,6 +744,19 @@ def launch() -> int:
                 f"Live measurement campaign created.\n\nPlan: {plan}\nGuide: {guide}\n\n"
                 "It is a checklist only: no MIDI port, DDrum4 state, or Arduino firmware was touched."
             )
+
+        def inspect_visible_midi_ports(self) -> None:
+            """Show only the current OS inventory; no port handle is opened."""
+            try:
+                inventory = discover_midi_port_inventory()
+            except (RuntimeError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot inspect MIDI ports", str(error)); return
+            lines = ["Visible MIDI ports — observation only", "", "Inputs:"]
+            lines.extend(f"• {name}" for name in inventory["inputs"])
+            lines.extend(["", "Outputs:"])
+            lines.extend(f"• {name}" for name in inventory["outputs"])
+            lines.extend(["", "Validate a physical cable and capture a trace before adding any name to deployment: live."])
+            self.editor_readiness.setPlainText("\n".join(lines))
 
         def save_editor_project(self) -> None:
             try:

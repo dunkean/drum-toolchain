@@ -10,8 +10,32 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
+from typing import Callable, Sequence
 
 from drum_domain.rig_project import RigProject, load_rig_project
+
+
+def discover_midi_port_inventory(
+    get_input_names: Callable[[], Sequence[str]] | None = None,
+    get_output_names: Callable[[], Sequence[str]] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    """List currently visible ports without opening an input or output stream.
+
+    Callers must still explicitly bind and measure a port in a campaign.  The
+    inventory is deliberately a momentary OS observation, never proof that a
+    similarly named cable has the expected source or destination.
+    """
+    if get_input_names is None or get_output_names is None:
+        try:
+            import mido
+        except ImportError as error:  # pragma: no cover - optional live dependency
+            raise RuntimeError("mido is required to inspect visible MIDI ports") from error
+        get_input_names, get_output_names = mido.get_input_names, mido.get_output_names
+    inputs = get_input_names()
+    outputs = get_output_names()
+    if not all(isinstance(name, str) and name for name in (*inputs, *outputs)):
+        raise ValueError("MIDI port inventory must contain non-empty names")
+    return {"inputs": tuple(inputs), "outputs": tuple(outputs)}
 
 
 @dataclass(frozen=True)
