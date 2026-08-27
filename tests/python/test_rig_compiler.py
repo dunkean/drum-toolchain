@@ -313,6 +313,9 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(bank["bank_reference"]["bank_id"], "fixture-bank")
             self.assertEqual(bank["bank_reference"]["midi_channel"], 10)
             self.assertEqual(bank["bank_reference"]["playable_notes"], [36, 38])
+            virtual_kit = json.loads((root / "out" / "virtual-kit-map.json").read_text(encoding="utf-8"))
+            self.assertEqual(virtual_kit["rows"][0]["ddrum4"],
+                             {"channel": 10, "note": 36, "slot": 1, "sound_id": None, "note_p": 1})
 
     def test_linked_bank_rejects_bad_hash_channel_and_renderer_note(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

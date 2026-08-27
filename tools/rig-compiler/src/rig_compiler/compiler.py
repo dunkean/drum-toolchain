@@ -258,7 +258,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
             **({"reports": reference["reports"]} if "reports" in reference else {}),
         }
     markdown = _megakit_markdown(digest, routes)
-    virtual_kit = _virtual_kit_map(provenance, document, routes, report_status["virtual-kit-map"])
+    virtual_kit = _virtual_kit_map(provenance, document, routes, report_status["virtual-kit-map"], bank_facts)
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
         "ddrum4-routing-contract.json": contract, "firmware-project-mapping.json": firmware,
@@ -273,21 +273,40 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
 
 
 def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], routes: list[dict[str, Any]],
-                     status: str) -> dict[str, Any]:
+                     status: str, bank_facts: Any = None) -> dict[str, Any]:
     """Emit a renderer-parity artifact from the exact compiled route records.
 
     It intentionally records one state-qualified source route per row.  This
     avoids hiding a Scene/VP variation behind a prettified single-pad table and
     gives the desktop UI a stable, compiler-owned contract to display.
     """
+    bank_sounds: list[dict[str, Any]] = []
+    if bank_facts is not None:
+        try:
+            bank_document = yaml.safe_load(bank_facts.manifest.read_text(encoding="utf-8"))
+            sounds = bank_document.get("sounds", []) if isinstance(bank_document, dict) else []
+            if isinstance(sounds, list):
+                bank_sounds = [item for item in sounds if isinstance(item, dict)]
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            # The domain has already validated the linked bank. The parity
+            # artifact remains useful even if optional display metadata cannot
+            # be read again during artifact rendering.
+            bank_sounds = []
     rows = []
     for route in routes:
         ddrum, sd3, gizmo = (route["renderers"][name] for name in ("ddrum4", "sd3", "drumgizmo"))
+        ddrum_target = {"channel": document["ddrum4_output_channel"], "note": ddrum["note"]}
+        for slot, sound in enumerate(bank_sounds, start=1):
+            base, width = sound.get("note_base"), sound.get("note_p")
+            if isinstance(base, int) and isinstance(width, int) and base <= ddrum["note"] < base + width:
+                ddrum_target.update({"slot": slot, "sound_id": sound.get("sound_id", sound.get("id")),
+                                     "note_p": ddrum["note"] - base + 1})
+                break
         rows.append({
             "id": route["id"], "scene": route["scene"], "state_predicates": route["state_predicates"],
             "source": route["source"]["id"], "raw_match": route["match"], "physical": route["physical"],
             "logical_sound": route["logical_target"],
-            "ddrum4": {"channel": document["ddrum4_output_channel"], "note": ddrum["note"]},
+            "ddrum4": ddrum_target,
             "sd3": {"channel": sd3.get("channel", 10), "note": sd3["note"]},
             "drumgizmo": {"channel": gizmo.get("channel", 10), "note": gizmo["note"],
                            "instrument": gizmo["instrument"], "articulation": gizmo["articulation"]},
