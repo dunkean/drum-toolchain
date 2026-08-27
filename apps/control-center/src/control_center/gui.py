@@ -1107,13 +1107,19 @@ def launch() -> int:
             return "\n\n".join(lines) or "No declared destination."
 
         def _append_virtual_kit_event(self, result: object) -> None:
-            ddrum = self.current_simulator().project.renderers["ddrum4"][result.logical_target]
-            sd3 = self.current_simulator().project.renderers["sd3"][result.logical_target]
-            gizmo = self.current_simulator().project.renderers["drumgizmo"][result.logical_target]
+            # The cards and chronological log both derive from the canonical
+            # trace. Do not look up the renderer map a second time here: a
+            # future transform could otherwise make the two views disagree.
+            by_stage = {step.stage: step for step in result.steps}
+            ddrum_message = getattr(by_stage.get("Arduino DDrum4 renderer"), "message", {}) or {}
+            sd3_message = getattr(by_stage.get("SD3 renderer"), "message", {}) or {}
+            gizmo_message = getattr(by_stage.get("DrumGizmo renderer"), "message", {}) or {}
+            ddrum = f"C{ddrum_message.get('channel', '—')} N{ddrum_message.get('note', '—')}"
+            sd3 = f"C{sd3_message.get('channel', '—')} N{sd3_message.get('note', '—')}"
+            gizmo = f"{gizmo_message.get('instrument', '—')}/{gizmo_message.get('articulation', '—')} · N{gizmo_message.get('note', '—')}"
             row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
             values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], "Note On", result.source, result.physical,
-                      result.logical_target, result.velocity, f"C{self.current_simulator().project.ddrum4_output_channel} N{ddrum['note']}",
-                      f"C{sd3.get('channel', 10)} N{sd3['note']}", f"{gizmo['instrument']}/{gizmo['articulation']} · N{gizmo['note']}")
+                      result.logical_target, result.velocity, ddrum, sd3, gizmo)
             for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
             self._studio_events.append(result.to_document())
             self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()

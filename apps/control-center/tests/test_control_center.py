@@ -113,6 +113,9 @@ class ControlCenterTests(unittest.TestCase):
         identifiers = {case.identifier for case in report.cases}
         self.assertIn("logical.scene.pc000", identifiers)
         self.assertIn("logical.scene.pc001", identifiers)
+        self.assertIn("logical.scene.pc000.ch15", identifiers)
+        self.assertIn("pad.edrumin.n038.v001.metalcore.vp1_snare0", identifiers)
+        self.assertIn("pad.edrumin.n038.v127.metalcore.vp1_snare0", identifiers)
         self.assertIn("native.ddrum_program_metalcore", identifiers)
         self.assertEqual(report.to_document()["hardware_io"], "disabled")
 

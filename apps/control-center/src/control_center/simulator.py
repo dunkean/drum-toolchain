@@ -389,8 +389,10 @@ class RigSimulator:
 
         State coverage is intentionally finite: defaults, every scene, every
         conditional route/action predicate combination and each native-control
-        value.  It catches broken mappings without inventing the unbounded
-        Cartesian product of arbitrary MIDI VP values.
+        value. Every exact Note path is exercised at MIDI velocities 1 and
+        127, and every declared logical-control channel is covered. It catches
+        boundary and protocol drift without inventing the unbounded Cartesian
+        product of arbitrary MIDI VP values.
         """
         cases: list[DiagnosticCase] = []
         for scene, values in self._diagnostic_state_vectors():
@@ -399,15 +401,16 @@ class RigSimulator:
                     notes = (decoder.match["note"],) if decoder.message_type == "note" else range(
                         decoder.match["note_range"][0], decoder.match["note_range"][1] + 1)
                     for note in notes:
-                        identifier = self._diagnostic_id("pad", decoder.source, note, scene, values)
-                        candidate = RigSimulator(self.project)
-                        try:
-                            candidate.set_state(scene=scene, values=values)
-                            result = candidate.simulate_pad(decoder.source, note)
-                            cases.append(DiagnosticCase(identifier, True,
-                                f"{result.physical} -> {result.logical_target}; DDrum4/SD3/DrumGizmo declared"))
-                        except SimulationError as error:
-                            cases.append(DiagnosticCase(identifier, False, str(error)))
+                        for velocity in (1, 127):
+                            identifier = self._diagnostic_id("pad", decoder.source, note, scene, values, velocity)
+                            candidate = RigSimulator(self.project)
+                            try:
+                                candidate.set_state(scene=scene, values=values)
+                                result = candidate.simulate_pad(decoder.source, note, velocity)
+                                cases.append(DiagnosticCase(identifier, True,
+                                    f"{result.physical} -> {result.logical_target} at v{velocity:03d}; DDrum4/SD3/DrumGizmo declared"))
+                            except SimulationError as error:
+                                cases.append(DiagnosticCase(identifier, False, str(error)))
                 elif decoder.message_type in {"cc", "poly_aftertouch"}:
                     data1 = decoder.match["cc"] if decoder.message_type == "cc" else decoder.match.get("note", 0)
                     identifier = self._diagnostic_id(decoder.message_type, decoder.source, data1, scene, values)
@@ -416,24 +419,29 @@ class RigSimulator:
                     if decoder.message_type == "poly_aftertouch" and decoder.match.get("active_note"):
                         reason += "; active_note/source_channel_note correlation also needs a live ledger"
                     cases.append(DiagnosticCase(identifier, False, reason))
+        scene_control = self.project.logical_control_protocol["scene"]
         for index, scene in enumerate(self.project.scenes):
-            candidate = RigSimulator(self.project)
-            identifier = f"logical.scene.pc{index:03d}"
-            try:
-                candidate.simulate_logical_control("simulator", 15, "program_change", index)
-                cases.append(DiagnosticCase(identifier, True, f"selects scene {scene}"))
-            except SimulationError as error:
-                cases.append(DiagnosticCase(identifier, False, str(error)))
+            for channel_index, channel in enumerate(scene_control["channels"]):
+                candidate = RigSimulator(self.project)
+                suffix = "" if channel_index == 0 else f".ch{channel:02d}"
+                identifier = f"logical.scene.pc{index:03d}{suffix}"
+                try:
+                    candidate.simulate_logical_control("simulator", channel, "program_change", index)
+                    cases.append(DiagnosticCase(identifier, True, f"selects scene {scene} on CH{channel}"))
+                except SimulationError as error:
+                    cases.append(DiagnosticCase(identifier, False, str(error)))
         for variable, values in self._diagnostic_variable_values().items():
             control = self.project.logical_control_protocol[variable]
             for value in sorted(values):
-                candidate = RigSimulator(self.project)
-                identifier = f"logical.{variable}.cc{control['cc']:03d}.v{value:03d}"
-                try:
-                    candidate.simulate_logical_control("simulator", 15, "cc", control["cc"], value)
-                    cases.append(DiagnosticCase(identifier, True, f"sets {variable}={value}"))
-                except SimulationError as error:
-                    cases.append(DiagnosticCase(identifier, False, str(error)))
+                for channel_index, channel in enumerate(control["channels"]):
+                    candidate = RigSimulator(self.project)
+                    suffix = "" if channel_index == 0 else f".ch{channel:02d}"
+                    identifier = f"logical.{variable}.cc{control['cc']:03d}.v{value:03d}{suffix}"
+                    try:
+                        candidate.simulate_logical_control("simulator", channel, "cc", control["cc"], value)
+                        cases.append(DiagnosticCase(identifier, True, f"sets {variable}={value} on CH{channel}"))
+                    except SimulationError as error:
+                        cases.append(DiagnosticCase(identifier, False, str(error)))
         for name in sorted(self.project.native_control_map):
             candidate = RigSimulator(self.project)
             try:
@@ -474,9 +482,10 @@ class RigSimulator:
         return tuple((scene, dict(values)) for scene, values in sorted(vectors))
 
     @staticmethod
-    def _diagnostic_id(kind: str, source: str, note: int, scene: str, values: Mapping[str, int]) -> str:
+    def _diagnostic_id(kind: str, source: str, note: int, scene: str, values: Mapping[str, int], velocity: int | None = None) -> str:
         suffix = ".".join(f"{name}{value}" for name, value in sorted(values.items()))
-        return f"{kind}.{source}.n{note:03d}.{scene}.{suffix or 'default'}"
+        velocity_suffix = f".v{velocity:03d}" if velocity is not None else ""
+        return f"{kind}.{source}.n{note:03d}{velocity_suffix}.{scene}.{suffix or 'default'}"
 
     def _note_decoder(self, source: str, note: int):
         for decoder in self.project.source_decoders:
