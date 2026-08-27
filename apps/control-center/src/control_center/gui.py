@@ -1017,6 +1017,7 @@ def launch() -> int:
             for row, kit_row in enumerate(self._studio_rows):
                 logical = kit_row.logical_sound or "MISSING"
                 ddrum_text = (f"S{kit_row.ddrum4_slot} {kit_row.ddrum4_sound_id} · P{kit_row.ddrum4_note_p} · "
+                              f"{len(kit_row.ddrum4_layer_candidates)} layer candidate(s) · "
                               f"C{simulator.project.ddrum4_output_channel} N{kit_row.ddrum4_note}"
                               if kit_row.ddrum4_note is not None and kit_row.ddrum4_sound_id else
                               (f"C{simulator.project.ddrum4_output_channel} · note {kit_row.ddrum4_note}" if kit_row.ddrum4_note is not None else "MISSING"))
@@ -1034,6 +1035,8 @@ def launch() -> int:
                     item = QTableWidgetItem(str(value))
                     if column != 1:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if column == 6:
+                        item.setToolTip(kit_row.ddrum4_content_summary)
                     if value == "MISSING":
                         item.setBackground(Qt.GlobalColor.darkRed)
                     self.virtual_kit_table.setItem(row, column, item)
@@ -1057,7 +1060,8 @@ def launch() -> int:
                 QMessageBox.warning(self, "Cannot trigger virtual pad", str(error)); return
             by_stage = {step.stage: step for step in result.steps}
             self.studio_cards["Raw input"].setPlainText(self._format_studio_card(by_stage, ("raw MIDI", "source profile", "logical state", "logical sound")))
-            self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer", "DDrum4 declared target", "DDrum4 echo guard")))
+            ddrum_card = self._format_studio_card(by_stage, ("Arduino DDrum4 renderer", "DDrum4 declared target", "DDrum4 echo guard"))
+            self.studio_cards["Arduino → DDrum4"].setPlainText(ddrum_card + "\n\nBank content\n" + kit_row.ddrum4_content_summary)
             self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 declared target")))
             self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer", "DrumGizmo declared target")))
             self.studio_route_summary.setText(
