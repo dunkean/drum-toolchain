@@ -116,7 +116,13 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
     output[count++]={MidiType::ControlChange,renderer->channel,renderer->positionCc,position,input.timestampUs};
   }
   const auto value=input.data2;
-  if(input.type==MidiType::ControlChange) output[count++]={MidiType::ControlChange,renderer->channel,renderer->controller<=127?renderer->controller:renderer->note,value,input.timestampUs};
+  if(input.type==MidiType::ControlChange) {
+    // A source CC can only be emitted when the renderer declares its exact
+    // controller in expression-routing/v1.  Falling back to a Note number
+    // silently turned CC4 into arbitrary CC values in earlier profiles.
+    if(renderer->controller>127) { ignore(); return 0; }
+    output[count++]={MidiType::ControlChange,renderer->channel,renderer->controller,value,input.timestampUs};
+  }
   else if(input.type==MidiType::PolyAftertouch) output[count++]={MidiType::PolyAftertouch,renderer->channel,renderer->note,value,input.timestampUs};
   else { remember(static_cast<uint16_t>(source),input,*renderer); output[count++]={MidiType::NoteOn,renderer->channel,renderer->note,value,input.timestampUs}; }
   rendered_.fetch_add(count,std::memory_order_relaxed); return count;

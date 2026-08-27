@@ -497,7 +497,7 @@ def launch() -> int:
                 controls_layout.addWidget(velocity)
             controls_layout.addWidget(load); controls_layout.addWidget(trigger); controls_layout.addWidget(reset); controls_layout.addWidget(panic)
             controls.setLayout(controls_layout); layout.addWidget(controls)
-            self.studio_source.currentTextChanged.connect(self.refresh_virtual_kit_workspace)
+            self.studio_source.currentTextChanged.connect(self._studio_source_changed)
             self.studio_scene.currentTextChanged.connect(self._studio_scene_changed)
 
             state_group = QGroupBox("Logical state — Scene and virtual palettes")
@@ -509,6 +509,18 @@ def launch() -> int:
             self.studio_variable_holder.setLayout(self.studio_variable_layout)
             state_layout = QVBoxLayout(); state_layout.addWidget(self.studio_variable_holder); state_group.setLayout(state_layout)
             layout.addWidget(state_group)
+
+            expressions = QGroupBox("Expression input — CC / aftertouch")
+            expressions_layout = QHBoxLayout()
+            self.studio_expression = QComboBox()
+            self.studio_expression_value = QSpinBox(); self.studio_expression_value.setRange(0, 127); self.studio_expression_value.setValue(64); self.studio_expression_value.setPrefix("V ")
+            expression_trigger = QPushButton("▶ Trigger expression")
+            expression_trigger.setToolTip("Traces the selected declared CC/aftertouch route. It never writes MIDI.")
+            expression_trigger.clicked.connect(self.trigger_virtual_expression)
+            expressions_layout.addWidget(QLabel("Declared expression:")); expressions_layout.addWidget(self.studio_expression, 2)
+            expressions_layout.addWidget(QLabel("Value:")); expressions_layout.addWidget(self.studio_expression_value)
+            expressions_layout.addWidget(expression_trigger); expressions_layout.addStretch(1)
+            expressions.setLayout(expressions_layout); layout.addWidget(expressions)
 
             body = QSplitter(Qt.Orientation.Horizontal)
             left = QWidget(); left_layout = QVBoxLayout()
@@ -579,6 +591,7 @@ def launch() -> int:
                 self.studio_source.blockSignals(True); self.studio_source.clear(); self.studio_source.addItems(tuple(simulator.project.sources)); self.studio_source.blockSignals(False)
                 self.studio_scene.blockSignals(True); self.studio_scene.clear(); self.studio_scene.addItems(simulator.project.scenes); self.studio_scene.setCurrentText(simulator.state["scene"]); self.studio_scene.blockSignals(False)
                 self._rebuild_studio_variable_controls(simulator)
+                self._refresh_studio_expression_choices(simulator)
                 self._load_project_bank_reference(self._active_simulator_path or Path(), simulator.project.raw)
                 self.refresh_virtual_kit_workspace()
                 self.virtual_kit_status.setText("Virtual kit loaded from the same validated rig project as the compiler.")
@@ -593,6 +606,29 @@ def launch() -> int:
                 self.refresh_virtual_kit_workspace()
             except (OSError, ValueError, SimulationError) as error:
                 self.virtual_kit_status.setText(f"Scene change rejected: {error}")
+
+        def _studio_source_changed(self, _source: str) -> None:
+            try:
+                simulator = self.current_simulator()
+                self._refresh_studio_expression_choices(simulator)
+                self.refresh_virtual_kit_workspace()
+            except (OSError, ValueError, SimulationError):
+                return
+
+        def _refresh_studio_expression_choices(self, simulator: RigSimulator) -> None:
+            """List CC/aftertouch routes for the selected raw module only."""
+            source = self.studio_source.currentText()
+            self.studio_expression.blockSignals(True)
+            self.studio_expression.clear()
+            for decoder in simulator.project.source_decoders:
+                if decoder.source != source or decoder.message_type not in {"cc", "poly_aftertouch"}:
+                    continue
+                data1 = decoder.match.get("cc") if decoder.message_type == "cc" else decoder.match.get("note", 0)
+                label = f"{decoder.physical} · {decoder.message_type} {data1}"
+                self.studio_expression.addItem(label, (decoder.message_type, data1, decoder.physical))
+            if self.studio_expression.count() == 0:
+                self.studio_expression.addItem("No declared expression for this source", None)
+            self.studio_expression.blockSignals(False)
 
         def _rebuild_studio_variable_controls(self, simulator: RigSimulator) -> None:
             """Expose exactly the project’s declared virtual-palette variables.
@@ -691,6 +727,31 @@ def launch() -> int:
             self._append_virtual_kit_event(result)
             self.virtual_kit_status.setText(f"Offline route verified: {result.physical} → {result.logical_target}. No MIDI or audio was emitted.")
 
+        def trigger_virtual_expression(self) -> None:
+            data = self.studio_expression.currentData()
+            if not isinstance(data, tuple) or len(data) != 3:
+                self.virtual_kit_status.setText("The selected raw source has no declared expression route.")
+                return
+            message_type, data1, physical = data
+            try:
+                simulator = self.current_simulator()
+                simulator.set_state(scene=self.studio_scene.currentText() or None)
+                result = simulator.simulate_expression(self.studio_source.currentText(), str(message_type), int(data1),
+                                                       self.studio_expression_value.value())
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot trigger virtual expression", str(error)); return
+            by_stage = {step.stage: step for step in result.steps}
+            self.studio_cards["Raw input"].setPlainText(self._format_studio_card(by_stage, ("raw MIDI", "source profile", "logical state", "logical sound")))
+            self.studio_cards["Arduino → DDrum4"].setPlainText(self._format_studio_card(by_stage, ("Arduino DDrum4 renderer",)))
+            self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 audio")))
+            self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer",)))
+            self.studio_route_summary.setText(
+                f"{physical} expression  |  source {result.source}, value {result.velocity}  |  "
+                "renderer capability is shown explicitly; planned and unsupported outputs are not emitted"
+            )
+            self._append_virtual_expression_event(result)
+            self.virtual_kit_status.setText("Offline expression trace completed. No MIDI or audio was emitted.")
+
         @staticmethod
         def _format_studio_card(by_stage: dict[str, object], stages: tuple[str, ...]) -> str:
             lines: list[str] = []
@@ -714,6 +775,21 @@ def launch() -> int:
                       result.logical_target, result.velocity, f"C{self.current_simulator().project.ddrum4_output_channel} N{ddrum['note']}",
                       f"C{sd3.get('channel', 10)} N{sd3['note']}", f"{gizmo['instrument']}/{gizmo['articulation']} · N{gizmo['note']}")
             for column, value in enumerate(values): self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
+            self._studio_events.append(result.to_document())
+            self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()
+
+        def _append_virtual_expression_event(self, result: object) -> None:
+            by_stage = {step.stage: step for step in result.steps}
+            ddrum = getattr(by_stage.get("Arduino DDrum4 renderer"), "detail", "—")
+            sd3_step = by_stage.get("SD3 renderer")
+            sd3_message = getattr(sd3_step, "message", None)
+            sd3 = " · ".join(f"{key}={value}" for key, value in sd3_message.items()) if sd3_message else getattr(sd3_step, "detail", "—")
+            gizmo = getattr(by_stage.get("DrumGizmo renderer"), "detail", "—")
+            row = self.virtual_kit_log.rowCount(); self.virtual_kit_log.insertRow(row)
+            values = (datetime.now().strftime("%H:%M:%S.%f")[:-3], result.raw_type, result.source, result.physical,
+                      result.logical_target, result.velocity, ddrum, sd3, gizmo)
+            for column, value in enumerate(values):
+                self.virtual_kit_log.setItem(row, column, QTableWidgetItem(str(value)))
             self._studio_events.append(result.to_document())
             self.virtual_kit_log.scrollToBottom(); self.virtual_kit_log.resizeColumnsToContents()
 

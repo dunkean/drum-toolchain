@@ -233,10 +233,11 @@ class RigSimulator:
     def simulate_expression(self, source: str, message_type: str, data1: int, value: int = 64) -> SimulationResult:
         """Inspect a declared expression without inventing renderer support.
 
-        The current project compiler can lower only exact Note decoders to the
-        Arduino.  A raw CC/aftertouch trace is still useful to inspect a
-        source profile, but it is deliberately *not* a proof that either the
-        DDrum4 bridge or the PC runtime implements a shared expression policy.
+        The compiler can currently lower only exact Note decoders to Arduino.
+        A measured ``expression-routing/v1`` route can nevertheless prove the
+        first PC vertical (openness CC passthrough to SD3). All other targets
+        remain explicit planned/unsupported trace steps rather than inferred
+        audio behavior.
         """
         if source not in self.project.sources:
             raise SimulationError(f"unknown source module {source!r}")
@@ -263,10 +264,26 @@ class RigSimulator:
             TraceStep("source profile", f"{source} {message_type} {data1} resolves to {physical}"),
             TraceStep("logical state", "Scene and virtual palettes select the current logical sound", dict(self._state)),
             TraceStep("logical sound", logical),
-            TraceStep("Arduino DDrum4 renderer", "unsupported: the verified firmware-project generator lowers exact Note decoders only"),
-            TraceStep("SD3 renderer", "unverified here: the runtime has target-specific CC/aftertouch behavior, not a shared declared expression contract"),
-            TraceStep("DrumGizmo renderer", "unsupported: the declared DrumGizmo map is note-only"),
         ]
+        expression = self._expression_route(source, physical, decoder.emit.get("expressions", ()))
+        if (message_type == "cc" and expression is not None and expression["expression"] == "openness"
+                and expression["targets"]["sd3"]["status"] in {"measured", "user-confirmed"}):
+            sd3_event = expression["targets"]["sd3"]["event"]
+            sd3_status = expression["targets"]["sd3"]["status"]
+            steps.extend((
+                TraceStep("Arduino DDrum4 renderer", "planned: quantized NOTE P needs measured CC polarity and thresholds", expression["targets"]["ddrum4"]),
+                TraceStep("SD3 renderer", f"{sd3_status} passthrough expression route", {
+                    "type": "control_change", "channel": sd3_event["channel"], "cc": sd3_event["cc"], "value": value,
+                }),
+                TraceStep("SD3 audio", f"MegaKit updates {physical} openness without triggering a new hit"),
+                TraceStep("DrumGizmo renderer", "unsupported: declared DrumGizmo map is note-only", expression["targets"]["drumgizmo"]),
+            ))
+        else:
+            steps.extend((
+                TraceStep("Arduino DDrum4 renderer", "unsupported: the verified firmware-project generator lowers exact Note decoders only"),
+                TraceStep("SD3 renderer", "unverified here: no measured common expression-routing/v1 target is declared"),
+                TraceStep("DrumGizmo renderer", "unsupported: the declared DrumGizmo map is note-only"),
+            ))
         return SimulationResult(source, data1, value, physical, logical, dict(self._state), tuple(steps),
                                 raw_type=raw_type, renders_audio=False)
 
@@ -477,6 +494,20 @@ class RigSimulator:
                 return decoder
             if message_type == "poly_aftertouch" and not decoder.match.get("active_note") and ("note" not in decoder.match or decoder.match["note"] == data1):
                 return decoder
+        return None
+
+    def _expression_route(self, source: str, physical: str, expressions: object) -> Mapping[str, Any] | None:
+        """Return one declared expression-routing/v1 route for this decoder."""
+        if not isinstance(expressions, (list, tuple)):
+            return None
+        routes = self.project.raw.get("expression_routing", ())
+        if not isinstance(routes, (list, tuple)):
+            return None
+        for expression in expressions:
+            for route in routes:
+                if (isinstance(route, Mapping) and route.get("source") == source
+                        and route.get("physical") == physical and route.get("expression") == expression):
+                    return route
         return None
 
     def _logical_target(self, physical: str) -> str:

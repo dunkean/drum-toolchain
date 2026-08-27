@@ -232,6 +232,9 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
         if emit["physical"] not in physical_events:
             _fail(f"source_decoders[{index}]: unknown physical event {emit['physical']!r}")
         expressions = set(emit.get("expressions", []))
+        semantic_expressions = expressions & {"openness", "pressure", "position"}
+        if message_type in {"cc", "poly_aftertouch"} and len(semantic_expressions) > 1:
+            _fail(f"source_decoders[{index}]: CC/poly-aftertouch supports exactly one semantic expression per decoder")
         if message_type == "cc" and ("velocity" in expressions or emit.get("normalize") != "cc7"):
             _fail(f"source_decoders[{index}]: cc must use normalize: cc7 and cannot emit velocity")
         if "position" in expressions and message_type == "note":
@@ -305,6 +308,64 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
         missing = logical_sounds - set(renderer)
         if missing:
             _fail(f"renderer {renderer_name}: logical sounds without renderer: {', '.join(sorted(missing))}")
+
+    # Expression routes are intentionally explicit and target-qualified.  A
+    # raw CC must never infer a renderer CC from an output note, and an
+    # aftertouch route must declare its correlation policy.  The model remains
+    # optional while legacy profiles are migrated, but any declared route is
+    # complete enough to be compiled and loaded without a fallback.
+    expression_routes = document.get("expression_routing", ())
+    expression_decoders: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    for decoder in document["source_decoders"]:
+        match, emit = decoder["match"], decoder["emit"]
+        if match["type"] not in {"cc", "poly_aftertouch"}:
+            continue
+        for expression in emit.get("expressions", ()):
+            if expression in {"openness", "pressure", "position"}:
+                key = (match["source"], emit["physical"], expression)
+                if key in expression_decoders:
+                    _fail(f"expression decoder {key!r} is ambiguous")
+                expression_decoders[key] = decoder
+    expression_keys: set[tuple[str, str, str]] = set()
+    for index, route in enumerate(expression_routes):
+        key = (route["source"], route["physical"], route["expression"])
+        if key in expression_keys:
+            _fail(f"expression_routing[{index}]: duplicate source/physical/expression route")
+        expression_keys.add(key)
+        decoder = expression_decoders.get(key)
+        if decoder is None:
+            _fail(f"expression_routing[{index}]: no matching CC or poly-aftertouch source decoder")
+        matcher = decoder["match"]["type"]
+        if route["expression"] == "openness" and (matcher != "cc" or route["correlation"] != "none"):
+            _fail(f"expression_routing[{index}]: openness requires a CC decoder with correlation: none")
+        if route["expression"] == "pressure" and (matcher != "poly_aftertouch" or route["correlation"] != "source_channel_note"):
+            _fail(f"expression_routing[{index}]: pressure requires correlated poly-aftertouch")
+        for target_name, target in route["targets"].items():
+            status, event = target["status"], target["event"]
+            event_type = event["type"]
+            if status == "unsupported":
+                if event_type != "unsupported" or not target.get("reason"):
+                    _fail(f"expression_routing[{index}].targets.{target_name}: unsupported target needs reason and event.type: unsupported")
+                continue
+            if target_name == "drumgizmo":
+                _fail(f"expression_routing[{index}].targets.drumgizmo: only unsupported is valid in the note-only MVP")
+            if target_name == "ddrum4":
+                if event_type != "quantized_note_p":
+                    _fail(f"expression_routing[{index}].targets.ddrum4: only planned quantized_note_p is currently representable")
+                if status != "planned":
+                    _fail(f"expression_routing[{index}].targets.ddrum4: quantized_note_p remains planned until thresholds are measured")
+                continue
+            if route["expression"] != "openness" or event_type != "cc" or event.get("transform") != "passthrough":
+                _fail(f"expression_routing[{index}].targets.sd3: the implemented vertical is openness -> passthrough CC")
+            if status not in {"measured", "user-confirmed"}:
+                _fail(f"expression_routing[{index}].targets.sd3: a live CC target must be measured or user-confirmed")
+            if not isinstance(event.get("channel"), int) or not isinstance(event.get("cc"), int):
+                _fail(f"expression_routing[{index}].targets.sd3: CC event needs channel and cc")
+            for scene in scenes:
+                for variant in logical_route_variants(routes[scene][route["physical"]]):
+                    renderer = document["renderers"]["sd3"][variant.logical_target]
+                    if renderer.get("channel", 10) != event["channel"] or renderer.get("cc") != event["cc"]:
+                        _fail(f"expression_routing[{index}].targets.sd3: renderer {variant.logical_target!r} must declare the same channel and cc")
 
     # A DrumGizmo midimap is one MIDI-note address per logical sound. The
     # all-zero M1 fixture is explicitly unresolved and therefore exempt until

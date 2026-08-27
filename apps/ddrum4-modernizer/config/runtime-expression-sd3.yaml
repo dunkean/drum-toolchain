@@ -1,0 +1,36 @@
+format: rig-runtime-profile/v1
+status: ready
+target_status: {sd3: ready, drumgizmo: planned}
+state:
+  scenes: [metal]
+  defaults: {scene: metal}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+policies: {echo: measured_only}
+expression_routing:
+  - source: edrumin
+    physical: hihat.opening
+    expression: openness
+    correlation: none
+    targets:
+      ddrum4:
+        status: planned
+        event: {type: quantized_note_p}
+      sd3:
+        status: user-confirmed
+        event: {type: cc, channel: 10, cc: 4, transform: passthrough}
+      drumgizmo:
+        status: unsupported
+        reason: note-only MVP
+        event: {type: unsupported}
+records:
+  - scene: metal
+    state_predicates: {}
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: cc, cc: 4}
+    emit: {physical: hihat.opening, expressions: [openness], normalize: cc7}
+    physical: hihat.opening
+    logical_target: hihat.opening
+    renderers:
+      sd3: {note: 46, channel: 10, cc: 4}
+      drumgizmo: {note: 46, channel: 10, instrument: hihat, articulation: opening}

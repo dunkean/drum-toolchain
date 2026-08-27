@@ -145,6 +145,33 @@ class ControlCenterTests(unittest.TestCase):
         self.assertFalse(cc.renders_audio)
         self.assertEqual(cc.to_document()["raw"], {"type": "control_change", "data1": 4, "value": 64})
 
+    def test_simulator_traces_a_measured_sd3_openness_cc_without_claiming_ddrum_or_drumgizmo_support(self) -> None:
+        source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "sd3-openness.yaml"
+            document = yaml.safe_load(source.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "edrumin", "type": "cc", "cc": 4},
+                "emit": {"physical": "kick.hit", "expressions": ["openness"], "normalize": "cc7"},
+            })
+            for logical in ("kick.acoustic", "kick.electronic"):
+                document["renderers"]["sd3"][logical]["cc"] = 4
+            document["expression_routing"] = [{
+                "source": "edrumin", "physical": "kick.hit", "expression": "openness", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "planned", "event": {"type": "quantized_note_p"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "note-only MVP", "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            result = RigSimulator.from_path(project).simulate_expression("edrumin", "cc", 4, 91)
+
+        steps = {step.stage: step for step in result.steps}
+        self.assertEqual(steps["SD3 renderer"].message, {"type": "control_change", "channel": 10, "cc": 4, "value": 91})
+        self.assertEqual(steps["Arduino DDrum4 renderer"].message["status"], "planned")
+        self.assertFalse(result.renders_audio)
+
     def test_r15_simulator_covers_ten_sounds_from_each_of_three_modules(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         simulator = RigSimulator.from_path(project)

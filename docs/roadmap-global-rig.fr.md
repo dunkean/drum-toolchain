@@ -17,9 +17,12 @@ change aucun réglage de module.
 - [x] Le compilateur publie aussi `virtual-kit-map.json`, la table
   état/source/physique/son logique/DDrum4/SD3/DrumGizmo exactement issue des
   routes compilées ; c'est le contrat de parité des trois renderers.
-- [x] `expression-capability-report.json` bloque maintenant tout profil
-  contenant CC ou aftertouch non abaissable : runtime et firmware restent
-  `planned`, et chaque sacrifice (notamment DrumGizmo note-only) est déclaré.
+- [x] `expression-routing/v1` rend explicite, par source/physique/expression,
+  le comportement de chaque renderer. Première verticale réellement
+  implémentée : `openness` CC en passthrough vers SD3 (CC et canal explicites,
+  testés de l'artefact au runtime C++). DDrum4 reste `planned` et DrumGizmo
+  `unsupported` : ni le simulateur ni le compilateur ne les font passer pour
+  fonctionnels.
 - [x] Un diagnostic offline « no-pad » parcourt chaque entrée Note, scène,
   état VP connu et contrôle natif déclaré, puis produit un rapport sans ouvrir
   de port MIDI (`drum-control-center diagnose <projet>`). Les CC et
@@ -71,12 +74,13 @@ change aucun réglage de module.
 
 ## Prochain incrément de contrat — expressions communes
 
-- [ ] Définir puis compiler une politique unique CC4, position, pression et
-  choke pour les trois cibles. Cette politique devra inclure le ledger
-  `source/channel/note` pour `active_note` / `source_channel_note`, les
-  sorties SD3 prouvées et le comportement DDrum4/DrumGizmo réellement
-  supporté. Le simulateur et le diagnostic resteront volontairement négatifs
-  jusque-là.
+- [ ] Mesurer puis abaisser CC4 vers `NOTE P` DDrum4 (polarité, seuils,
+  articulations bow/edge) sans modifier le profil live avant capture réelle.
+- [ ] Ajouter la pression/choke corrélée avec le ledger borné
+  `source/channel/note → destination` commun au runtime PC et au firmware.
+- [ ] Décider et prouver le comportement DrumGizmo pour les expressions ;
+  jusque-là, le sacrifice note-only reste explicite et le diagnostic global
+  d'expression reste négatif.
 
 ## Règle de flash
 

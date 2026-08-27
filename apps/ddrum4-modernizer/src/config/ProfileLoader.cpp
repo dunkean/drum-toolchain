@@ -117,11 +117,17 @@ NativeControlType runtimeNativeControlType(const std::string& value) {
 RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRendererTarget target) {
   const auto root=YAML::LoadFile(path.string());
   if(!root.IsMap() || !root["format"] || root["format"].as<std::string>()!="rig-runtime-profile/v1") invalid("format rig-runtime-profile/v1 is required");
-  if(!root["status"] || root["status"].as<std::string>()!="ready") invalid("runtime profile is unresolved/planned");
+  const auto rendererName=runtimeRendererName(target);
+  const auto status=root["status"] ? root["status"].as<std::string>() : "planned";
+  if(root["target_status"] && root["target_status"][rendererName]) {
+    if(root["target_status"][rendererName].as<std::string>()!="ready")
+      invalid("runtime profile is unresolved/planned for the selected renderer");
+  } else if(status!="ready") {
+    invalid("runtime profile is unresolved/planned");
+  }
   const auto records=root["records"] ? root["records"] : root["routes"];
   if(!records || !records.IsSequence() || records.size()==0) invalid("runtime profile needs records");
   RuntimeProfile result; result.rendererTarget=target;
-  const auto rendererName=runtimeRendererName(target);
   if(root["source_sha256"]) result.sourceSha256=root["source_sha256"].as<std::string>();
   if(root["control_bus"] && !root["control_bus"].IsNull()) {
     const auto bus=root["control_bus"];
@@ -151,8 +157,6 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
     if(!record["source"]||!record["match"]||!record["emit"]||!record["scene"]||!record["physical"]||!record["logical_target"]||!record["renderers"]||!record["renderers"][rendererName]) invalid(std::string("runtime record is incomplete for ")+rendererName);
     const auto source=runtimeSource(result,record["source"]); const auto match=record["match"]; const auto emit=record["emit"];
     const auto matcherName=match["type"].as<std::string>();
-    if(matcherName=="cc" || matcherName=="poly_aftertouch")
-      invalid("runtime profile contains an expression decoder; compile a measured common expression-routing contract first");
     RuntimeDecoder decoder; decoder.source=source; decoder.matcher=runtimeMatcher(matcherName); decoder.physical=record["physical"].as<std::string>();
     if(decoder.matcher==PhysicalMatcher::NoteRange) { const auto range=match["note_range"]; if(!range||range.size()!=2) invalid("runtime note_range needs two values"); decoder.first=midiValue(range[0]); decoder.last=midiValue(range[1]); }
     else if(decoder.matcher==PhysicalMatcher::PolyAftertouch) { decoder.first=match["note"]?midi(match,"note"):255; decoder.last=decoder.first; }
@@ -168,6 +172,32 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
     bool routeExists=false; for(const auto& item:result.routes) { if(item.scene!=route.scene||item.physical!=route.physical||item.logical!=route.logical||item.predicateCount!=route.predicateCount) continue; bool same=true; for(uint8_t i=0;i<route.predicateCount;++i) if(item.predicates[i].variable!=route.predicates[i].variable||item.predicates[i].value!=route.predicates[i].value) {same=false;break;} if(same) routeExists=true; }
     if(!routeExists) result.routes.push_back(std::move(route));
     const auto targetRenderer=record["renderers"][rendererName]; if(!targetRenderer["note"]&&!targetRenderer["cc"]) invalid(std::string("runtime ")+rendererName+" renderer needs note or cc"); RuntimeRenderer renderer; renderer.logical=logical; renderer.note=targetRenderer["note"]?midi(targetRenderer,"note"):0; renderer.channel=channel(targetRenderer,"channel",10); if(targetRenderer["position_cc"]) renderer.positionCc=midi(targetRenderer,"position_cc"); if(targetRenderer["cc"]) renderer.controller=midi(targetRenderer,"cc");
+    if(matcherName=="cc" || matcherName=="poly_aftertouch") {
+      if(target!=RuntimeRendererTarget::Sd3 || matcherName!="cc") invalid("runtime expression is unsupported for the selected renderer");
+      bool accepted=false;
+      const auto expressions=emit["expressions"];
+      if(expressions && root["expression_routing"]) for(const auto& expression:expressions) {
+        if(expression.as<std::string>()!="openness") continue;
+        for(const auto& candidate:root["expression_routing"]) {
+          if(!candidate["source"]||!candidate["physical"]||!candidate["expression"]||
+             candidate["source"].as<std::string>()!=record["source"]["id"].as<std::string>() ||
+             candidate["physical"].as<std::string>()!=physical || candidate["expression"].as<std::string>()!="openness") continue;
+          if(!candidate["correlation"] || candidate["correlation"].as<std::string>()!="none")
+            invalid("runtime openness expression route requires correlation: none");
+          const auto expressionTarget=candidate["targets"] ? candidate["targets"]["sd3"] : YAML::Node{};
+          const auto event=expressionTarget ? expressionTarget["event"] : YAML::Node{};
+          if(!expressionTarget||!event||!expressionTarget["status"]||!event["type"]||!event["transform"]||!event["channel"]||!event["cc"])
+            invalid("runtime expression route is incomplete");
+          const auto expressionStatus=expressionTarget["status"].as<std::string>();
+          if((expressionStatus!="measured"&&expressionStatus!="user-confirmed") || event["type"].as<std::string>()!="cc" || event["transform"].as<std::string>()!="passthrough")
+            invalid("runtime expression route is not a reviewed passthrough CC");
+          if(renderer.channel!=channel(event,"channel",10)||renderer.controller!=midi(event,"cc"))
+            invalid("runtime expression route differs from its SD3 renderer address");
+          accepted=true;
+        }
+      }
+      if(!accepted) invalid("runtime expression decoder has no measured expression-routing/v1 target");
+    }
     bool renderExists=false; for(const auto& item:result.renderers) if(item.logical==renderer.logical) { renderExists=true; if(item.note!=renderer.note||item.channel!=renderer.channel||item.positionCc!=renderer.positionCc||item.controller!=renderer.controller) invalid(std::string("logical sound has inconsistent ")+rendererName+" renderers"); } if(!renderExists) result.renderers.push_back(std::move(renderer));
   }
   if(root["native_control_map"]) for(const auto& item:root["native_control_map"]) {

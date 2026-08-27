@@ -187,11 +187,35 @@ def _firmware_lowering_reason(record: dict[str, Any]) -> str | None:
     return None
 
 
-def _runtime_expression_reason(record: dict[str, Any]) -> str | None:
-    """Return why a source expression cannot be loaded into the PC runtime."""
+def _expression_route(document: dict[str, Any], record: dict[str, Any]) -> dict[str, Any] | None:
+    """Find the explicit contract for a raw CC/aftertouch route, if any."""
+    expressions = record["emit"].get("expressions", ())
+    for expression in expressions:
+        if expression not in {"openness", "pressure", "position"}:
+            continue
+        for route in document.get("expression_routing", ()):
+            if (route.get("source"), route.get("physical"), route.get("expression")) == (
+                    record["source"]["id"], record["physical"], expression):
+                return route
+    return None
+
+
+def _runtime_expression_reason(document: dict[str, Any], record: dict[str, Any], target: str) -> str | None:
+    """Return why a raw expression cannot be loaded for one PC renderer."""
     matcher = record["match"].get("type")
-    if matcher in {"cc", "poly_aftertouch"}:
-        return "runtime expression routing is not yet common/correlated with the firmware"
+    if matcher not in {"cc", "poly_aftertouch"}:
+        return None
+    route = _expression_route(document, record)
+    if route is None:
+        return "no explicit expression-routing/v1 target is declared"
+    target_config = route["targets"][target]
+    if target_config["status"] not in {"measured", "user-confirmed"}:
+        return f"expression target is {target_config['status']!r}"
+    event = target_config["event"]
+    if target != "sd3" or matcher != "cc" or route["expression"] != "openness":
+        return "this runtime implements only the measured openness -> SD3 CC vertical"
+    if event.get("type") != "cc" or event.get("transform") != "passthrough":
+        return "expression target is not a passthrough CC event"
     return None
 
 
@@ -199,25 +223,37 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
                                   provenance: dict[str, str]) -> dict[str, Any]:
     """Make unsupported expression paths explicit before any target is enabled.
 
-    ``rig-project/v1`` already records raw CC and poly-aftertouch decoders,
-    but a common PC/Arduino lowering contract has not been measured.  This
-    report is intentionally fail-closed: an expression cannot be hidden by a
-    renderer fallback or make a firmware plan look flashable.
+    ``rig-project/v1`` can now carry a measured target-specific expression
+    route (the first implemented vertical is openness CC -> SD3 CC).  This
+    report remains fail-closed for every other target: an expression cannot be
+    hidden by a renderer fallback or make a firmware plan look flashable.
     """
     expressions = [record for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"}]
     non_exact = [record for record in routes if _firmware_lowering_reason(record) is not None]
     rows: list[dict[str, Any]] = []
     for record in expressions:
         kind = record["match"]["type"]
+        declared = _expression_route(document, record)
+        def target_capability(name: str) -> dict[str, Any]:
+            if declared is None:
+                return {"status": "unsupported", "reason": "no explicit expression-routing/v1 target is declared"}
+            declared_name = "ddrum4" if name == "arduino_ddrum4" else name
+            target = dict(declared["targets"][declared_name])
+            if name == "arduino_ddrum4":
+                return {"status": "unsupported", "reason": _firmware_lowering_reason(record), "declared": target}
+            runtime_reason = _runtime_expression_reason(document, record, name)
+            if runtime_reason is not None:
+                return {"status": "unsupported", "reason": runtime_reason, "declared": target}
+            return {"status": "supported", "event": target["event"], "declared_status": target["status"]}
         rows.append({
             "id": record["id"], "source": record["source"]["id"], "physical": record["physical"],
             "logical_sound": record["logical_target"], "raw_match": record["match"], "emit": record["emit"],
             "targets": {
-                "arduino_ddrum4": {"status": "unsupported", "reason": _firmware_lowering_reason(record)},
-                "sd3": {"status": "unsupported", "reason": _runtime_expression_reason(record)},
-                "drumgizmo": {"status": "unsupported", "reason": "declared DrumGizmo renderer map is note-only"},
+                "arduino_ddrum4": target_capability("arduino_ddrum4"),
+                "sd3": target_capability("sd3"),
+                "drumgizmo": target_capability("drumgizmo"),
             },
-            "status": "unsupported",
+            "status": "supported" if target_capability("sd3")["status"] == "supported" else "unsupported",
             "kind": kind,
         })
     firmware_rows = [{
@@ -227,7 +263,7 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
     } for record in non_exact]
     return {**provenance, "format": "expression-capability-report/v1",
             "status": "ready" if not firmware_rows else "planned", "hardware_io": "disabled",
-            "summary": {"declared_expressions": len(rows), "supported_expressions": 0,
+            "summary": {"declared_expressions": len(rows), "supported_expressions": sum(row["status"] == "supported" for row in rows),
                         "firmware_unlowerable_routes": len(firmware_rows)},
             "expressions": rows, "firmware_unlowerable_routes": firmware_rows}
 
@@ -260,7 +296,25 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     unresolved = _has_unresolved_values(document)
     expression_report = _expression_capability_report(document, routes, provenance)
     firmware_unlowerable = bool(expression_report["firmware_unlowerable_routes"])
-    runtime_expressions_unlowered = bool(expression_report["expressions"])
+    runtime_expressions_unlowered = any(
+        _runtime_expression_reason(document, record, target) is not None
+        for target in ("sd3", "drumgizmo") for record in routes
+        if record["match"].get("type") in {"cc", "poly_aftertouch"}
+    )
+    runtime_target_status = {
+        target: ("planned" if unresolved or any(_runtime_expression_reason(document, record, target) is not None
+                                                   for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"})
+                 else "ready")
+        for target in ("sd3", "drumgizmo")
+    }
+    sd3_expressions_unlowered = any(
+        _runtime_expression_reason(document, record, "sd3") is not None
+        for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"}
+    )
+    drumgizmo_expressions_unlowered = any(
+        _runtime_expression_reason(document, record, "drumgizmo") is not None
+        for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"}
+    )
     deployment = document.get("deployment", "simulation")
     live_ready = deployment == "live" and not unresolved and not firmware_unlowerable
     control_bus = document.get("control_bus")
@@ -269,9 +323,9 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     report_status = {
         "runtime-profile": "planned" if unresolved or runtime_expressions_unlowered else "ready", "ddrum4-routing-plan": "planned",
         "ddrum4-routing-contract": "planned", "firmware-project-mapping": "ready" if live_ready else ("planned" if unresolved or firmware_unlowerable else ("simulation-only" if deployment == "simulation" else "planned")),
-        "sd3-midimap": "user-confirmed" if not runtime_expressions_unlowered else "planned",
-        "drumgizmo-midimap": "planned" if unresolved or runtime_expressions_unlowered else "ready",
-        "sd3-megakit-map": "user-confirmed" if not runtime_expressions_unlowered else "planned",
+        "sd3-midimap": "user-confirmed" if not sd3_expressions_unlowered else "planned",
+        "drumgizmo-midimap": "planned" if unresolved or drumgizmo_expressions_unlowered else "ready",
+        "sd3-megakit-map": "user-confirmed" if not sd3_expressions_unlowered else "planned",
         "ddrum4-bank-plan": "planned", "virtual-kit-map": "planned" if unresolved or firmware_unlowerable or runtime_expressions_unlowered else "ready",
         "expression-capability-report": expression_report["status"],
         "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
@@ -286,12 +340,14 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     # source decoder metadata without loss.
     runtime = {**provenance, "format": "rig-runtime-profile/v1", "status": report_status["runtime-profile"],
                "project": document.get("project", "unnamed-rig"), "deployment": deployment,
+               "target_status": runtime_target_status,
                "state": document["state"], "logical_control_protocol": document["logical_control_protocol"],
                "policies": document["policies"], "connection_profiles": document["connection_profiles"],
                "sources": document["sources"], "source_decoders": document["source_decoders"],
                "physical_events": document["physical_events"], "logical_routes": document["logical_routes"],
                "renderers": document["renderers"], "native_control_map": document["native_control_map"],
                "ddrum_state_actions": document.get("ddrum_state_actions", {}),
+               "expression_routing": document.get("expression_routing", []),
                "records": routes, "routes": routes,
                "hardware_io": "logical-control-only" if logical_control_live else "disabled"}
     if control_bus is not None:
@@ -313,8 +369,14 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         mappings = []
         unsupported_source_expressions = []
         for route in routes:
-            runtime_reason = _runtime_expression_reason(route)
-            if runtime_reason is not None:
+            runtime_reason = _runtime_expression_reason(document, route, target)
+            if route["match"].get("type") in {"cc", "poly_aftertouch"}:
+                if runtime_reason is None and target == "sd3":
+                    declared = _expression_route(document, route)
+                    mappings.append({"id": route["id"], "type": "expression", "logical_target": route["logical_target"],
+                                     "raw_match": route["match"], "physical": route["physical"],
+                                     "event": declared["targets"]["sd3"]["event"]})
+                    continue
                 unsupported_source_expressions.append({
                     "id": route["id"], "raw_match": route["match"], "physical": route["physical"],
                     "reason": runtime_reason,
@@ -340,7 +402,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
             "playable_notes": list(bank_facts.playable_notes),
             **({"reports": reference["reports"]} if "reports" in reference else {}),
         }
-    markdown = _megakit_markdown(digest, routes)
+    markdown = _megakit_markdown(document, digest, routes)
     virtual_kit = _virtual_kit_map(provenance, document, routes, report_status["virtual-kit-map"], bank_facts)
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
@@ -388,10 +450,11 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
                 break
         matcher = route["match"].get("type")
         firmware_reason = _firmware_lowering_reason(route)
-        runtime_reason = _runtime_expression_reason(route)
+        runtime_reason = _runtime_expression_reason(document, route, "sd3")
+        drumgizmo_reason = _runtime_expression_reason(document, route, "drumgizmo")
         if firmware_reason is not None:
             coverage = "unsupported" if matcher in {"cc", "poly_aftertouch"} else "planned"
-        elif runtime_reason is not None:
+        elif runtime_reason is not None or drumgizmo_reason is not None:
             coverage = "unsupported"
         else:
             coverage = "complete"
@@ -409,6 +472,7 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
             row["ddrum4_capability"] = {"status": "unsupported", "reason": firmware_reason}
         if runtime_reason is not None:
             row["sd3_capability"] = {"status": "unsupported", "reason": runtime_reason}
+        if drumgizmo_reason is not None:
             row["drumgizmo_capability"] = {"status": "unsupported", "reason": "declared DrumGizmo renderer map is note-only"}
         rows.append(row)
     return {**provenance, "format": "virtual-kit-map/v1", "status": status,
@@ -416,16 +480,22 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
             "state": document["state"], "rows": rows, "hardware_io": "disabled"}
 
 
-def _megakit_markdown(digest: str, routes: list[dict[str, Any]]) -> str:
+def _megakit_markdown(document: dict[str, Any], digest: str, routes: list[dict[str, Any]]) -> str:
     lines = ["# SD3 MegaKit map", "", f"Compiler version: `{COMPILER_VERSION}`", f"Source SHA-256: `{digest}`", "", "| Route | Note | Articulation |", "| --- | ---: | --- |"]
-    supported = [route for route in routes if _runtime_expression_reason(route) is None]
-    unsupported = [route for route in routes if _runtime_expression_reason(route) is not None]
+    supported = [route for route in routes if route["match"].get("type") not in {"cc", "poly_aftertouch"}]
+    expression_routes = [route for route in routes if route["match"].get("type") in {"cc", "poly_aftertouch"}
+                         and _runtime_expression_reason(document, route, "sd3") is None]
+    unsupported = [route for route in routes if route["match"].get("type") in {"cc", "poly_aftertouch"}
+                   and _runtime_expression_reason(document, route, "sd3") is not None]
     lines.extend(f"| {r['id']} | {r['renderers']['sd3']['note']} | {r['logical_target']} |" for r in supported)
+    if expression_routes:
+        lines.extend(["", "## Active source expressions", "", "| Route | Raw matcher | SD3 event |", "| --- | --- | --- |"])
+        lines.extend(f"| {route['id']} | {route['match'].get('type')} | configured expression route |" for route in expression_routes)
     if unsupported:
         lines.extend(["", "## Unsupported source expressions", "",
                       "The following raw expressions are deliberately excluded from the active SD3 note map until a measured common expression-routing contract exists.",
                       "", "| Route | Raw matcher | Reason |", "| --- | --- | --- |"])
-        lines.extend(f"| {route['id']} | {route['match'].get('type')} | {_runtime_expression_reason(route)} |"
+        lines.extend(f"| {route['id']} | {route['match'].get('type')} | no active SD3 expression route |"
                      for route in unsupported)
     return "\n".join(lines) + "\n"
 

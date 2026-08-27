@@ -108,6 +108,15 @@ class RigProjectTests(unittest.TestCase):
         document["source_decoders"][2]["emit"] = {"physical": "hh.opening", "expressions": ["velocity"]}
         with self.assertRaisesRegex(RigProjectError, "cc must use normalize"):
             self.load(document)
+
+    def test_rejects_multiple_semantic_expressions_on_one_raw_expression_decoder(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][2]["emit"] = {
+            "physical": "hh.opening", "expressions": ["openness", "pressure"], "normalize": "cc7",
+        }
+        with self.assertRaisesRegex(RigProjectError, "exactly one semantic expression"):
+            self.load(document)
         document = valid_project()
         fill_renderers(document)
         document["native_control_map"]["ddrum4_program_change"]["channel"] = 14

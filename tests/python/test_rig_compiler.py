@@ -109,6 +109,15 @@ class RigCompilerTests(unittest.TestCase):
                 "match": {"source": "brain", "type": "cc", "cc": 4},
                 "emit": {"physical": "kick.head", "expressions": ["openness"], "normalize": "cc7"},
             })
+            document["renderers"]["sd3"]["kick.hit"]["cc"] = 4
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "kick.head", "expression": "openness", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "planned", "event": {"type": "quantized_note_p"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "note-only MVP", "event": {"type": "unsupported"}},
+                },
+            }]
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             result = compile_project(project, root / "out")
 
@@ -119,13 +128,16 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(statuses["virtual-kit-map"], "planned")
             report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["expressions"][0]["targets"]["arduino_ddrum4"]["status"], "unsupported")
+            self.assertEqual(report["expressions"][0]["targets"]["sd3"]["status"], "supported")
+            runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "planned"})
             virtual_kit = json.loads((root / "out" / "virtual-kit-map.json").read_text(encoding="utf-8"))
             expression_row = next(row for row in virtual_kit["rows"] if row["raw_match"]["type"] == "cc")
             self.assertEqual(expression_row["coverage"], "unsupported")
             sd3_map = json.loads((root / "out" / "sd3-midimap.json").read_text(encoding="utf-8"))
-            self.assertEqual(sd3_map["status"], "planned")
-            self.assertEqual(len(sd3_map["unsupported_source_expressions"]), 1)
-            self.assertEqual(sd3_map["unsupported_source_expressions"][0]["raw_match"]["type"], "cc")
+            self.assertEqual(sd3_map["status"], "user-confirmed")
+            self.assertEqual(sd3_map["mappings"][-1]["event"], {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"})
+            self.assertEqual(sd3_map["unsupported_source_expressions"], [])
 
     def test_live_non_exact_note_route_never_creates_a_flashable_firmware_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

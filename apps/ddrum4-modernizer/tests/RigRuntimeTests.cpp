@@ -13,7 +13,7 @@ int main() {
   p.scenes={"metal","electronic"}; p.defaultScene=0; p.echoMeasuredOnly=true;
   p.decoders={{0,PhysicalMatcher::NoteRange,40,47,"snare.head",true,true}, {0,PhysicalMatcher::ControlChange,4,4,"hat.opening",false,false}, {0,PhysicalMatcher::PolyAftertouch,49,49,"cymbal.choke",false,false}};
   p.routes={{0,"snare.head","snare.metal"},{1,"snare.head","snare.electronic"},{0,"hat.opening","hat.opening"},{1,"hat.opening","hat.opening"},{0,"cymbal.choke","cymbal.choke"},{1,"cymbal.choke","cymbal.choke"}};
-  p.renderers={{"snare.metal",38,10,16},{"snare.electronic",40,10,16},{"hat.opening",46,10,255},{"cymbal.choke",49,10,255}};
+  p.renderers={{"snare.metal",38,10,16},{"snare.electronic",40,10,16},{"hat.opening",46,10,255,46},{"cymbal.choke",49,10,255}};
   p.variables={{"vp1",20,9}};
   p.nativeControls={{0,1,NativeControlType::ProgramChange,1,0,1},{0,1,NativeControlType::ControlChange,21,1,66}};
   RigRuntime runtime{p}; assert(runtime.variable(0)==9); std::array<MidiEvent,RigRuntime::maxOutputEvents> out{};
@@ -78,5 +78,16 @@ int main() {
     expressionProfileRejected=true;
   }
   assert(expressionProfileRejected);
+  const auto expressionSd3=loadRuntimeProfile(std::filesystem::path(DDRUM4_TEST_CONFIG_DIR)/"runtime-expression-sd3.yaml");
+  RigRuntime expressionRuntime{expressionSd3};
+  count=expressionRuntime.process("edrumin",{MidiType::ControlChange,1,4,73,118},out);
+  assert(count==1 && out[0].type==MidiType::ControlChange && out[0].channel==10 && out[0].data1==4 && out[0].data2==73);
+  bool expressionDrumGizmoRejected=false;
+  try {
+    (void)loadRuntimeProfile(std::filesystem::path(DDRUM4_TEST_CONFIG_DIR)/"runtime-expression-sd3.yaml", RuntimeRendererTarget::DrumGizmo);
+  } catch(const std::exception&) {
+    expressionDrumGizmoRejected=true;
+  }
+  assert(expressionDrumGizmoRejected);
   std::cout << "rig runtime tests passed\n";
 }
