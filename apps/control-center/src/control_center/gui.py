@@ -112,10 +112,16 @@ def launch() -> int:
             row = QHBoxLayout(); row.addWidget(QLabel("Project:")); row.addWidget(self.editor_project); row.addWidget(choose); row.addWidget(load)
             layout.addLayout(row)
             editor_tabs = QTabWidget()
-            self.visual_sounds = QTableWidget(0, 4)
-            self.visual_sounds.setHorizontalHeaderLabels(("Logical sound", "DDrum4 note / NOTE P", "SD3 note", "DrumGizmo note"))
+            self.visual_sounds = QTableWidget(0, 9)
+            self.visual_sounds.setHorizontalHeaderLabels((
+                "Logical sound", "DDrum4 note", "DDrum4 bank slot / NOTE P",
+                "SD3 channel", "SD3 note", "DrumGizmo channel", "DrumGizmo note",
+                "DrumGizmo instrument", "DrumGizmo articulation",
+            ))
             self.visual_sounds.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.visual_sounds.itemChanged.connect(lambda _: self._sync_visual_project("sounds"))
+            self.visual_sounds.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.visual_sounds.horizontalHeader().setStretchLastSection(True)
             editor_tabs.addTab(self.visual_sounds, "Sounds and renderer map")
             self.visual_routes = QTableWidget(0, 3)
             self.visual_routes.setHorizontalHeaderLabels(("Scene", "Physical pad / articulation", "Logical sound"))
@@ -201,10 +207,40 @@ def launch() -> int:
             self.layer_table.clearContents(); self.layer_table.setRowCount(0)
             self.bank_summary.setText("No DDrum4 bank loaded. Select a local manifest or load a rig project that declares ddrum4_bank.")
             self.bank_action_status.setText("No bank actions available until a local manifest is loaded.")
+            self._refresh_visual_sound_bank_facts()
             if clear_reference:
                 self.report_paths = []
                 self.manifest.clear()
                 self.reports.clear()
+
+        def _bank_note_text(self, note: object) -> str:
+            """Resolve a DDrum4 renderer note to a loaded bank slot without guessing."""
+            if not isinstance(note, int):
+                return "not declared"
+            if self.matrix is None:
+                return "bank not loaded"
+            sound = self.matrix.sound_for_note(note)
+            if sound is None or sound.note_base is None:
+                return "no declared bank slot"
+            return f"S{sound.slot} · P{note - sound.note_base + 1} · {sound.sound_id or 'missing'}"
+
+        def _refresh_visual_sound_bank_facts(self) -> None:
+            """Refresh only the read-only bank-resolution column after loading a bank."""
+            if not hasattr(self, "visual_sounds"):
+                return
+            self._visual_project_syncing = True
+            try:
+                for row in range(self.visual_sounds.rowCount()):
+                    note_item = self.visual_sounds.item(row, 1)
+                    try:
+                        note = int(note_item.text()) if note_item is not None else None
+                    except ValueError:
+                        note = None
+                    item = QTableWidgetItem(self._bank_note_text(note))
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.visual_sounds.setItem(row, 2, item)
+            finally:
+                self._visual_project_syncing = False
 
         def _populate_visual_project_editor(self, document: object) -> None:
             if not isinstance(document, dict):
@@ -223,13 +259,22 @@ def launch() -> int:
             logical_ids = sorted(set().union(*(set(rows) for rows in renderers.values() if isinstance(rows, dict))))
             self.visual_sounds.setRowCount(len(logical_ids))
             for row, logical in enumerate(logical_ids):
-                values = [logical]
-                for renderer in ("ddrum4", "sd3", "drumgizmo"):
-                    value = renderers.get(renderer, {}).get(logical, {}) if isinstance(renderers.get(renderer), dict) else {}
-                    values.append(value.get("note", "—") if isinstance(value, dict) else "—")
+                ddrum = renderers.get("ddrum4", {}).get(logical, {}) if isinstance(renderers.get("ddrum4"), dict) else {}
+                sd3 = renderers.get("sd3", {}).get(logical, {}) if isinstance(renderers.get("sd3"), dict) else {}
+                drumgizmo = renderers.get("drumgizmo", {}).get(logical, {}) if isinstance(renderers.get("drumgizmo"), dict) else {}
+                ddrum_note = ddrum.get("note", "—") if isinstance(ddrum, dict) else "—"
+                values = [
+                    logical, ddrum_note, self._bank_note_text(ddrum_note),
+                    sd3.get("channel", "—") if isinstance(sd3, dict) else "—",
+                    sd3.get("note", "—") if isinstance(sd3, dict) else "—",
+                    drumgizmo.get("channel", "—") if isinstance(drumgizmo, dict) else "—",
+                    drumgizmo.get("note", "—") if isinstance(drumgizmo, dict) else "—",
+                    drumgizmo.get("instrument", "—") if isinstance(drumgizmo, dict) else "—",
+                    drumgizmo.get("articulation", "—") if isinstance(drumgizmo, dict) else "—",
+                ]
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(str(value))
-                    if column == 0:
+                    if column in (0, 2):
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.visual_sounds.setItem(row, column, item)
             routes = document.get("logical_routes", {})
@@ -282,11 +327,24 @@ def launch() -> int:
                 if table == "sounds":
                     for row in range(self.visual_sounds.rowCount()):
                         logical = self.visual_sounds.item(row, 0).text()
-                        for column, renderer in enumerate(("ddrum4", "sd3", "drumgizmo"), start=1):
+                        ddrum = document["renderers"]["ddrum4"][logical]
+                        sd3 = document["renderers"]["sd3"][logical]
+                        drumgizmo = document["renderers"]["drumgizmo"][logical]
+                        ddrum_note = self.visual_sounds.item(row, 1)
+                        if ddrum_note is not None and ddrum_note.text().strip() != "—":
+                            ddrum["note"] = int(ddrum_note.text())
+                        for column, field in ((3, "channel"), (4, "note")):
                             item = self.visual_sounds.item(row, column)
-                            if item is None or item.text().strip() == "—":
-                                continue
-                            document["renderers"][renderer][logical]["note"] = int(item.text())
+                            if item is not None and item.text().strip() != "—":
+                                sd3[field] = int(item.text())
+                        for column, field in ((5, "channel"), (6, "note")):
+                            item = self.visual_sounds.item(row, column)
+                            if item is not None and item.text().strip() != "—":
+                                drumgizmo[field] = int(item.text())
+                        for column, field in ((7, "instrument"), (8, "articulation")):
+                            item = self.visual_sounds.item(row, column)
+                            if item is not None and item.text().strip() != "—":
+                                drumgizmo[field] = item.text().strip()
                 elif table == "routes":
                     for row in range(self.visual_routes.rowCount()):
                         scene = self.visual_routes.item(row, 0).text()
@@ -310,6 +368,7 @@ def launch() -> int:
                 self._visual_project_syncing = True
                 self.project_document.setPlainText(yaml.safe_dump(document, sort_keys=False, allow_unicode=True))
                 self._visual_project_syncing = False
+                self._refresh_visual_sound_bank_facts()
                 self.editor_status.setText("Table edit applied to Advanced YAML. Validate before saving.")
             except (TypeError, ValueError, KeyError) as error:
                 self._visual_project_syncing = True
@@ -1205,6 +1264,7 @@ def launch() -> int:
                 self.bank_action_status.setText(f"Cannot load bank: {error}")
                 QMessageBox.warning(self, "Cannot load DDrum4 matrix", str(error)); return
             self.matrix = matrix
+            self._refresh_visual_sound_bank_facts()
             for row, sound in enumerate(matrix.sounds):
                 variations = ", ".join(
                     f"V{number}" + (f" · {name}" if name else "")
