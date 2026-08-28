@@ -1,94 +1,86 @@
-[CmdletBinding(SupportsShouldProcess = $true)]
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] [string] $InputMarkdown,
-    [Parameter(Mandatory = $true)] [string] $OutputPdf
+    [Parameter(Mandatory = $true)]
+    [string]$Source,
+    [Parameter(Mandatory = $true)]
+    [string]$Output,
+    [string]$Browser,
+    [switch]$Force
 )
 
-$ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$venvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
-$python = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { (Get-Command python -ErrorAction Stop).Source }
-$markdownPath = (Resolve-Path -LiteralPath $InputMarkdown).Path
-$outputPath = [IO.Path]::GetFullPath($OutputPdf)
-$edgeCandidates = @(
-    'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-    'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-    'C:\Program Files\Google\Chrome\Application\chrome.exe'
-)
-$browser = $edgeCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-if (-not $browser) { throw 'Edge or Chrome is required for deterministic headless PDF rendering.' }
-if (-not $PSCmdlet.ShouldProcess($outputPath, "Render $markdownPath as PDF")) { return }
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
-$body = & $python -c "import markdown,sys; sys.stdout.reconfigure(encoding='utf-8'); print(markdown.markdown(open(sys.argv[1],encoding='utf-8').read(),extensions=['tables','fenced_code']))" $markdownPath
-if ($LASTEXITCODE -ne 0) { throw 'Markdown conversion failed.' }
-$style = @'
-body { font: 10pt "Segoe UI", sans-serif; color: #20242b; margin: 18mm; line-height: 1.35; }
-h1, h2 { color: #7b1e24; break-after: avoid; }
-table { border-collapse: collapse; width: 100%; font-size: 7.5pt; margin: 10px 0 18px; }
-th { background: #252b33; color: white; }
-th, td { border: 1px solid #aeb4bc; padding: 4px 5px; vertical-align: top; }
-tr:nth-child(even) { background: #f2f4f6; }
-code { font-family: Consolas, monospace; font-size: 0.92em; }
-@page { size: A4 landscape; margin: 10mm; }
-'@
-$html = "<!doctype html><html><head><meta charset='utf-8'><style>$style</style></head><body>$body</body></html>"
-$temporary = Join-Path ([IO.Path]::GetTempPath()) ('drum-toolchain-pdf-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $temporary | Out-Null
-try {
-    $htmlPath = Join-Path $temporary 'document.html'
-    $renderPath = Join-Path $temporary 'rendered.pdf'
-    Set-Content -LiteralPath $htmlPath -Value $html -Encoding utf8NoBOM
-    $parent = Split-Path -Parent $outputPath
-    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-    $uri = [Uri]::new($htmlPath).AbsoluteUri
-    $browserProfile = Join-Path $temporary 'browser-profile'
-    $process = Start-Process -FilePath $browser -ArgumentList @('--headless=new', '--disable-gpu', '--no-pdf-header-footer', "--user-data-dir=$browserProfile", "--print-to-pdf=$renderPath", $uri) -PassThru -WindowStyle Hidden
-    $process.WaitForExit()
-    for ($attempt = 0; $attempt -lt 100 -and -not (Test-Path -LiteralPath $renderPath -PathType Leaf); $attempt++) {
-        Start-Sleep -Milliseconds 100
-    }
-    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $renderPath -PathType Leaf)) {
-        throw "PDF renderer failed with exit code $($process.ExitCode)."
-    }
-    # Chromium may delegate the final flush to a child process and let the
-    # process returned by Start-Process exit first.  Do not return a PDF which
-    # is still changing underneath a following git add or file copy.
-    $previousHash = ''
-    $stablePasses = 0
-    for ($attempt = 0; $attempt -lt 100 -and $stablePasses -lt 5; $attempt++) {
-        try {
-            $pdfBytes = [IO.File]::ReadAllBytes($renderPath)
-            $tailStart = [Math]::Max(0, $pdfBytes.Length - 32)
-            $tail = [Text.Encoding]::ASCII.GetString($pdfBytes, $tailStart, $pdfBytes.Length - $tailStart)
-            $hash = (Get-FileHash -LiteralPath $renderPath -Algorithm SHA256).Hash
-            if ($pdfBytes.Length -gt 8 -and $tail.Contains('%%EOF') -and $hash -eq $previousHash) {
-                $stablePasses++
-            } else {
-                $stablePasses = 0
-            }
-            $previousHash = $hash
-        } catch {
-            $stablePasses = 0
-        }
-        if ($stablePasses -lt 5) { Start-Sleep -Milliseconds 100 }
-    }
-    if ($stablePasses -lt 5) { throw 'PDF renderer did not produce a stable, complete file.' }
-    $copied = $false
-    for ($attempt = 0; $attempt -lt 100 -and -not $copied; $attempt++) {
-        try {
-            Copy-Item -LiteralPath $renderPath -Destination $outputPath -Force -ErrorAction Stop
-            $copied = $true
-        } catch {
-            Start-Sleep -Milliseconds 100
-        }
-    }
-    if (-not $copied) { throw "Rendered PDF is complete, but destination remains locked: $outputPath" }
-} finally {
-    for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $temporary); $attempt++) {
-        try { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop } catch {
-            Start-Sleep -Milliseconds 100
-        }
-    }
-    if (Test-Path -LiteralPath $temporary) { Write-Warning "Temporary browser profile remains locked: $temporary" }
+$sourcePath = (Resolve-Path -LiteralPath $Source).Path
+if ([IO.Path]::GetExtension($sourcePath) -ne ".md") {
+    throw "Source must be a Markdown file: $sourcePath"
 }
-Write-Output "Rendered PDF: $outputPath"
+$outputPath = [IO.Path]::GetFullPath($Output, (Get-Location).Path)
+$outputParent = Split-Path -Parent $outputPath
+if (-not (Test-Path -LiteralPath $outputParent -PathType Container)) {
+    throw "Output directory does not exist: $outputParent"
+}
+if ((Test-Path -LiteralPath $outputPath) -and -not $Force) {
+    throw "Output already exists; pass -Force to replace it: $outputPath"
+}
+
+if (-not $Browser) {
+    $candidates = @(
+        "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        "C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        "C:\Program Files\Google\Chrome\Application\chrome.exe"
+    )
+    $Browser = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+}
+if (-not $Browser -or -not (Test-Path -LiteralPath $Browser -PathType Leaf)) {
+    throw "A Chromium-compatible browser executable is required. Pass -Browser explicitly."
+}
+
+$temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$temporaryDirectory = Join-Path $temporaryRoot ("drum-toolchain-pdf-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
+try {
+    $htmlBody = (ConvertFrom-Markdown -Path $sourcePath).Html
+    $htmlPath = Join-Path $temporaryDirectory "document.html"
+    $style = @"
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><style>
+@page { size: A4 landscape; margin: 12mm; }
+body { font-family: "Segoe UI", Arial, sans-serif; color: #17202a; font-size: 9pt; line-height: 1.35; }
+h1 { font-size: 22pt; margin: 0 0 8mm; color: #111827; }
+h2 { font-size: 14pt; margin: 7mm 0 3mm; break-after: avoid; color: #1f2937; }
+h3 { font-size: 11pt; break-after: avoid; }
+code { font-family: "Cascadia Mono", Consolas, monospace; background: #eef2f7; padding: 0 2px; }
+table { width: 100%; border-collapse: collapse; table-layout: auto; margin: 3mm 0 6mm; font-size: 7.4pt; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th { background: #1f2937; color: white; text-align: left; }
+th, td { border: 1px solid #cbd5e1; padding: 3px 5px; vertical-align: top; overflow-wrap: anywhere; }
+tbody tr:nth-child(even) { background: #f8fafc; }
+ul, ol { margin-top: 2mm; }
+</style></head><body>
+$htmlBody
+</body></html>
+"@
+    [IO.File]::WriteAllText($htmlPath, $style, [Text.UTF8Encoding]::new($false))
+    $htmlUri = [uri]$htmlPath
+    $arguments = @(
+        "--headless",
+        "--disable-gpu",
+        "--user-data-dir=$(Join-Path $temporaryDirectory 'browser-profile')",
+        "--no-pdf-header-footer",
+        "--print-to-pdf=$outputPath",
+        $htmlUri.AbsoluteUri
+    )
+    $process = Start-Process -FilePath $Browser -ArgumentList $arguments -PassThru -Wait -WindowStyle Hidden
+    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
+        throw "PDF renderer failed with exit code $($process.ExitCode)"
+    }
+    Get-Item -LiteralPath $outputPath
+}
+finally {
+    $resolvedTemporary = [IO.Path]::GetFullPath($temporaryDirectory)
+    if ($resolvedTemporary.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
