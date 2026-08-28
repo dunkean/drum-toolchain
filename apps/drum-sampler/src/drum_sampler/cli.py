@@ -66,6 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--report", required=True, type=Path)
     calibrate.add_argument("--preferred-velocity", type=int, default=110)
     calibrate.add_argument("--duration-seconds", type=float, default=1.5)
+    calibrate.add_argument(
+        "--only", action="append", default=[], metavar="INSTRUMENT.ARTICULATION",
+        help="capture only an exact articulation selector; repeat as needed (probes are reused by the later full run)",
+    )
     calibrate.add_argument("--confirm-capture", action="store_true", help="required: sends bounded MIDI notes and records the named audio input")
     calibrate.add_argument("--confirm-preset-loaded", action="store_true", help="required: confirms the exact fingerprinted SD3 preset is loaded")
     drumgizmo = subparsers.add_parser("export-drumgizmo", help="export a captured neutral library as a DrumGizmo 2.0 kit")
@@ -157,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 preset_loaded_confirmed=True,
                 preferred_velocity=args.preferred_velocity,
                 duration_seconds=args.duration_seconds,
+                only=tuple(args.only),
                 progress=lambda index, total, row: print(
                     f"[{index}/{total}] {row['instrument']}.{row['articulation']} "
                     f"note={row['note']} velocity={row['velocity']} "

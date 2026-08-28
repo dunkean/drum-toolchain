@@ -118,6 +118,46 @@ class CaptureQualityTests(unittest.TestCase):
         self.assertIn("relative-level-outlier", rows["quiet"]["findings"])
         self.assertEqual(report["summary"]["status"], "technical-fail")
 
+    def test_calibration_can_probe_exact_articulations_then_reuse_them_in_full_run(self) -> None:
+        session = CaptureSessionPlan(
+            "virtual-midi", "loopback:output", ("left", "right"),
+            (
+                CaptureRequest("snare", "rimshot", 35, (80, 120), 1, channel=10),
+                CaptureRequest("tom2", "electronic", 53, (80, 120), 1, channel=10),
+                CaptureRequest("ride", "bow", 83, (80, 120), 1, channel=10),
+            ),
+        )
+        calls: list[int] = []
+
+        def fake_capture(**kwargs: object) -> Path:
+            output, note = kwargs["output"], kwargs["note"]
+            assert isinstance(output, Path) and isinstance(note, int)
+            calls.append(note)
+            wavfile.write(output, 44100, np.full((256, 2), 0.25, dtype=np.float32))
+            return output
+
+        arguments = {
+            "session_sha256": "a" * 64,
+            "preset_path": Path("MegaKit.sd3p"),
+            "preset_sha256": "b" * 64,
+            "preset_loaded_confirmed": True,
+            "capture": fake_capture,
+        }
+        with tempfile.TemporaryDirectory() as temporary, patch("drum_sampler.calibration.time.sleep"):
+            output = Path(temporary)
+            targeted = calibrate_session(
+                session, output, only=("tom2.electronic", "snare.rimshot"), **arguments,
+            )
+            full = calibrate_session(session, output, **arguments)
+
+        self.assertEqual(calls, [35, 53, 83])
+        self.assertEqual([row["note"] for row in targeted["rows"]], [35, 53])
+        self.assertEqual(targeted["summary"]["captured_now"], 2)
+        self.assertEqual(full["summary"]["reused"], 2)
+        self.assertEqual(full["summary"]["captured_now"], 1)
+        with self.assertRaisesRegex(ValueError, "unknown calibration articulation selectors"):
+            calibrate_session(session, Path("unused"), only=("missing.articulation",), **arguments)
+
     def test_loopback_uses_safe_buffer_and_writes_clean_take(self) -> None:
         class FakeSoundcardWarning(Warning):
             pass

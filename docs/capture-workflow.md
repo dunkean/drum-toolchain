@@ -26,6 +26,23 @@ Current safe routes:
 
 ## Before a dense capture
 
+When a preset revision changes only a few routes or gains, probe those exact
+articulations first with repeatable `--only instrument.articulation` options.
+For example:
+
+```powershell
+drum-sampler calibrate <usual arguments> `
+  --only tom2.electronic `
+  --only rim1.rimshot `
+  --only snare1.deftones
+```
+
+Selectors must match the saved session exactly. Unknown names fail before any
+MIDI is sent. Successful targeted WAVs use the same fingerprinted probe cache
+as the later full calibration, so the complete pass reuses them instead of
+recording them twice. Explicit capture and preset-loaded confirmations remain
+mandatory.
+
 Run a ten-minute stereo proof session with one articulation and at least three
 velocities. Confirm that:
 

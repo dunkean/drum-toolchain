@@ -40,6 +40,7 @@ def calibrate_session(
     silence_peak_dbfs: float = -60.0,
     minimum_headroom_db: float = 0.5,
     relative_outlier_db: float = 18.0,
+    only: tuple[str, ...] = (),
     capture: CaptureFunction = capture_note,
     progress: ProgressFunction | None = None,
 ) -> dict[str, object]:
@@ -56,6 +57,20 @@ def calibrate_session(
         raise ValueError("session and preset SHA-256 values are required")
     if minimum_headroom_db < 0 or relative_outlier_db <= 0:
         raise ValueError("calibration level thresholds are invalid")
+    requested_ids = tuple(dict.fromkeys(only))
+    available_ids = {
+        f"{request.instrument}.{request.articulation}"
+        for request in session.requests
+    }
+    missing_ids = sorted(set(requested_ids) - available_ids)
+    if missing_ids:
+        raise ValueError(f"unknown calibration articulation selectors: {missing_ids}")
+    selected_requests = tuple(
+        request for request in session.requests
+        if not requested_ids or f"{request.instrument}.{request.articulation}" in requested_ids
+    )
+    if not selected_requests:
+        raise ValueError("calibration selection is empty")
     probe_identity = hashlib.sha256(json.dumps({
         "session_sha256": session_sha256,
         "preset_sha256": preset_sha256,
@@ -66,7 +81,7 @@ def calibrate_session(
     probe_directory.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
     captured_count = 0
-    for index, request in enumerate(session.requests, start=1):
+    for index, request in enumerate(selected_requests, start=1):
         velocity = _selected_velocity(request.velocities, preferred_velocity)
         controller_label = "".join(f"__cc{control:03d}-{value:03d}" for control, value in request.controllers)
         filename = (
@@ -120,7 +135,7 @@ def calibrate_session(
         }
         rows.append(row)
         if progress is not None:
-            progress(index, len(session.requests), row)
+            progress(index, len(selected_requests), row)
 
     valid_peaks = [float(row["peak_dbfs"]) for row in rows if row["peak_dbfs"] is not None]
     loudest = max(valid_peaks) if valid_peaks else None
@@ -154,6 +169,7 @@ def calibrate_session(
             "silence_peak_dbfs": silence_peak_dbfs,
             "minimum_headroom_db": minimum_headroom_db,
             "relative_outlier_db": relative_outlier_db,
+            "only": list(requested_ids),
         },
         "rows": rows,
         "summary": {
