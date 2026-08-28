@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 import json
@@ -287,7 +289,7 @@ class ControlCenterTests(unittest.TestCase):
             command = [
                 sys.executable, "-m", "control_center.cli", "create-sd3-campaign", str(plan),
                 "--output", str(output), "--id", "greg_hybrid_r15_full",
-                "--preset", "Greg_Hybrid_r15_MegaKit_v2", "--midi-output", "SD3_MEGA_INPUT",
+                "--preset", "Greg_Hybrid_r15_MegaKit_v3", "--midi-output", "SD3_MEGA_INPUT",
                 "--preset-file", str(preset), "--audio-input", "SD3_PRINT_LOOPBACK",
             ]
             completed = subprocess.run(command, capture_output=True, text=True)
@@ -534,6 +536,84 @@ class ControlCenterTests(unittest.TestCase):
                          [(1, 84, 1), (2, 124, 2)])
         self.assertIn("Candidates (declared, not selected)", rows[0].ddrum4_content_summary)
         self.assertIn("variation 1/2", rows[0].ddrum4_content_summary)
+
+    def test_r15_native_panel_programs_decode_to_scene_and_virtual_palettes(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+
+        scene = simulator.simulate_native_control("ddrum_program_sleep_token")
+        snare = simulator.simulate_native_control("ddrum_snare_palette_3")
+        flex = simulator.simulate_native_control("ddrum_toms_palette_5")
+        family = simulator.simulate_native_control("ddrum_perc_palette_4")
+        variant = simulator.simulate_native_control("ddrum_kick_palette_2")
+
+        self.assertEqual(scene.message, {"type": "program_change", "channel": 12, "data1": 4, "value": 1})
+        self.assertEqual(simulator.state, {
+            "scene": "sleep_token",
+            "vp1_snare1": 3,
+            "vp2_flex": 5,
+            "vp3_percussion_family": 4,
+            "vp4_percussion_variant": 2,
+        })
+        for result in (scene, snare, flex, family, variant):
+            self.assertNotIn("Arduino DDrum4 state", {step.stage for step in result.steps})
+
+    def test_control_center_ui_loads_virtual_kit_and_native_panel_controls_offscreen(self) -> None:
+        repository = Path(__file__).resolve().parents[3]
+        script = textwrap.dedent("""
+            from pathlib import Path
+            import sys
+            import traceback
+
+            from PySide6.QtCore import QTimer
+            from PySide6.QtWidgets import QApplication
+
+            repository = Path.cwd()
+            sys.path.insert(0, str(repository / "apps/control-center/src"))
+            from control_center.gui import launch
+
+            status = [0]
+
+            def smoke():
+                app = QApplication.instance()
+                try:
+                    assert app is not None
+                    window = max(app.topLevelWidgets(), key=lambda item: item.width() * item.height())
+                    project = repository / "profiles/projects/metalcore-r15-chain-simulator.yaml"
+                    window.editor_project.setText(str(project))
+                    window.load_editor_project()
+                    assert window.visual_native_controls.rowCount() == 30
+                    window.load_virtual_kit_workspace()
+                    assert window.studio_native_control.count() == 30
+                    assert window.virtual_kit_table.rowCount() == 29
+                    window.studio_native_control.setCurrentIndex(1)
+                    window.trigger_virtual_native_control()
+                    assert window.current_simulator().state["scene"] in window.current_simulator().project.scenes
+                except Exception:
+                    traceback.print_exc()
+                    status[0] = 1
+                finally:
+                    app.quit()
+
+            original_exec = QApplication.exec
+
+            def smoke_exec(app):
+                QTimer.singleShot(250, smoke)
+                return original_exec()
+
+            QApplication.exec = smoke_exec
+            result = launch()
+            raise SystemExit(status[0] or result)
+        """)
+        environment = dict(os.environ)
+        environment["QT_QPA_PLATFORM"] = "offscreen"
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script], cwd=repository, env=environment,
+            capture_output=True, text=True, timeout=25,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
     def test_installed_r15_keeps_unmeasured_hihat_targets_out_of_firmware(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"

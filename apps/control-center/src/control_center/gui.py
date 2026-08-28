@@ -160,6 +160,26 @@ def launch() -> int:
             action_buttons.addWidget(add_action); action_buttons.addWidget(remove_action); action_buttons.addStretch(1)
             actions_layout.addLayout(action_buttons); actions_page.setLayout(actions_layout)
             editor_tabs.addTab(actions_page, "DDrum4 kit / palette actions")
+            self.visual_native_controls = QTableWidget(0, 7)
+            self.visual_native_controls.setHorizontalHeaderLabels((
+                "Control", "Source", "Channel", "MIDI type", "Address", "Logical target", "Value",
+            ))
+            self.visual_native_controls.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.visual_native_controls.itemChanged.connect(lambda _: self._sync_visual_project("native"))
+            self.visual_native_controls.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self.visual_native_controls.horizontalHeader().setStretchLastSection(True)
+            native_page = QWidget(); native_layout = QVBoxLayout()
+            native_layout.addWidget(QLabel(
+                "Exact Program/Palette messages observed from the DDrum4 panel and their Scene/VP meaning. "
+                "Decoder inputs are never echoed back to the module."
+            ))
+            native_layout.addWidget(self.visual_native_controls)
+            native_buttons = QHBoxLayout()
+            add_native = QPushButton("Add panel control…"); add_native.clicked.connect(self.add_visual_native_control)
+            remove_native = QPushButton("Delete selected control…"); remove_native.clicked.connect(self.delete_visual_native_control)
+            native_buttons.addWidget(add_native); native_buttons.addWidget(remove_native); native_buttons.addStretch(1)
+            native_layout.addLayout(native_buttons); native_page.setLayout(native_layout)
+            editor_tabs.addTab(native_page, "DDrum4 panel controls")
             self.visual_sources = QTableWidget(0, 4)
             self.visual_sources.setHorizontalHeaderLabels(("Module", "Endpoint", "Raw channel", "Primary input"))
             self.visual_sources.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -366,6 +386,26 @@ def launch() -> int:
                     if column < 2:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.visual_actions.setItem(row, column, item)
+            native_rows = []
+            native_controls = document.get("native_control_map", {})
+            if isinstance(native_controls, dict):
+                for name, control in native_controls.items():
+                    if not isinstance(control, dict):
+                        continue
+                    message_type = str(control.get("type", "—"))
+                    address_key = {"program_change": "program", "cc": "cc", "note": "note"}.get(message_type)
+                    native_rows.append((
+                        name, control.get("source", "—"), control.get("channel", "—"), message_type,
+                        control.get(address_key, "—") if address_key else "—",
+                        control.get("decode_to", "—"), control.get("value", "—"),
+                    ))
+            self.visual_native_controls.setRowCount(len(native_rows))
+            for row, values in enumerate(native_rows):
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column == 0:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self.visual_native_controls.setItem(row, column, item)
             sources = document.get("sources", {})
             source_rows = [(name, item.get("endpoint", "—"), item.get("channel", "—"), item.get("primary", "—")) for name, item in sources.items() if isinstance(item, dict)]
             self.visual_sources.setRowCount(len(source_rows))
@@ -485,6 +525,29 @@ def launch() -> int:
                         if decoder is None:
                             raise ValueError(f"{physical} has no editable Note-On decoder")
                         decoder["match"]["note"] = int(self.visual_physical.item(row, 5).text())
+                elif table == "native":
+                    native_controls = document.get("native_control_map")
+                    if not isinstance(native_controls, dict):
+                        raise ValueError("native_control_map must be a mapping")
+                    address_keys = {"program_change": "program", "cc": "cc", "note": "note"}
+                    for row in range(self.visual_native_controls.rowCount()):
+                        name = self.visual_native_controls.item(row, 0).text()
+                        control = native_controls[name]
+                        message_type = self.visual_native_controls.item(row, 3).text().strip()
+                        if message_type not in address_keys:
+                            raise ValueError(f"unsupported native control type {message_type!r}")
+                        for key in address_keys.values():
+                            control.pop(key, None)
+                        source = self.visual_native_controls.item(row, 1).text().strip()
+                        if source == "—":
+                            control.pop("source", None)
+                        else:
+                            control["source"] = source
+                        control["channel"] = int(self.visual_native_controls.item(row, 2).text())
+                        control["type"] = message_type
+                        control[address_keys[message_type]] = int(self.visual_native_controls.item(row, 4).text())
+                        control["decode_to"] = self.visual_native_controls.item(row, 5).text().strip()
+                        control["value"] = int(self.visual_native_controls.item(row, 6).text())
                 else:
                     action_rows = [(scene, action) for scene, actions in document.get("ddrum_state_actions", {}).items()
                                    if isinstance(actions, list) for action in actions if isinstance(action, dict)]
@@ -503,6 +566,69 @@ def launch() -> int:
                 self._populate_visual_project_tables(yaml.safe_load(self.project_document.toPlainText()))
                 self._visual_project_syncing = False
                 self.editor_status.setText(f"Table edit rejected: {error}")
+
+        def add_visual_native_control(self) -> None:
+            try:
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict):
+                    raise ValueError("Advanced YAML is not a project mapping")
+                native_controls = document.setdefault("native_control_map", {})
+                if not isinstance(native_controls, dict):
+                    raise ValueError("native_control_map must be a mapping")
+                name, accepted = QInputDialog.getText(self, "Add DDrum4 panel control", "Stable control identifier:")
+                name = name.strip()
+                if not accepted:
+                    return
+                if not name:
+                    raise ValueError("control identifier cannot be empty")
+                if name in native_controls:
+                    raise ValueError(f"native control {name!r} already exists")
+                sources = tuple(document.get("sources", {}))
+                source, accepted = QInputDialog.getItem(self, "Add DDrum4 panel control", "Source module:", sources, 0, False)
+                if not accepted:
+                    return
+                targets = ("scene", *document["state"]["variables"])
+                target, accepted = QInputDialog.getItem(self, "Add DDrum4 panel control", "Logical target:", targets, 0, False)
+                if not accepted:
+                    return
+                message_type, accepted = QInputDialog.getItem(
+                    self, "Add DDrum4 panel control", "MIDI message:", ("program_change", "cc", "note"), 0, False,
+                )
+                if not accepted:
+                    return
+                address, accepted = QInputDialog.getInt(self, "Add DDrum4 panel control", "Program / CC / note address:", 0, 0, 127)
+                if not accepted:
+                    return
+                maximum = len(document["state"]["scenes"]) - 1 if target == "scene" else 127
+                value, accepted = QInputDialog.getInt(self, "Add DDrum4 panel control", "Decoded logical value:", 0, 0, maximum)
+                if not accepted:
+                    return
+                source_document = document["sources"][source]
+                address_key = {"program_change": "program", "cc": "cc", "note": "note"}[message_type]
+                native_controls[name] = {
+                    "decode_to": target, "source": source, "channel": int(source_document["channel"]),
+                    "type": message_type, address_key: address, "value": value,
+                }
+                self._apply_visual_project_document(document, f"Native panel control {name!r} added.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Cannot add DDrum4 panel control", str(error))
+
+        def delete_visual_native_control(self) -> None:
+            try:
+                row = self.visual_native_controls.currentRow()
+                if row < 0 or self.visual_native_controls.item(row, 0) is None:
+                    raise ValueError("select a native panel control first")
+                name = self.visual_native_controls.item(row, 0).text()
+                answer = QMessageBox.question(self, "Delete panel control", f"Delete native control {name!r}?")
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                document = yaml.safe_load(self.project_document.toPlainText())
+                if not isinstance(document, dict) or not isinstance(document.get("native_control_map"), dict):
+                    raise ValueError("native_control_map must be a mapping")
+                del document["native_control_map"][name]
+                self._apply_visual_project_document(document, f"Native panel control {name!r} deleted.")
+            except (TypeError, ValueError, KeyError) as error:
+                QMessageBox.warning(self, "Cannot delete DDrum4 panel control", str(error))
 
         def _selected_visual_scene(self) -> str:
             row = self.visual_routes.currentRow()
@@ -984,6 +1110,20 @@ def launch() -> int:
             state_layout = QVBoxLayout(); state_layout.addWidget(self.studio_variable_holder); state_group.setLayout(state_layout)
             layout.addWidget(state_group)
 
+            native_controls = QGroupBox("DDrum4 panel — native Program / Palette input")
+            native_layout = QHBoxLayout()
+            self.studio_native_control = QComboBox()
+            self.studio_native_control.addItem("Load a project to expose native panel controls", None)
+            native_trigger = QPushButton("▶ Apply panel control")
+            native_trigger.setToolTip(
+                "Decodes the selected Program/Palette exactly as if it came from the DDrum4 panel. "
+                "The simulator never echoes it or opens MIDI."
+            )
+            native_trigger.clicked.connect(self.trigger_virtual_native_control)
+            native_layout.addWidget(QLabel("Observed control:")); native_layout.addWidget(self.studio_native_control, 2)
+            native_layout.addWidget(native_trigger); native_layout.addStretch(1)
+            native_controls.setLayout(native_layout); layout.addWidget(native_controls)
+
             expressions = QGroupBox("Expression input — CC / aftertouch")
             expressions_layout = QHBoxLayout()
             self.studio_expression = QComboBox()
@@ -1064,6 +1204,14 @@ def launch() -> int:
                 simulator = self.current_simulator()
                 self.studio_source.blockSignals(True); self.studio_source.clear(); self.studio_source.addItems(tuple(simulator.project.sources)); self.studio_source.blockSignals(False)
                 self.studio_scene.blockSignals(True); self.studio_scene.clear(); self.studio_scene.addItems(simulator.project.scenes); self.studio_scene.setCurrentText(simulator.state["scene"]); self.studio_scene.blockSignals(False)
+                self.studio_native_control.clear()
+                for name, control in sorted(simulator.project.native_control_map.items()):
+                    address_key = {"program_change": "program", "cc": "cc", "note": "note"}[control["type"]]
+                    label = (f"{name}  ·  CH{control['channel']} {control['type']} {control[address_key]}  "
+                             f"→ {control['decode_to']}={control['value']}")
+                    self.studio_native_control.addItem(label, name)
+                if self.studio_native_control.count() == 0:
+                    self.studio_native_control.addItem("No native panel controls declared", None)
                 self._rebuild_studio_variable_controls(simulator)
                 self._refresh_studio_expression_choices(simulator)
                 self._load_project_bank_reference(self._active_simulator_path or Path(), simulator.project.raw)
@@ -1145,7 +1293,7 @@ def launch() -> int:
                 control = QSpinBox(); control.setRange(0, 127); control.setValue(simulator.state[name]); control.setPrefix("V ")
                 control.setToolTip(f"Offline value for {name}. It is applied to the logical route matrix.")
                 control.valueChanged.connect(lambda value, variable=name: self._studio_variable_changed(variable, value))
-                self.studio_variable_controls[name] = control
+                self._studio_variable_controls[name] = control
                 self.studio_variable_layout.addWidget(label); self.studio_variable_layout.addWidget(control)
             self.studio_variable_layout.addStretch(1)
 
@@ -1186,6 +1334,14 @@ def launch() -> int:
 
         def _present_virtual_state_change(self, target: str, result: object) -> None:
             """Render a state-command trace in the four simulator stages."""
+            state = getattr(result, "state")
+            self._studio_state_syncing = True
+            try:
+                self.studio_scene.setCurrentText(str(state["scene"]))
+                for name, control in self._studio_variable_controls.items():
+                    control.setValue(int(state[name]))
+            finally:
+                self._studio_state_syncing = False
             by_stage = {step.stage: step for step in result.steps}
             self.studio_cards["Raw input"].setPlainText(
                 self._format_studio_card(by_stage, ("logical control", "Arduino state"))
@@ -1196,7 +1352,6 @@ def launch() -> int:
             state_text = "Logical state is shared by all renderer resolutions; no hit was triggered."
             self.studio_cards["SD3 reference"].setPlainText(state_text)
             self.studio_cards["DrumGizmo"].setPlainText(state_text)
-            state = getattr(result, "state")
             event_name = "Scene" if target == "scene" else "Palette"
             self.studio_route_summary.setText(
                 f"{event_name} control applied  |  " + " · ".join(f"{name}={value}" for name, value in state.items()) +
@@ -1278,6 +1433,23 @@ def launch() -> int:
             )
             self._append_virtual_kit_event(result)
             self.virtual_kit_status.setText(f"Offline route resolved: {result.physical} → {result.logical_target}. No MIDI or audio was emitted.")
+
+        def trigger_virtual_native_control(self) -> None:
+            name = self.studio_native_control.currentData()
+            if not isinstance(name, str):
+                self.virtual_kit_status.setText("This project declares no native DDrum4 panel control.")
+                return
+            try:
+                simulator = self.current_simulator()
+                result = simulator.simulate_native_control(name)
+                target = simulator.project.native_control_map[name]["decode_to"]
+            except (OSError, ValueError, SimulationError) as error:
+                QMessageBox.warning(self, "Cannot apply DDrum4 panel control", str(error)); return
+            self._present_virtual_state_change(target, result)
+            self.refresh_virtual_kit_workspace()
+            self.virtual_kit_status.setText(
+                f"Native panel control {name!r} decoded offline without MIDI echo or hardware output."
+            )
 
         def trigger_virtual_expression(self) -> None:
             data = self.studio_expression.currentData()

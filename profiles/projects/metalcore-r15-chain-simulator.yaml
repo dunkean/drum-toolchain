@@ -275,11 +275,41 @@ renderers:
     snare1.industrial: {note: 55, channel: 10, instrument: snare1, articulation: industrial}
     snare1.electro: {note: 48, channel: 10, instrument: snare1, articulation: electro}
     tom4.sleep: {note: 63, channel: 10, instrument: tom4, articulation: sleep}
-# The installed r15 bank is one persistent renderer palette.  Logical scenes
-# select resident Sound variations through output notes; they must not invent
-# unobserved DDrum4 Programs or change the module kit behind the player's back.
-# Native panel controls can be added after their exact emitted MIDI bytes have
-# been captured.  Until then CH14/15 is the only authoritative state protocol.
-native_control_map: {}
+# The installed r15 bank is one persistent renderer palette. Logical scenes
+# select resident Sound variations through output notes; they do not change the
+# module kit. These Program Change addresses are the documented DDrum4 native
+# panel protocol, decoded here in simulation only; live promotion still needs a
+# captured round-trip from the physical module.
+native_control_map:
+  ddrum_program_metalcore: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 0, value: 0}
+  ddrum_program_sleep_token: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 4, value: 1}
+  ddrum_program_deftones: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 5, value: 2}
+  ddrum_program_dnb: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 6, value: 3}
+  ddrum_program_industrial: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 8, value: 4}
+  ddrum_program_electro: {decode_to: scene, source: ddrum4, channel: 12, type: program_change, program: 10, value: 5}
+  ddrum_kick_palette_1: {decode_to: vp4_percussion_variant, source: ddrum4, channel: 12, type: program_change, program: 100, value: 1}
+  ddrum_kick_palette_2: {decode_to: vp4_percussion_variant, source: ddrum4, channel: 12, type: program_change, program: 101, value: 2}
+  ddrum_kick_palette_3: {decode_to: vp4_percussion_variant, source: ddrum4, channel: 12, type: program_change, program: 102, value: 3}
+  ddrum_kick_palette_4: {decode_to: vp4_percussion_variant, source: ddrum4, channel: 12, type: program_change, program: 103, value: 4}
+  ddrum_kick_palette_5: {decode_to: vp4_percussion_variant, source: ddrum4, channel: 12, type: program_change, program: 104, value: 5}
+  ddrum_kick_palette_kit: {decode_to: vp4_percussion_variant, source: ddrum4, channel: 12, type: program_change, program: 105, value: 1}
+  ddrum_snare_palette_1: {decode_to: vp1_snare1, source: ddrum4, channel: 12, type: program_change, program: 106, value: 1}
+  ddrum_snare_palette_2: {decode_to: vp1_snare1, source: ddrum4, channel: 12, type: program_change, program: 107, value: 2}
+  ddrum_snare_palette_3: {decode_to: vp1_snare1, source: ddrum4, channel: 12, type: program_change, program: 108, value: 3}
+  ddrum_snare_palette_4: {decode_to: vp1_snare1, source: ddrum4, channel: 12, type: program_change, program: 109, value: 4}
+  ddrum_snare_palette_5: {decode_to: vp1_snare1, source: ddrum4, channel: 12, type: program_change, program: 110, value: 5}
+  ddrum_snare_palette_kit: {decode_to: vp1_snare1, source: ddrum4, channel: 12, type: program_change, program: 111, value: 1}
+  ddrum_toms_palette_1: {decode_to: vp2_flex, source: ddrum4, channel: 12, type: program_change, program: 112, value: 1}
+  ddrum_toms_palette_2: {decode_to: vp2_flex, source: ddrum4, channel: 12, type: program_change, program: 113, value: 2}
+  ddrum_toms_palette_3: {decode_to: vp2_flex, source: ddrum4, channel: 12, type: program_change, program: 114, value: 3}
+  ddrum_toms_palette_4: {decode_to: vp2_flex, source: ddrum4, channel: 12, type: program_change, program: 115, value: 4}
+  ddrum_toms_palette_5: {decode_to: vp2_flex, source: ddrum4, channel: 12, type: program_change, program: 116, value: 5}
+  ddrum_toms_palette_kit: {decode_to: vp2_flex, source: ddrum4, channel: 12, type: program_change, program: 117, value: 1}
+  ddrum_perc_palette_1: {decode_to: vp3_percussion_family, source: ddrum4, channel: 12, type: program_change, program: 118, value: 1}
+  ddrum_perc_palette_2: {decode_to: vp3_percussion_family, source: ddrum4, channel: 12, type: program_change, program: 119, value: 2}
+  ddrum_perc_palette_3: {decode_to: vp3_percussion_family, source: ddrum4, channel: 12, type: program_change, program: 120, value: 3}
+  ddrum_perc_palette_4: {decode_to: vp3_percussion_family, source: ddrum4, channel: 12, type: program_change, program: 121, value: 4}
+  ddrum_perc_palette_5: {decode_to: vp3_percussion_family, source: ddrum4, channel: 12, type: program_change, program: 122, value: 5}
+  ddrum_perc_palette_kit: {decode_to: vp3_percussion_family, source: ddrum4, channel: 12, type: program_change, program: 123, value: 1}
 ddrum_state_actions: {}
 policies: {echo: measured_only, unknown_message: drop_and_count}

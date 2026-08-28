@@ -33,6 +33,10 @@ change aucun réglage de module.
   positions, vélocités, variations, pitch et round robin.
 - [x] Les Program Change natifs sont des correspondances exactes
   `program → Scene/VP`, jamais des valeurs brutes copiées vers l'état.
+- [x] L'éditeur expose ces commandes natives dans une table dédiée et le
+  simulateur permet de déclencher directement chaque Program/Palette. Un smoke
+  test Qt hors écran charge les 29 articulations, les 30 commandes natives et
+  applique une commande sans ouvrir de port MIDI.
 - [x] Un `control_bus` explicite sépare la sortie renderer PC (SD3/DrumGizmo)
   de la sortie logique PC → Master Merger/Arduino. Seul un profil `live` avec
   endpoint `user-confirmed` peut ouvrir ce second port sur CH14 ou CH15.
@@ -86,7 +90,7 @@ change aucun réglage de module.
   sont publiées dans `docs/greg-hybrid-r15-megakit.md` et son PDF. Ce statut
   prouve la génération structurelle, pas la validation audio : la révision
   courante doit encore passer la calibration réelle avant toute capture.
-- [x] Générer la campagne complète v2 de 746 prises sur 59 articulations, dont cinq ouvertures HH bow
+- [x] Générer la campagne complète v3 de 746 prises sur 59 articulations, dont cinq ouvertures HH bow
   et trois toms Electronic Edge dédiés
   et quatre edge pilotées par CC4, ainsi que l'export DrumGizmo reprenable.
   La campagne est préparée et reprenable, mais ses WAV ne sont pas encore
