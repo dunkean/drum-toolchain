@@ -185,6 +185,11 @@ def _firmware_lowering_reason(document: dict[str, Any], record: dict[str, Any]) 
     if matcher == "note":
         return None
     expression = _expression_route(document, record)
+    if (matcher == "poly_aftertouch" and expression is not None and expression.get("expression") == "pressure"
+            and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
+            and expression["targets"]["ddrum4"].get("event", {}).get("type") == "poly_aftertouch"
+            and expression["targets"]["ddrum4"].get("event", {}).get("note_from") == "active_rendered_hit"):
+        return None
     if (matcher == "cc" and expression is not None and expression.get("expression") == "openness"
             and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
             and expression["targets"]["ddrum4"].get("event", {}).get("type") == "quantized_note_p"):
@@ -303,8 +308,14 @@ def _runtime_expression_reason(document: dict[str, Any], record: dict[str, Any],
     if target_config["status"] not in {"measured", "user-confirmed"}:
         return f"expression target is {target_config['status']!r}"
     event = target_config["event"]
+    if matcher == "poly_aftertouch" and route["expression"] == "pressure":
+        if target != "sd3":
+            return "this runtime has no measured pressure route for the selected renderer"
+        if event.get("type") != "poly_aftertouch" or event.get("note_from") != "active_rendered_hit":
+            return "pressure target is not active-hit poly-aftertouch"
+        return None
     if matcher != "cc" or route["expression"] != "openness":
-        return "this runtime implements only CC openness expression routes"
+        return "this runtime implements only CC openness and active-hit pressure expression routes"
     if target == "sd3":
         if event.get("type") != "cc" or event.get("transform") != "passthrough":
             return "expression target is not a passthrough CC event"
@@ -472,6 +483,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "logical_control_protocol": document["logical_control_protocol"],
         "native_control_map": document["native_control_map"],
         "ddrum_state_actions": document.get("ddrum_state_actions", {}),
+        "expression_routing": document.get("expression_routing", []),
         "records": routes,
         "lowering_blockers": firmware_lowering_blockers,
         "hardware_flash": "ready" if live_ready else "disabled",

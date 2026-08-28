@@ -1,0 +1,40 @@
+format: rig-runtime-profile/v1
+status: ready
+target_status: {sd3: ready, drumgizmo: planned}
+state:
+  scenes: [metal]
+  defaults: {scene: metal}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+policies: {echo: measured_only}
+expression_routing:
+  - source: edrumin
+    physical: ride.bow
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: unsupported, reason: fixture has no measured DrumGizmo choke behavior, event: {type: unsupported}}
+records:
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: note, note: 49}
+    emit: {physical: ride.bow, expressions: [velocity]}
+    physical: ride.bow
+    logical_target: ride.bow
+    renderers: {sd3: {note: 83, channel: 10}, drumgizmo: {note: 83, channel: 10, instrument: ride, articulation: bow}}
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: note, note: 50}
+    emit: {physical: crash.bow, expressions: [velocity]}
+    physical: crash.bow
+    logical_target: crash.bow
+    renderers: {sd3: {note: 84, channel: 10}, drumgizmo: {note: 84, channel: 10, instrument: crash, articulation: bow}}
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: poly_aftertouch, active_note: true}
+    emit: {physical: ride.bow, expressions: [pressure], correlate: source_channel_note}
+    physical: ride.bow
+    logical_target: ride.bow
+    renderers: {sd3: {note: 83, channel: 10}, drumgizmo: {note: 83, channel: 10, instrument: ride, articulation: bow}}

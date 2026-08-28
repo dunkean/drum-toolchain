@@ -44,6 +44,12 @@ bool RigRuntime::recall(uint16_t source, const MidiEvent& input, Active& active)
   if(!queue.size) return false;
   active=queue.entries[queue.head]; queue.head=static_cast<uint8_t>((queue.head+1)%queue.entries.size()); --queue.size; return true;
 }
+bool RigRuntime::peek(uint16_t source, const MidiEvent& input, Active& active) noexcept {
+  const auto& queue=(*active_)[source][input.channel-1][input.data1];
+  if(!queue.size) return false;
+  active=queue.entries[(queue.head+queue.size-1)%queue.entries.size()];
+  return true;
+}
 uint8_t RigRuntime::stateVariable(uint64_t state, size_t index) const noexcept { return index<4 ? static_cast<uint8_t>(state>>(16+index*8)) : 0; }
 uint8_t RigRuntime::variable(size_t index) const noexcept { return stateVariable(state_.load(std::memory_order_acquire),index); }
 void RigRuntime::setStateVariable(size_t index,uint8_t value) noexcept { if(index>=4) return; const auto shift=16+index*8; const auto mask=uint64_t{0xff}<<shift; auto current=state_.load(std::memory_order_relaxed); do { const auto next=(current&~mask)|(static_cast<uint64_t>(value)<<shift); if(state_.compare_exchange_weak(current,next,std::memory_order_release,std::memory_order_relaxed)) return; } while(true); }
@@ -106,6 +112,14 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
     return 0;
   }
   if (isNoteOff(input)) { Active active; if(!recall(static_cast<uint16_t>(source),input,active)) { ignore(); return 0; } output[0]={MidiType::NoteOff,active.channel,active.note,0,input.timestampUs}; rendered_.fetch_add(1,std::memory_order_relaxed); return 1; }
+  if (input.type==MidiType::PolyAftertouch) {
+    const bool declared=std::any_of(profile_.pressureExpressions.begin(),profile_.pressureExpressions.end(),
+                                    [source,&input](const RuntimePressureExpression& expression){ return expression.source==static_cast<uint16_t>(source) && input.data1>=expression.inputFirst && input.data1<=expression.inputLast; });
+    Active active;
+    if(!declared || !peek(static_cast<uint16_t>(source),input,active)) { ignore(); return 0; }
+    output[0]={MidiType::PolyAftertouch,active.channel,active.note,input.data2,input.timestampUs};
+    decoded_.fetch_add(1,std::memory_order_relaxed); rendered_.fetch_add(1,std::memory_order_relaxed); return 1;
+  }
   const RuntimeDecoder* decoder=nullptr;
   for(const auto& d:profile_.decoders) {
     if(d.source!=static_cast<uint16_t>(source) || input.channel!=profile_.sources[d.source].channel) continue;

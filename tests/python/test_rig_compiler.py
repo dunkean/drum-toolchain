@@ -168,6 +168,33 @@ class RigCompilerTests(unittest.TestCase):
             report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["expressions"][0]["targets"]["drumgizmo"]["status"], "supported")
 
+    def test_reviewed_pressure_route_uses_the_active_rendered_hit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "brain", "type": "poly_aftertouch", "active_note": True},
+                "emit": {"physical": "kick.head", "expressions": ["pressure"], "correlate": "source_channel_note"},
+            })
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "kick.head", "expression": "pressure", "correlation": "source_channel_note",
+                "targets": {
+                    "ddrum4": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "no measured choke behavior", "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            compile_project(project, root / "out")
+
+            runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "planned"})
+            report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
+            targets = report["expressions"][0]["targets"]
+            self.assertEqual(targets["arduino_ddrum4"]["status"], "supported")
+            self.assertEqual(targets["sd3"]["status"], "supported")
+
     def test_live_non_exact_note_route_never_creates_a_flashable_firmware_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -429,6 +456,18 @@ class RigCompilerTests(unittest.TestCase):
             for decoder in document["source_decoders"]:
                 decoder["match"]["source"] = "ddrum4"
             document["expression_routing"][0]["source"] = "ddrum4"
+            document["source_decoders"].append({
+                "match": {"source": "ddrum4", "type": "poly_aftertouch", "active_note": True},
+                "emit": {"physical": "snare.head", "expressions": ["pressure"], "correlate": "source_channel_note"},
+            })
+            document["expression_routing"].append({
+                "source": "ddrum4", "physical": "snare.head", "expression": "pressure", "correlation": "source_channel_note",
+                "targets": {
+                    "ddrum4": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "fixture has no measured choke behavior", "event": {"type": "unsupported"}},
+                },
+            })
             document["native_control_map"]["brain_program"]["source"] = "ddrum4"
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             output = root / "out"
@@ -449,6 +488,9 @@ class RigCompilerTests(unittest.TestCase):
             self.assertIn("constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};", generated)
             self.assertIn("constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {10, 4, 127, 0, true};", generated)
             self.assertIn("{10, 42, 72, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}}", generated)
+            self.assertIn("const PressureRoute PRESSURE_ROUTES[] PROGMEM", generated)
+            self.assertIn("{10, 38},", generated)
+            self.assertIn("constexpr size_t PRESSURE_ROUTE_COUNT = 1;", generated)
             wrong_channel = subprocess.run(
                 [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping",
                  str(output / "firmware-project-mapping.json"), "--output-channel", "11",

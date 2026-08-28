@@ -349,6 +349,14 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                 if event_type != "unsupported" or not target.get("reason"):
                     _fail(f"expression_routing[{index}].targets.{target_name}: unsupported target needs reason and event.type: unsupported")
                 continue
+            if route["expression"] == "pressure":
+                if target_name not in {"ddrum4", "sd3"}:
+                    _fail(f"expression_routing[{index}].targets.{target_name}: pressure is not implemented for this renderer")
+                if event_type != "poly_aftertouch" or event.get("note_from") != "active_rendered_hit":
+                    _fail(f"expression_routing[{index}].targets.{target_name}: pressure needs poly_aftertouch from active_rendered_hit")
+                if status not in {"measured", "user-confirmed"}:
+                    _fail(f"expression_routing[{index}].targets.{target_name}: pressure target must be measured or user-confirmed")
+                continue
             if target_name == "drumgizmo":
                 if event_type != "quantized_note":
                     _fail(f"expression_routing[{index}].targets.drumgizmo: only quantized_note is representable")

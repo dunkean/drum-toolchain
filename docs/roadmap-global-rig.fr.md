@@ -87,8 +87,10 @@ change aucun réglage de module.
 - [ ] Mesurer puis valider CC4 vers `NOTE P` DDrum4 (polarité, seuils,
   articulations bow/edge) dans une **nouvelle** copie `deployment: live`.
   Les valeurs de simulation ne peuvent jamais être flashées.
-- [ ] Ajouter la pression/choke corrélée avec le ledger borné
+- [x] Ajouter la pression/choke corrélée avec le ledger borné
   `source/channel/note → destination` commun au runtime PC et au firmware.
+  Cette verticale doit être déclarée `poly_aftertouch` / `active_rendered_hit`
+  et mesurée avant d'être active dans un profil live.
 - [x] Définir la verticale DrumGizmo `CC4 → note de zone` avec seuils et notes
   explicites par profil ; elle reste `planned` sans captures du kit exporté.
 - [ ] Décider et prouver les autres expressions DrumGizmo (choke, pression,

@@ -34,6 +34,10 @@ struct RuntimeHihatQuantization {
   uint16_t source{}; uint8_t controller{}; uint8_t inputClosed{}; uint8_t inputOpen{};
   std::vector<RuntimeHihatZone> zones;
 };
+// A measured poly-aftertouch path follows the original raw hit through the
+// bounded Note-On ledger. It is intentionally renderer-local: a profile must
+// declare it rather than allowing arbitrary aftertouch to become a choke.
+struct RuntimePressureExpression { uint16_t source{}; uint8_t inputFirst{}; uint8_t inputLast{}; };
 struct RuntimePredicate { uint8_t variable{}; uint8_t value{}; };
 struct RuntimeRoute { uint16_t scene{}; std::string physical; std::string logical; std::array<RuntimePredicate, 4> predicates{}; uint8_t predicateCount{}; };
 struct RuntimeControl { std::string name; uint8_t cc{}; uint8_t defaultValue{}; };
@@ -45,6 +49,7 @@ struct RuntimeProfile {
   std::vector<RuntimeDecoder> decoders; std::vector<RuntimeRoute> routes;
   std::vector<RuntimeRenderer> renderers; std::vector<RuntimeControl> variables; std::vector<RuntimeNativeControl> nativeControls;
   std::unique_ptr<RuntimeHihatQuantization> hihatQuantization;
+  std::vector<RuntimePressureExpression> pressureExpressions;
   std::string sourceSha256; uint16_t defaultScene{}; bool echoMeasuredOnly{}; uint64_t dedupWindowUs{10000};
   // A PC renderer may publish only logical CH14/15 control to this explicit
   // endpoint. It is off unless the compiled source project is live and the
@@ -89,6 +94,7 @@ class RigRuntime {
   bool duplicate(uint16_t source, const MidiEvent& input) noexcept;
   void remember(uint16_t source, const MidiEvent& input, const RuntimeRenderer& renderer) noexcept;
   bool recall(uint16_t source, const MidiEvent& input, Active& active) noexcept;
+  bool peek(uint16_t source, const MidiEvent& input, Active& active) noexcept;
   uint8_t stateVariable(uint64_t state, size_t index) const noexcept;
   void setStateVariable(size_t index, uint8_t value) noexcept;
   uint8_t normalizedHihatOpenness() const noexcept;

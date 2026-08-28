@@ -17,12 +17,18 @@ static const NoteRoute routes[] = {
     {12, 17, 17, 1, 127, 1, 127}, // Local-OFF DDrum4 CYMB2 diagnostic pad
 };
 static const uint8_t programChannels[] = {10, 11, 12};
+static const PressureRoute pressureRoutes[] = {{12, 17}};
 
-static const BridgeConfig config = {
-    10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
-    {11, 4, 4, 0, 127, 0, 127, false},
-    routes, sizeof(routes) / sizeof(routes[0]), true,
-};
+static const BridgeConfig config = [] {
+  BridgeConfig result = {
+      10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
+      {11, 4, 4, 0, 127, 0, 127, false},
+      routes, sizeof(routes) / sizeof(routes[0]), true,
+  };
+  result.pressureRoutes = pressureRoutes;
+  result.pressureRouteCount = sizeof(pressureRoutes) / sizeof(pressureRoutes[0]);
+  return result;
+}();
 
 void test_zeitgeist_bow_maps_to_hihat_position_2() {
   DdrumBridge bridge(config);
@@ -110,6 +116,8 @@ void test_ddrum_one_shot_policy_drops_note_off_but_keeps_aftertouch() {
   TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::PolyAftertouch, 12, 17, 47}, &output, 1));
   TEST_ASSERT_EQUAL(MidiEventType::PolyAftertouch, output.type);
   TEST_ASSERT_EQUAL_UINT8(47, output.data2);
+  TEST_ASSERT_EQUAL_UINT8(1, bridge.process({MidiEventType::NoteOn, 10, 36, 100}, &output, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, bridge.process({MidiEventType::PolyAftertouch, 10, 36, 47}, &output, 1));
 }
 
 void test_bypass_preserves_release_wire_semantics() {

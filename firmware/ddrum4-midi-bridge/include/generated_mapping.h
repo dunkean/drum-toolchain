@@ -21,5 +21,7 @@ constexpr HihatDirectCc4Config HIHAT_CC4 = {0, 0, 0, 0, 0, 0, 0, false, false};
 constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {0, 0, 0, 0, false};
 constexpr const HihatHitRoute* HIHAT_HIT_ROUTES = nullptr;
 constexpr size_t HIHAT_HIT_ROUTE_COUNT = 0;
+constexpr const PressureRoute* PRESSURE_ROUTES = nullptr;
+constexpr size_t PRESSURE_ROUTE_COUNT = 0;
 constexpr bool HIHAT_NOTE_P_SUPPORTED = false;
 constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;

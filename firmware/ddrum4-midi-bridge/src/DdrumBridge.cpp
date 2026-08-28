@@ -80,6 +80,18 @@ HihatHitRoute DdrumBridge::readHihatHitRoute(size_t index) const {
 #endif
 }
 
+PressureRoute DdrumBridge::readPressureRoute(size_t index) const {
+#if defined(ARDUINO_ARCH_AVR)
+  PressureRoute result{};
+  const uint8_t* source = reinterpret_cast<const uint8_t*>(config_.pressureRoutes) + index * sizeof(PressureRoute);
+  uint8_t* destination = reinterpret_cast<uint8_t*>(&result);
+  for (size_t byte = 0; byte < sizeof(PressureRoute); ++byte) destination[byte] = pgm_read_byte(source + byte);
+  return result;
+#else
+  return config_.pressureRoutes[index];
+#endif
+}
+
 uint8_t DdrumBridge::hihatZone(const HihatHitRoute& route) const {
   const HihatQuantizedConfig& h = config_.hihatQuantized;
   const int16_t span = static_cast<int16_t>(h.inputOpen) - static_cast<int16_t>(h.inputClosed);
@@ -133,6 +145,14 @@ const NoteRoute* DdrumBridge::findLedgerRoute(uint8_t inputChannel, uint8_t inpu
   return nullptr;
 }
 
+bool DdrumBridge::isDeclaredPressure(uint8_t inputChannel, uint8_t inputNote) const {
+  for (size_t index = 0; index < config_.pressureRouteCount; ++index) {
+    const PressureRoute route = readPressureRoute(index);
+    if (route.inputChannel == inputChannel && route.inputNote == inputNote) return true;
+  }
+  return false;
+}
+
 void DdrumBridge::rememberPrimaryHit(uint8_t inputChannel, uint8_t inputNote, const NoteRoute* route, uint32_t nowMs) {
   size_t target = 0;
   uint32_t greatestAge = 0;
@@ -169,6 +189,7 @@ bool DdrumBridge::validConfig() const {
   if (config_.nativeControlCount && !config_.nativeControls) return false;
   if (config_.stateActionCount && !config_.stateActions) return false;
   if (config_.hihatQuantized.enabled && (!config_.hihatHitRouteCount || !config_.hihatHitRoutes)) return false;
+  if (config_.pressureRouteCount && !config_.pressureRoutes) return false;
   if (config_.echoGuard.mode != EchoGuardMode::Disabled &&
       config_.echoGuard.mode != EchoGuardMode::DualDdrum) return false;
   if (config_.echoGuard.mode == EchoGuardMode::DualDdrum &&
@@ -192,6 +213,14 @@ bool DdrumBridge::validConfig() const {
     for (size_t otherIndex = i + 1; otherIndex < config_.hihatHitRouteCount; ++otherIndex) {
       HihatHitRoute other = readHihatHitRoute(otherIndex);
       if (route.inputChannel == other.inputChannel && route.inputNote == other.inputNote) return false;
+    }
+  }
+  for (size_t i = 0; i < config_.pressureRouteCount; ++i) {
+    const PressureRoute route = readPressureRoute(i);
+    if (route.inputChannel < 1 || route.inputChannel > 16 || route.inputNote > 127) return false;
+    for (size_t other = i + 1; other < config_.pressureRouteCount; ++other) {
+      const PressureRoute candidate = readPressureRoute(other);
+      if (route.inputChannel == candidate.inputChannel && route.inputNote == candidate.inputNote) return false;
     }
   }
   for (size_t i = 0; i < config_.relayProgramChannelCount; ++i)
@@ -480,6 +509,10 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   // note; it must not be re-routed through a changed Scene/VP state.
   const NoteRoute* route = nullptr;
   if (input.type == MidiEventType::PolyAftertouch) {
+    if (!isDeclaredPressure(input.channel, input.data1)) {
+      ++ignoredMessages_;
+      return 0;
+    }
     route = findLedgerRoute(input.channel, input.data1, nowMs);
   } else {
     route = findNoteRoute(input.channel, input.data1);

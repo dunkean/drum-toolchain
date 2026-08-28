@@ -39,9 +39,11 @@ def project_mapping_header(document, output_channel):
     records = document.get("records")
     native_control_map = document.get("native_control_map", {})
     state_actions_document = document.get("ddrum_state_actions", {})
+    expression_routing = document.get("expression_routing", [])
     if (not isinstance(state, dict) or not isinstance(controls, dict) or not isinstance(records, list)
-            or not isinstance(native_control_map, dict) or not isinstance(state_actions_document, dict)):
-            raise ValueError("firmware project mapping needs state, logical_control_protocol, native_control_map, and records")
+            or not isinstance(native_control_map, dict) or not isinstance(state_actions_document, dict)
+            or not isinstance(expression_routing, list)):
+            raise ValueError("firmware project mapping needs state, logical_control_protocol, expression_routing, native_control_map, and records")
     hihat_document = document.get("hihat_quantization")
     hihat_routes = []
     hihat_source_channel = hihat_cc = hihat_closed = hihat_open = None
@@ -91,6 +93,7 @@ def project_mapping_header(document, output_channel):
     initial_values.extend([0] * (4 - len(initial_values)))
     state_routes = []
     relay_channels = set()
+    pressure_records = []
     for index, record in enumerate(records):
         if not isinstance(record, dict):
             raise ValueError(f"record {index} must be an object")
@@ -99,6 +102,12 @@ def project_mapping_header(document, output_channel):
             raise ValueError(f"record {index} is incomplete")
         if (hihat_document is not None and match.get("type") == "cc" and
                 source.get("channel") == hihat_source_channel and match.get("cc") == hihat_cc):
+            continue
+        # A reviewed pressure route follows the original active raw Note via
+        # DdrumBridge's bounded ledger. It therefore has no independent
+        # StateRoute to generate.
+        if match.get("type") == "poly_aftertouch":
+            pressure_records.append((index, source, match, record.get("physical")))
             continue
         if match.get("type") != "note":
             raise ValueError(f"record {index}: firmware generation supports only exact note decoders")
@@ -123,6 +132,32 @@ def project_mapping_header(document, output_channel):
         relay_channels.add(channel)
     if not state_routes:
         raise ValueError("firmware project mapping has no state routes")
+    pressure_routes = []
+    for index, source, match, physical in pressure_records:
+        if not isinstance(physical, str):
+            raise ValueError(f"record {index}: pressure route needs a physical event")
+        source_id = source.get("id") if isinstance(source, dict) else None
+        channel = integer(source.get("channel") if isinstance(source, dict) else None,
+                          f"record {index} pressure source channel", 1, 16)
+        declared = [item for item in expression_routing if isinstance(item, dict) and
+                    item.get("source") == source_id and item.get("physical") == physical and
+                    item.get("expression") == "pressure" and item.get("correlation") == "source_channel_note"]
+        if len(declared) != 1:
+            raise ValueError(f"record {index}: pressure requires exactly one declared source-channel-note expression route")
+        target = declared[0].get("targets", {}).get("ddrum4", {})
+        event = target.get("event", {}) if isinstance(target, dict) else {}
+        if (target.get("status") not in {"measured", "user-confirmed"} or
+                event.get("type") != "poly_aftertouch" or event.get("note_from") != "active_rendered_hit"):
+            raise ValueError(f"record {index}: pressure route is not a reviewed active-rendered-hit DDrum4 target")
+        primary_notes = {item.get("match", {}).get("note") for item in records
+                         if isinstance(item, dict) and item.get("source", {}).get("id") == source_id and
+                         item.get("physical") == physical and item.get("match", {}).get("type") == "note"}
+        if len(primary_notes) != 1:
+            raise ValueError(f"record {index}: pressure physical event needs exactly one primary Note decoder")
+        pressure_routes.append((channel, integer(next(iter(primary_notes)), f"record {index} pressure input note", 0, 127)))
+    # Scene/VP records can repeat the same raw source key. One explicit guard
+    # is sufficient because the ledger retains the already resolved output.
+    pressure_routes = sorted(set(pressure_routes))
     native_type = {"program_change": "ProgramChange", "cc": "ControlChange", "note": "NoteOn"}
     native_routes = []
     for name, control in sorted(native_control_map.items()):
@@ -210,6 +245,16 @@ def project_mapping_header(document, output_channel):
     lines.extend([
         "};",
         f"constexpr size_t STATE_ACTION_COUNT = {len(state_actions)};",
+        "",
+        "const PressureRoute PRESSURE_ROUTES[] PROGMEM = {",
+    ])
+    if pressure_routes:
+        lines.extend(f"  {{{channel}, {note}}}," for channel, note in pressure_routes)
+    else:
+        lines.append("  {1, 0}, // empty sentinel")
+    lines.extend([
+        "};",
+        f"constexpr size_t PRESSURE_ROUTE_COUNT = {len(pressure_routes)};",
         "",
         "constexpr LogicalControlConfig LOGICAL_CONTROLS = {" + ", ".join(str(value) for value in (*control_values, len(scenes))) + "};",
         "constexpr LogicalState INITIAL_LOGICAL_STATE = {" + ", ".join(str(value) for value in (scenes.index(defaults["scene"]), *initial_values)) + "};",
@@ -370,6 +415,8 @@ def main() -> int:
             "constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {0, 0, 0, 0, false};",
             "constexpr const HihatHitRoute* HIHAT_HIT_ROUTES = nullptr;",
             "constexpr size_t HIHAT_HIT_ROUTE_COUNT = 0;",
+            "constexpr const PressureRoute* PRESSURE_ROUTES = nullptr;",
+            "constexpr size_t PRESSURE_ROUTE_COUNT = 0;",
             "// Deliberately unsupported until hardware captures validate them.",
             "constexpr bool HIHAT_NOTE_P_SUPPORTED = false;",
             "constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;",

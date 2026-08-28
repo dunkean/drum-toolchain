@@ -1653,6 +1653,12 @@ Le Source Profile transforme le signal réel du pad/module en événement canoni
 
 Le DDrum4 Renderer l'émet avec le mécanisme de choke/Aftertouch attendu par le channel cible ; le SD3 Renderer utilise indépendamment son articulation de mute/choke.
 
+Le contrat `expression-routing` encode cette verticale comme
+`poly_aftertouch` avec `note_from: active_rendered_hit`. Arduino et le
+Converter PC utilisent alors le ledger borné de la frappe source (canal/note)
+pour ne pas appliquer le choke à une Scene ou une palette sélectionnée après
+la frappe. Aucun profil ne l'active sans trace isolée mesurée.
+
 ---
 # 39. MIDI Map E — vers SD3 : custom mega-kit
 

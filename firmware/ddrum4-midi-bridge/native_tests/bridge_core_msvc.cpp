@@ -20,12 +20,18 @@ const NoteRoute routes[] = {
     {12, 17, 17, 1, 127, 1, 127},
 };
 const uint8_t programChannels[] = {10, 11, 12};
+const PressureRoute pressureRoutes[] = {{11, 42}, {11, 46}, {12, 17}};
 
-const BridgeConfig config = {
-    10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
-    {11, 4, 4, 0, 127, 0, 127, false},
-    routes, sizeof(routes) / sizeof(routes[0]), true,
-};
+const BridgeConfig config = [] {
+  BridgeConfig result = {
+      10, programChannels, sizeof(programChannels) / sizeof(programChannels[0]),
+      {11, 4, 4, 0, 127, 0, 127, false},
+      routes, sizeof(routes) / sizeof(routes[0]), true,
+  };
+  result.pressureRoutes = pressureRoutes;
+  result.pressureRouteCount = sizeof(pressureRoutes) / sizeof(pressureRoutes[0]);
+  return result;
+}();
 
 class FakeMidiStream : public HardwareSerial {
  public:
@@ -90,6 +96,10 @@ void test_ddrum_one_shot_policy() {
   require(bridge.process({MidiEventType::PolyAftertouch, 12, 17, 47}, &output, 1) == 1,
           "one-shot aftertouch was filtered");
   require(output.type == MidiEventType::PolyAftertouch && output.data2 == 47, "one-shot aftertouch differs");
+  require(bridge.process({MidiEventType::NoteOn, 10, 36, 90}, &output, 1) == 1,
+          "non-pressure primary hit missing");
+  require(bridge.process({MidiEventType::PolyAftertouch, 10, 36, 47}, &output, 1) == 0,
+          "undeclared aftertouch was routed through the ledger");
   bridge.setMode(BridgeMode::Bypass);
   require(bridge.process({MidiEventType::NoteOn, 12, 17, 0}, &output, 1) == 1,
           "bypass release marker was filtered");
@@ -192,7 +202,10 @@ void test_state_route_and_ledger_keep_the_primary_hit() {
       routes, 4, false, nullptr, {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0}, stateRoutes, 2,
       {0, 1, 2, 3, 10},
   };
-  DdrumBridge bridge(stateful);
+  BridgeConfig pressureStateful = stateful;
+  pressureStateful.pressureRoutes = pressureRoutes;
+  pressureStateful.pressureRouteCount = sizeof(pressureRoutes) / sizeof(pressureRoutes[0]);
+  DdrumBridge bridge(pressureStateful);
   MidiEvent output{};
   bridge.process({MidiEventType::ProgramChange, 14, 9, 0}, &output, 1);
   bridge.process({MidiEventType::ControlChange, 15, 2, 4}, &output, 1);

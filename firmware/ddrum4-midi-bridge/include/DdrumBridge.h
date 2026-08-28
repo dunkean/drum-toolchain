@@ -95,6 +95,14 @@ struct HihatHitRoute {
   uint8_t outputNotes[8];
 };
 
+// Polyphonic aftertouch is never a generic pass-through. A generated route
+// explicitly authorizes the raw source key whose active rendered hit may
+// receive pressure/choke. The output note still comes from the hit ledger.
+struct PressureRoute {
+  uint8_t inputChannel;
+  uint8_t inputNote;
+};
+
 enum class EchoGuardMode : uint8_t {
   Disabled,
   // Only for a physically declared second-DDrum renderer return path.
@@ -201,6 +209,8 @@ struct BridgeConfig {
   HihatQuantizedConfig hihatQuantized = {0, 0, 0, 0, false};
   const HihatHitRoute* hihatHitRoutes = nullptr;
   size_t hihatHitRouteCount = 0;
+  const PressureRoute* pressureRoutes = nullptr;
+  size_t pressureRouteCount = 0;
 };
 
 // Pure, allocation-free routing core. It has no Arduino dependency so tests can
@@ -253,12 +263,14 @@ class DdrumBridge {
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   StateRoute readStateRoute(size_t index) const;
   HihatHitRoute readHihatHitRoute(size_t index) const;
+  PressureRoute readPressureRoute(size_t index) const;
   const NoteRoute* findHihatRoute(uint8_t inputChannel, uint8_t inputNote,
                                   const NoteRoute& resolvedRoute) const;
   uint8_t hihatZone(const HihatHitRoute& route) const;
   NativeControlRoute readNativeControl(size_t index) const;
   DdrumStateAction readStateAction(size_t index) const;
   const NoteRoute* findLedgerRoute(uint8_t inputChannel, uint8_t inputNote, uint32_t nowMs);
+  bool isDeclaredPressure(uint8_t inputChannel, uint8_t inputNote) const;
   void rememberPrimaryHit(uint8_t inputChannel, uint8_t inputNote, const NoteRoute* route, uint32_t nowMs);
   uint8_t mapVelocity(const NoteRoute& route, uint8_t velocity) const;
   uint8_t mapHihatCc(uint8_t value) const;

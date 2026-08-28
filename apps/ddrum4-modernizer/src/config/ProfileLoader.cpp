@@ -169,16 +169,50 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
     if(!decoderExists) result.decoders.push_back(std::move(decoder));
     const auto scene=sceneIndex(result,record["scene"].as<std::string>()); const auto physical=record["physical"].as<std::string>(); const auto logical=record["logical_target"].as<std::string>();
     RuntimeRoute route; route.scene=scene; route.physical=physical; route.logical=logical; const auto predicates=record["state_predicates"] ? record["state_predicates"] : record["predicates"]; if(predicates) { if(!predicates.IsMap()) invalid("state predicates must be a map"); for(const auto& predicate:predicates) { if(route.predicateCount>=route.predicates.size()) invalid("too many state predicates"); const auto name=predicate.first.as<std::string>(); auto it=std::find_if(result.variables.begin(),result.variables.end(),[&](const RuntimeControl& c){return c.name==name;}); if(it==result.variables.end()) invalid("unknown state predicate "+name); route.predicates[route.predicateCount++]={static_cast<uint8_t>(it-result.variables.begin()),midiValue(predicate.second)}; } std::sort(route.predicates.begin(),route.predicates.begin()+route.predicateCount,[](const RuntimePredicate& left,const RuntimePredicate& right){return left.variable<right.variable;}); }
-    // DrumGizmo openness is state for the next note, not an independently
-    // routed logical sound. Keeping its CC decoder out of the route table
-    // also permits it to share `hh.bow` with the raw bow Note decoder.
-    if(!(target==RuntimeRendererTarget::DrumGizmo && (matcherName=="cc" || matcherName=="poly_aftertouch"))) {
+    // Expressions are state for an active or following hit, not independent
+    // logical sounds. Keeping them out of the route table lets CC4 share
+    // `hh.bow` and pressure share a raw cymbal Note decoder safely.
+    if(!(matcherName=="poly_aftertouch" || (target==RuntimeRendererTarget::DrumGizmo && matcherName=="cc"))) {
       bool routeExists=false; for(const auto& item:result.routes) { if(item.scene!=route.scene||item.physical!=route.physical||item.logical!=route.logical||item.predicateCount!=route.predicateCount) continue; bool same=true; for(uint8_t i=0;i<route.predicateCount;++i) if(item.predicates[i].variable!=route.predicates[i].variable||item.predicates[i].value!=route.predicates[i].value) {same=false;break;} if(same) routeExists=true; }
       if(!routeExists) result.routes.push_back(std::move(route));
     }
     const auto targetRenderer=record["renderers"][rendererName]; if(!targetRenderer["note"]&&!targetRenderer["cc"]) invalid(std::string("runtime ")+rendererName+" renderer needs note or cc"); RuntimeRenderer renderer; renderer.logical=logical; renderer.note=targetRenderer["note"]?midi(targetRenderer,"note"):0; renderer.channel=channel(targetRenderer,"channel",10); if(targetRenderer["position_cc"]) renderer.positionCc=midi(targetRenderer,"position_cc"); if(targetRenderer["cc"]) renderer.controller=midi(targetRenderer,"cc");
     if(matcherName=="cc" || matcherName=="poly_aftertouch") {
-      if(matcherName!="cc") invalid("runtime expression is unsupported for the selected renderer");
+      if(matcherName=="poly_aftertouch") {
+        if(target!=RuntimeRendererTarget::Sd3) invalid("runtime pressure expression is unsupported for the selected renderer");
+        bool accepted=false;
+        const auto expressions=emit["expressions"];
+        if(expressions && root["expression_routing"]) for(const auto& expression:expressions) {
+          if(expression.as<std::string>()!="pressure") continue;
+          for(const auto& candidate:root["expression_routing"]) {
+            if(!candidate["source"]||!candidate["physical"]||!candidate["expression"]||
+               candidate["source"].as<std::string>()!=record["source"]["id"].as<std::string>() ||
+               candidate["physical"].as<std::string>()!=physical || candidate["expression"].as<std::string>()!="pressure") continue;
+            if(!candidate["correlation"] || candidate["correlation"].as<std::string>()!="source_channel_note")
+              invalid("runtime pressure expression requires correlation: source_channel_note");
+            const auto expressionTarget=candidate["targets"] ? candidate["targets"]["sd3"] : YAML::Node{};
+            const auto event=expressionTarget ? expressionTarget["event"] : YAML::Node{};
+            if(!expressionTarget||!event||!expressionTarget["status"]||!event["type"]||!event["note_from"])
+              invalid("runtime pressure expression route is incomplete");
+            const auto status=expressionTarget["status"].as<std::string>();
+            if((status!="measured"&&status!="user-confirmed") || event["type"].as<std::string>()!="poly_aftertouch" ||
+               event["note_from"].as<std::string>()!="active_rendered_hit")
+              invalid("runtime pressure expression route is not a reviewed active-hit aftertouch route");
+            bool foundPrimary=false;
+            for(const auto& primary:result.decoders) {
+              if(primary.source!=source || primary.physical!=physical ||
+                 (primary.matcher!=PhysicalMatcher::Note && primary.matcher!=PhysicalMatcher::NoteRange)) continue;
+              foundPrimary=true;
+              const auto existing=std::find_if(result.pressureExpressions.begin(),result.pressureExpressions.end(),
+                                               [&primary](const RuntimePressureExpression& item){ return item.source==primary.source && item.inputFirst==primary.first && item.inputLast==primary.last; });
+              if(existing==result.pressureExpressions.end()) result.pressureExpressions.push_back({source,primary.first,primary.last});
+            }
+            if(!foundPrimary) invalid("runtime pressure expression has no primary Note decoder for its physical event");
+            accepted=true;
+          }
+        }
+        if(!accepted) invalid("runtime pressure decoder has no measured expression-routing/v1 target");
+      } else {
       bool accepted=false;
       const auto expressions=emit["expressions"];
       if(expressions && root["expression_routing"]) for(const auto& expression:expressions) {
@@ -229,6 +263,7 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
         }
       }
       if(!accepted) invalid("runtime expression decoder has no measured expression-routing/v1 target");
+      }
     }
     bool renderExists=false; for(const auto& item:result.renderers) if(item.logical==renderer.logical) { renderExists=true; if(item.note!=renderer.note||item.channel!=renderer.channel||item.positionCc!=renderer.positionCc||item.controller!=renderer.controller) invalid(std::string("logical sound has inconsistent ")+rendererName+" renderers"); } if(!renderExists) result.renderers.push_back(std::move(renderer));
   }
