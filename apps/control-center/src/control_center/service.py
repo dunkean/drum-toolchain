@@ -129,10 +129,11 @@ class ControlCenter:
         if action == "export-drumgizmo":
             if note_map is None:
                 raise ValueError("DrumGizmo export requires a compiled note map")
+            if megakit_plan is None:
+                raise ValueError("MegaKit DrumGizmo export requires its reviewed MegaKit plan")
             export_command = (*command, "export-drumgizmo", "--library", str(library), "--audio-root", str(raw),
-                              "--output-directory", str(run_directory / "drumgizmo-kit"), "--note-map", str(note_map))
-            if megakit_plan is not None:
-                export_command = (*export_command, "--megakit-plan", str(megakit_plan))
+                              "--output-directory", str(run_directory / "drumgizmo-kit"), "--note-map", str(note_map),
+                              "--megakit-plan", str(megakit_plan))
             return (*export_command, "--report", str(reports / "drumgizmo-export.json"))
         if action == "verify-drumgizmo":
             return (*command, "verify-drumgizmo", "--kit-directory", str(run_directory / "drumgizmo-kit"),

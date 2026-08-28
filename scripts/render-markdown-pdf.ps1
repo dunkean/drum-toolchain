@@ -36,14 +36,18 @@ $temporary = Join-Path ([IO.Path]::GetTempPath()) ('drum-toolchain-pdf-' + [guid
 New-Item -ItemType Directory -Path $temporary | Out-Null
 try {
     $htmlPath = Join-Path $temporary 'document.html'
+    $renderPath = Join-Path $temporary 'rendered.pdf'
     Set-Content -LiteralPath $htmlPath -Value $html -Encoding utf8NoBOM
     $parent = Split-Path -Parent $outputPath
     if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     $uri = [Uri]::new($htmlPath).AbsoluteUri
     $browserProfile = Join-Path $temporary 'browser-profile'
-    $process = Start-Process -FilePath $browser -ArgumentList @('--headless=new', '--disable-gpu', '--no-pdf-header-footer', "--user-data-dir=$browserProfile", "--print-to-pdf=$outputPath", $uri) -PassThru -WindowStyle Hidden
+    $process = Start-Process -FilePath $browser -ArgumentList @('--headless=new', '--disable-gpu', '--no-pdf-header-footer', "--user-data-dir=$browserProfile", "--print-to-pdf=$renderPath", $uri) -PassThru -WindowStyle Hidden
     $process.WaitForExit()
-    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
+    for ($attempt = 0; $attempt -lt 100 -and -not (Test-Path -LiteralPath $renderPath -PathType Leaf); $attempt++) {
+        Start-Sleep -Milliseconds 100
+    }
+    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $renderPath -PathType Leaf)) {
         throw "PDF renderer failed with exit code $($process.ExitCode)."
     }
     # Chromium may delegate the final flush to a child process and let the
@@ -53,10 +57,10 @@ try {
     $stablePasses = 0
     for ($attempt = 0; $attempt -lt 100 -and $stablePasses -lt 5; $attempt++) {
         try {
-            $pdfBytes = [IO.File]::ReadAllBytes($outputPath)
+            $pdfBytes = [IO.File]::ReadAllBytes($renderPath)
             $tailStart = [Math]::Max(0, $pdfBytes.Length - 32)
             $tail = [Text.Encoding]::ASCII.GetString($pdfBytes, $tailStart, $pdfBytes.Length - $tailStart)
-            $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
+            $hash = (Get-FileHash -LiteralPath $renderPath -Algorithm SHA256).Hash
             if ($pdfBytes.Length -gt 8 -and $tail.Contains('%%EOF') -and $hash -eq $previousHash) {
                 $stablePasses++
             } else {
@@ -69,6 +73,16 @@ try {
         if ($stablePasses -lt 5) { Start-Sleep -Milliseconds 100 }
     }
     if ($stablePasses -lt 5) { throw 'PDF renderer did not produce a stable, complete file.' }
+    $copied = $false
+    for ($attempt = 0; $attempt -lt 100 -and -not $copied; $attempt++) {
+        try {
+            Copy-Item -LiteralPath $renderPath -Destination $outputPath -Force -ErrorAction Stop
+            $copied = $true
+        } catch {
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    if (-not $copied) { throw "Rendered PDF is complete, but destination remains locked: $outputPath" }
 } finally {
     for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $temporary); $attempt++) {
         try { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop } catch {

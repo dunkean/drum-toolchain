@@ -24,6 +24,61 @@ base_aliases:
     splash3: [77]
   27:
     snare2: [48]
+  29:
+    tom4: [54]
+mixer_overrides:
+  X-Sub1: {volume: 0.75, route: "buss 10"}
+  X-SubR1: {volume: 0.75, route: "buss 10"}
+  X-Perc: {volume: 0.68, route: "buss 11"}
+  X-PercR: {volume: 0.68, route: "buss 11"}
+  X-FX-11: {volume: 0.46, route: "buss 12"}
+  X-FX-1R1: {volume: 0.46, route: "buss 12"}
+  X-FX-12: {volume: 0.46, route: "buss 12"}
+  X-FX-1R2: {volume: 0.46, route: "buss 12"}
+  X-Perc3: {volume: 0.46, route: "buss 12"}
+  X-PercR3: {volume: 0.46, route: "buss 12"}
+  X-ClosedHats-1: {volume: 1.0, route: "buss 13"}
+  X-ClosedHats-1R: {volume: 1.0, route: "buss 13"}
+  X-Perc2: {volume: 1.0, route: "buss 13"}
+  X-PercR2: {volume: 1.0, route: "buss 13"}
+  X-Sub2: {volume: 0.565, route: "buss 14"}
+  X-SubR2: {volume: 0.565, route: "buss 14"}
+  X-Perc1: {volume: 0.758, route: "buss 15"}
+  X-PercR1: {volume: 0.758, route: "buss 15"}
+  X-Claps-2: {volume: 0.42, route: "buss 14"}
+  X-Claps-2R: {volume: 0.42, route: "buss 14"}
+  X-TunedKicks: {volume: 0.25, route: "buss 14"}
+  X-PercS-1: {volume: 0.18, route: "buss 14"}
+  X-PercS-1R: {volume: 0.18, route: "buss 14"}
+  X-Perc5: {volume: 0.65, route: "buss 15"}
+  X-PercR5: {volume: 0.65, route: "buss 15"}
+  X-Perc4: {volume: 0.78, route: "buss 15"}
+  X-PercR4: {volume: 0.78, route: "buss 15"}
+  "buss 20": {volume: 0.65035, route: "output 0", username: "DnB Kicks"}
+  "buss 21": {volume: 0.65035, route: "output 0"}
+  "buss 22": {volume: 0.702172, route: "output 0", username: "DnB Snares"}
+  "buss 23": {volume: 0.702172, route: "output 0"}
+  "buss 24": {volume: 1.0, route: "output 0", username: "Electronic Toms"}
+  "buss 25": {volume: 1.0, route: "output 0"}
+  "buss 26": {volume: 0.190906, route: "output 0", username: "Electronic Hats"}
+  "buss 27": {volume: 0.190906, route: "output 0"}
+  "buss 28": {volume: 0.58, route: "output 0", username: "Industrial Drums"}
+  "buss 29": {volume: 0.58, route: "output 0"}
+  "buss 30": {volume: 0.55, route: "output 0", username: "Electro Drums"}
+  "buss 31": {volume: 0.55, route: "output 0"}
+mixer_effect_imports:
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 0", target_entry: "buss 20"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 1", target_entry: "buss 21"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 2", target_entry: "buss 22"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 3", target_entry: "buss 23"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 8", target_entry: "buss 24"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 9", target_entry: "buss 25"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 6", target_entry: "buss 26"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 7", target_entry: "buss 27"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 12", target_entry: "buss 28"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 13", target_entry: "buss 29"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 4", target_entry: "buss 30"}
+  - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 5", target_entry: "buss 31"}
 clones:
   - source: Drum+Deftones.sd3p
     source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b
@@ -36,6 +91,9 @@ clones:
       snareMC: [39]
       snareFX: [40]
       snareSL: [41]
+    micmap_overrides:
+      Snare: SnareTop-C
+      OH: Oh
   - source: Develop Device/Sleep_Token_Kit.sd3p
     source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906
     source_instbox: 2
@@ -45,6 +103,14 @@ clones:
       snareR: [42]
       snareFO: [43]
       snareRO: [44]
+    micmap_overrides:
+      Oh-414: Oh
+      AmbNear-NarrowM49: AmbNear
+      AmbFar-WideAEA44: AmbMid
+      AmbBooth-Royer: Stairs
+      Oh251: OhP28
+      AmbFar: AmbMid
+      AmbPZM2: AmbMono
   - source: Kit_SleepToken.sd3p
     source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
     source_instbox: 0
@@ -52,6 +118,9 @@ clones:
     purpose: Sleep Token kick from Death & Darkness
     aliases:
       kickR: [25]
+    micmap_overrides:
+      KickSub: KickAlt
+      OH: Oh
   - source: Kit_SleepToken.sd3p
     source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
     source_instbox: 4
@@ -59,6 +128,8 @@ clones:
     purpose: Sleep Token high tom from Death & Darkness
     aliases:
       tom1R: [60]
+    micmap_overrides:
+      TomU1: Tom1
   - source: Kit_SleepToken.sd3p
     source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
     source_instbox: 5
@@ -66,6 +137,8 @@ clones:
     purpose: Sleep Token mid tom from Death & Darkness
     aliases:
       tom2R: [61]
+    micmap_overrides:
+      TomU2: Tom2
   - source: Kit_SleepToken.sd3p
     source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
     source_instbox: 6
@@ -73,6 +146,9 @@ clones:
     purpose: Sleep Token low tom from Death & Darkness
     aliases:
       tom3R: [62]
+    micmap_overrides:
+      Tom3: Tom4
+      TomU3: Tom5
   - source: DNBKit.sd3p
     source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075
     source_instbox: 5
@@ -80,6 +156,8 @@ clones:
     purpose: Distinct Electronic Edge snare for the flexible second-snare surface
     aliases:
       snare3: [49]
+    micmap_overrides:
+      Snare-3: X-Perc4
   - source: Kit_SleepToken.sd3p
     source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
     source_instbox: 16
@@ -87,4 +165,62 @@ clones:
     purpose: Distinct second splash from Death & Darkness
     aliases:
       splash2: [78]
-expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]
+    micmap_overrides:
+      Splash2: Splash
+  - source: DNBKit.sd3p
+    source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075
+    source_instbox: 12
+    target_instbox: 38
+    purpose: Electronic Edge high tom for DnB, industrial and electro scenes
+    aliases:
+      tom1: [52]
+    micmap_overrides:
+      Tom1: X-FX-11
+  - source: DNBKit.sd3p
+    source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075
+    source_instbox: 13
+    target_instbox: 39
+    purpose: Electronic Edge mid tom for DnB, industrial and electro scenes
+    aliases:
+      tom2: [53]
+    micmap_overrides:
+      Tom2: X-FX-12
+  - source: 2_Complete_metal_foundry.sd3p
+    source_sha256: 78589328d4dc17495da942198c1c079be0ed0260eff33946153f33b296a6d8ec
+    source_instbox: 2
+    target_instbox: 40
+    purpose: Metal Foundry Zeppelin snare isolated on the Industrial Drums bus
+    aliases:
+      snareR: [55]
+    micmap_require_explicit: true
+    micmap_overrides:
+      Kick-R: null
+      Kick-L: null
+      KickExt: null
+      SnareTop-C: X-Claps-2
+      SnareTop-D: X-Claps-2
+      SnareBottom-C: X-TunedKicks
+      SnareBottom-D: X-TunedKicks
+      SnareRim-Trash: null
+      Hats: null
+      Tom1: null
+      Tom2: null
+      Tom3: null
+      Tom4: null
+      Tom5: null
+      Oh: X-PercS-1
+      Oh-Drummer: null
+      AmbNear: null
+      AmbFar: null
+      AmbMono-Near: null
+      AmbMono-Far: null
+      Chamber: null
+expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]
+expected_mappings:
+  47: {instbox: 26, pad: snare1, library: EZX2_ElectronicEdge, drum_id: ""}
+  48: {instbox: 27, pad: snare2, library: EZX2_ElectronicEdge, drum_id: SD2_35}
+  49: {instbox: 36, pad: snare3, library: EZX2_ElectronicEdge, drum_id: SD3_34}
+  52: {instbox: 38, pad: tom1, library: EZX2_ElectronicEdge, drum_id: ""}
+  53: {instbox: 39, pad: tom2, library: EZX2_ElectronicEdge, drum_id: ""}
+  54: {instbox: 29, pad: tom4, library: EZX2_ElectronicEdge, drum_id: TL06}
+  55: {instbox: 40, pad: snareR, library: SL-DFH, drum_id: SD_ZEPPELIN4}

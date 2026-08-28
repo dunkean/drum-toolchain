@@ -178,6 +178,7 @@ _XPAD_RE = re.compile(r"^xpad\s+\d+\s+(\S+)\s+\{$")
 _POS_RE = re.compile(r'^pos\s+"([^"]+)"')
 _DRUM_RE = re.compile(r'^drum\s+"([^"]*)"\s+"([^"]*)"\s+(-?\d+)')
 _ALIAS_RE = re.compile(r"^alias\s+(\S+)\s+(.+)$")
+_MIC_ENTRY_RE = re.compile(r'^("([^"]+)"\s+"[^"]*"\s+[01]\s+)-?\d+$')
 
 
 def _preset_lines(path: Path) -> tuple[list[str], bool]:
@@ -279,6 +280,251 @@ def preset_inventory(path: Path) -> dict[str, Any]:
     }
 
 
+def _direct_child_spans(block: list[str]) -> list[tuple[str, int, int]]:
+    """Return the direct named children of a brace-delimited SD3 block."""
+    children: list[tuple[str, int, int]] = []
+    depth = 0
+    index = 0
+    while index < len(block):
+        stripped = block[index].strip()
+        if stripped.endswith("{"):
+            if depth == 1:
+                end = _block_end(block, index)
+                children.append((stripped[:-1].strip(), index, end))
+                index = end
+                continue
+            depth += 1
+        elif stripped == "}":
+            depth -= 1
+        index += 1
+    return children
+
+
+def _direct_properties(block: list[str]) -> dict[str, str]:
+    properties: dict[str, str] = {}
+    depth = 0
+    for line in block:
+        stripped = line.strip()
+        if stripped.endswith("{"):
+            depth += 1
+            continue
+        if stripped == "}":
+            depth -= 1
+            continue
+        if depth != 1 or not stripped:
+            continue
+        key, separator, value = stripped.partition(" ")
+        if separator:
+            properties[key] = value
+    return properties
+
+
+def mixer_inventory(path: Path) -> dict[str, Any]:
+    """Return top-level SD3 mixer channels, buses, routes, gains and effects."""
+    lines, _ = _preset_lines(path)
+    mixer_start, mixer_end = _named_block(lines, "mixer")
+    mixer = lines[mixer_start:mixer_end]
+    entries: list[dict[str, Any]] = []
+    for name, start, end in _direct_child_spans(mixer):
+        child = mixer[start:end]
+        properties = _direct_properties(child)
+        if name.startswith("buss "):
+            kind = "bus"
+        elif name.startswith("output "):
+            kind = "output"
+        else:
+            kind = "channel"
+        entries.append({
+            "name": name,
+            "kind": kind,
+            "volume": float(properties["volume"]) if "volume" in properties else None,
+            "route": properties.get("route"),
+            "mute": int(properties["mute"]) if "mute" in properties else None,
+            "hidden": any(line.strip() == "hidden" for line in child),
+            "effect_count": sum(
+                1 for child_name, _, _ in _direct_child_spans(child)
+                if child_name.startswith("effect ")
+            ),
+        })
+    return {
+        "path": str(path),
+        "sha256": sha256_hex(path.read_bytes()),
+        "entry_count": len(entries),
+        "entries": entries,
+    }
+
+
+def _validate_mixer_routes(path: Path) -> list[str]:
+    """Prove that every audible channel reaches a real stereo bus and output."""
+    entries = {entry["name"]: entry for entry in mixer_inventory(path)["entries"]}
+    validated: set[str] = set()
+
+    def visit(name: str, stack: tuple[str, ...]) -> None:
+        if name in validated:
+            return
+        if name in stack:
+            raise ValueError(f"mixer route cycle: {' -> '.join((*stack, name))}")
+        entry = entries.get(name)
+        if entry is None:
+            raise ValueError(f"mixer route target does not exist: {name}")
+        route = entry.get("route")
+        if not isinstance(route, str):
+            raise ValueError(f"mixer entry has no route: {name}")
+        kind, separator, number_text = route.partition(" ")
+        if not separator or not number_text.lstrip("-").isdigit():
+            raise ValueError(f"unsupported mixer route for {name}: {route}")
+        number = int(number_text)
+        if number < 0:
+            raise ValueError(f"mixer entry is disconnected: {name} -> {route}")
+        if kind == "output":
+            target = f"output {number}"
+            if target not in entries:
+                raise ValueError(f"mixer output does not exist: {name} -> {target}")
+        elif kind == "buss":
+            # SD3 route buss N points to the serialized stereo pair 2N / 2N+1.
+            for target in (f"buss {2 * number}", f"buss {2 * number + 1}"):
+                visit(target, (*stack, name))
+        else:
+            raise ValueError(f"unsupported mixer route for {name}: {route}")
+        validated.add(name)
+
+    for name, entry in entries.items():
+        if entry["kind"] == "channel" and entry.get("route") is not None and entry.get("mute") != 1:
+            visit(name, ())
+    return sorted(validated)
+
+
+def _validate_expected_mappings(inventory: dict[str, Any], expected: dict[Any, Any]) -> list[int]:
+    """Validate semantic note ownership, not merely note uniqueness."""
+    validated: list[int] = []
+    for note_text, requested in expected.items():
+        note = int(note_text)
+        owners = inventory["notes"].get(str(note), [])
+        if len(owners) != 1:
+            raise ValueError(f"expected mapping note {note} has {len(owners)} owners")
+        if not isinstance(requested, dict):
+            raise ValueError(f"expected mapping note {note} must be an object")
+        owner = owners[0]
+        mismatches = {
+            key: (owner.get(key), value)
+            for key, value in requested.items()
+            if owner.get(key) != value
+        }
+        if mismatches:
+            raise ValueError(f"expected mapping mismatch for note {note}: {mismatches}")
+        validated.append(note)
+    return sorted(validated)
+
+
+def _apply_mixer_overrides(lines: list[str], overrides: dict[str, dict[str, Any]]) -> list[str]:
+    if not overrides:
+        return lines
+    mixer_start, mixer_end = _named_block(lines, "mixer")
+    mixer = list(lines[mixer_start:mixer_end])
+    children = {name: (start, end) for name, start, end in _direct_child_spans(mixer)}
+    missing = sorted(set(overrides) - set(children))
+    if missing:
+        raise ValueError(f"mixer entries do not exist in base preset: {missing}")
+
+    replacements: list[tuple[int, int, list[str]]] = []
+    supported = {"volume", "route", "mute", "solo", "username"}
+    for name, requested in overrides.items():
+        unsupported = sorted(set(requested) - supported)
+        if unsupported:
+            raise ValueError(f"unsupported mixer overrides for {name}: {unsupported}")
+        start, end = children[name]
+        block = list(mixer[start:end])
+        newline = "\r\n" if block[0].endswith("\r\n") else "\n"
+        depth = 0
+        found: set[str] = set()
+        for index, line in enumerate(block):
+            stripped = line.strip()
+            if stripped.endswith("{"):
+                depth += 1
+                continue
+            if stripped == "}":
+                depth -= 1
+                continue
+            if depth != 1:
+                continue
+            key = stripped.partition(" ")[0]
+            if key in requested:
+                value = f'"{requested[key]}"' if key == "username" else requested[key]
+                block[index] = f"{key} {value}{newline}"
+                found.add(key)
+        if "username" in requested and "username" not in found:
+            route_index = next(
+                (index for index, line in enumerate(block) if line.strip().startswith("route ")),
+                len(block) - 1,
+            )
+            block.insert(route_index, f'username "{requested["username"]}"{newline}')
+            found.add("username")
+        absent = sorted(set(requested) - found)
+        if absent:
+            raise ValueError(f"mixer properties do not exist for {name}: {absent}")
+        replacements.append((start, end, block))
+    for start, end, replacement in sorted(replacements, reverse=True):
+        mixer[start:end] = replacement
+    lines[mixer_start:mixer_end] = mixer
+    return lines
+
+
+def _apply_mixer_effect_imports(lines: list[str], imports: list[dict[str, Any]],
+                                preset_library: Path) -> dict[str, str]:
+    source_hashes: dict[str, str] = {}
+    for item in imports:
+        source = preset_library / item["source"]
+        if not source.is_file():
+            raise FileNotFoundError(f"required mixer source preset is missing: {source}")
+        actual_source = sha256_hex(source.read_bytes())
+        expected_source = str(item["source_sha256"]).lower()
+        if actual_source != expected_source:
+            raise ValueError(
+                f"mixer source SHA256 mismatch for {source}: expected {expected_source}, got {actual_source}"
+            )
+        source_hashes[str(item["source"])] = actual_source
+        source_lines, _ = _preset_lines(source)
+        source_mixer_start, source_mixer_end = _named_block(source_lines, "mixer")
+        source_mixer = source_lines[source_mixer_start:source_mixer_end]
+        source_children = {
+            name: (start, end) for name, start, end in _direct_child_spans(source_mixer)
+        }
+        source_name = str(item["source_entry"])
+        if source_name not in source_children:
+            raise ValueError(f"mixer source entry does not exist: {source_name}")
+        source_start, source_end = source_children[source_name]
+        source_block = source_mixer[source_start:source_end]
+        effects = [
+            source_block[start:end]
+            for name, start, end in _direct_child_spans(source_block)
+            if name.startswith("effect ")
+        ]
+
+        mixer_start, mixer_end = _named_block(lines, "mixer")
+        mixer = list(lines[mixer_start:mixer_end])
+        target_children = {name: (start, end) for name, start, end in _direct_child_spans(mixer)}
+        target_name = str(item["target_entry"])
+        if target_name not in target_children:
+            raise ValueError(f"mixer target entry does not exist: {target_name}")
+        target_start, target_end = target_children[target_name]
+        target = list(mixer[target_start:target_end])
+        existing_effects = [
+            (start, end) for name, start, end in _direct_child_spans(target)
+            if name.startswith("effect ")
+        ]
+        for start, end in sorted(existing_effects, reverse=True):
+            target[start:end] = []
+        insert_at = next(
+            (index for index, line in enumerate(target) if line.strip().startswith("solo ")),
+            len(target) - 1,
+        )
+        imported_lines = [line for effect in effects for line in effect]
+        target[insert_at:insert_at] = imported_lines
+        mixer[target_start:target_end] = target
+        lines[mixer_start:mixer_end] = mixer
+    return source_hashes
+
+
 def _named_block(block: list[str], name: str) -> tuple[int, int]:
     marker = f"{name} {{"
     for index, line in enumerate(block):
@@ -309,8 +555,93 @@ def _rewrite_aliases(block: list[str], aliases: dict[str, list[Any]], drop_unspe
     return rewritten
 
 
+def _master_entries(mastermics: list[str]) -> dict[str, int]:
+    entries: dict[str, int] = {}
+    for line in mastermics:
+        match = _MIC_ENTRY_RE.match(line.strip())
+        if match:
+            name = match.group(2)
+            if name in entries:
+                raise ValueError(f"duplicate master mic name: {name}")
+            # Stereo master channels reserve two serialized ordinals, so the
+            # visible entry position is not its routable micmap index.
+            entries[name] = int(line.strip().rsplit(" ", 1)[1])
+    return entries
+
+
+def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_count: int,
+                     overrides: dict[str, Any], exact_match: bool,
+                     require_explicit: bool) -> list[str]:
+    entries = _master_entries(base_mastermics)
+    resolved: dict[str, int] = {}
+    for source_name, target in overrides.items():
+        if target is None:
+            resolved[source_name] = -1
+        elif isinstance(target, int):
+            if target < 0 or target >= base_mic_count:
+                raise ValueError(f"master mic index out of range for {source_name}: {target}")
+            resolved[source_name] = target
+        else:
+            target_name = str(target)
+            if target_name not in entries:
+                raise ValueError(f"master mic does not exist for {source_name}: {target_name}")
+            resolved[source_name] = entries[target_name]
+
+    micmap_starts = [index for index, line in enumerate(block) if line.strip() == "micmap {"]
+    source_names: set[str] = set()
+    for start in micmap_starts:
+        end = _block_end(block, start)
+        depth = 0
+        for line in block[start:end]:
+            stripped = line.strip()
+            if stripped.endswith("{"):
+                depth += 1
+                continue
+            if stripped == "}":
+                depth -= 1
+                continue
+            if depth == 1 and (match := _MIC_ENTRY_RE.match(stripped)):
+                source_names.add(match.group(2))
+    if require_explicit:
+        missing_explicit = sorted(source_names - set(overrides))
+        if missing_explicit:
+            raise ValueError(f"micmap entries require explicit map or null: {missing_explicit}")
+
+    rewritten = list(block)
+    micmap_starts = [index for index, line in enumerate(rewritten) if line.strip() == "micmap {"]
+    for start in micmap_starts:
+        end = _block_end(rewritten, start)
+        depth = 0
+        for index in range(start, end):
+            stripped = rewritten[index].strip()
+            if stripped.endswith("{"):
+                depth += 1
+                continue
+            if stripped == "}":
+                depth -= 1
+                continue
+            newline = "\r\n" if rewritten[index].endswith("\r\n") else "\n"
+            if depth == 1 and stripped.startswith("nrmaster "):
+                rewritten[index] = f"nrmaster {base_mic_count}{newline}"
+                continue
+            match = _MIC_ENTRY_RE.match(stripped)
+            if depth == 1 and match:
+                source_name = match.group(2)
+                target_index = resolved.get(
+                    source_name,
+                    entries.get(source_name, -1) if exact_match else -1,
+                )
+                rewritten[index] = f"{match.group(1)}{target_index}{newline}"
+    unknown = sorted(set(resolved) - source_names)
+    if unknown:
+        raise ValueError(f"micmap overrides do not exist in source block: {unknown}")
+    return rewritten
+
+
 def _clone_block(source: Path, source_instbox: int, target_instbox: int,
-                 aliases: dict[str, list[Any]], base_mastermics: list[str]) -> list[str]:
+                 aliases: dict[str, list[Any]], base_mastermics: list[str], base_mic_count: int,
+                 micmap_overrides: dict[str, Any], micmap_exact_match: bool,
+                 micmap_require_explicit: bool) -> list[str]:
     lines, _ = _preset_lines(source)
     spans = _instrument_spans(lines)
     if source_instbox not in spans:
@@ -321,6 +652,14 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
     block[0] = f"instbox {target_instbox} {{{newline}"
     master_start, master_end = _named_block(block, "mastermics")
     block[master_start:master_end] = base_mastermics
+    block = _rewrite_micmaps(
+        block,
+        base_mastermics,
+        base_mic_count,
+        micmap_overrides,
+        micmap_exact_match,
+        micmap_require_explicit,
+    )
     return _rewrite_aliases(block, aliases, drop_unspecified=True)
 
 
@@ -342,6 +681,14 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
     master_start, master_end = _named_block(lines[slice(*spans[0])], "mastermics")
     base_block = lines[slice(*spans[0])]
     base_mastermics = base_block[master_start:master_end]
+    micmap_start, micmap_end = _named_block(base_block, "micmap")
+    base_mic_count_line = next(
+        (line.strip() for line in base_block[micmap_start:micmap_end] if line.strip().startswith("nrmaster ")),
+        None,
+    )
+    if base_mic_count_line is None:
+        raise ValueError("base preset micmap has no nrmaster count")
+    base_mic_count = int(base_mic_count_line.split()[1])
 
     replacements: list[tuple[int, int, list[str]]] = []
     for number_text, aliases in recipe.get("base_aliases", {}).items():
@@ -353,8 +700,15 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
     for start, end, replacement in sorted(replacements, reverse=True):
         lines[start:end] = replacement
 
+    lines = _apply_mixer_overrides(lines, recipe.get("mixer_overrides", {}))
+    mixer_source_hashes = _apply_mixer_effect_imports(
+        lines,
+        recipe.get("mixer_effect_imports", []),
+        preset_library,
+    )
+
     clones: list[str] = []
-    source_hashes: dict[str, str] = {}
+    source_hashes: dict[str, str] = dict(mixer_source_hashes)
     for clone in recipe.get("clones", []):
         source = preset_library / clone["source"]
         if not source.is_file():
@@ -370,6 +724,10 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
             int(clone["target_instbox"]),
             clone["aliases"],
             base_mastermics,
+            base_mic_count,
+            clone.get("micmap_overrides", {}),
+            bool(clone.get("micmap_exact_match", True)),
+            bool(clone.get("micmap_require_explicit", False)),
         ))
 
     mixer_index = next((index for index, line in enumerate(lines) if line.strip() == "mixer {"), None)
@@ -390,6 +748,15 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
     if missing_notes or duplicate_notes:
         output.unlink(missing_ok=True)
         raise ValueError(f"generated mapping invalid; missing={missing_notes}, duplicate={duplicate_notes}")
+    try:
+        validated_mappings = _validate_expected_mappings(
+            inventory,
+            recipe.get("expected_mappings", {}),
+        )
+        validated_mixer_routes = _validate_mixer_routes(output)
+    except ValueError:
+        output.unlink(missing_ok=True)
+        raise
     return {
         "output": str(output),
         "sha256": inventory["sha256"],
@@ -398,6 +765,8 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
         "base_sha256": actual_base,
         "source_sha256": source_hashes,
         "validated_unique_notes": sorted(expected_notes),
+        "validated_mappings": validated_mappings,
+        "validated_mixer_routes": validated_mixer_routes,
     }
 
 

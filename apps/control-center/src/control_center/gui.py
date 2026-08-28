@@ -1401,7 +1401,7 @@ def launch() -> int:
             self.note_map = QLineEdit(); self.note_map.setPlaceholderText("Compiled drumgizmo-midimap.json for export")
             choose_map = QPushButton("Select DrumGizmo note map…"); choose_map.clicked.connect(self.select_note_map)
             row = QHBoxLayout(); row.addWidget(self.note_map); row.addWidget(choose_map); actions_layout.addLayout(row)
-            self.export_megakit_plan = QLineEdit(); self.export_megakit_plan.setPlaceholderText("MegaKit plan for shared variations (no duplicate WAV)")
+            self.export_megakit_plan = QLineEdit(); self.export_megakit_plan.setPlaceholderText("Required MegaKit plan for HH positions and shared variations")
             choose_plan = QPushButton("Select MegaKit plan…"); choose_plan.clicked.connect(self.select_export_megakit_plan)
             row = QHBoxLayout(); row.addWidget(self.export_megakit_plan); row.addWidget(choose_plan); actions_layout.addLayout(row)
             export = QPushButton("Export complete DrumGizmo kit"); export.clicked.connect(lambda: self.run_campaign_action("export-drumgizmo")); actions_layout.addWidget(export)
@@ -1471,6 +1471,7 @@ def launch() -> int:
             self.capture_rows.setRowCount(0)
             for capture_row in rows:
                 self.add_capture_row(capture_row)
+            self.export_megakit_plan.setText(filename)
             self.campaign_log.setPlainText(
                 f"Loaded {len(rows)} capture articulations from {filename}, including explicit CC4 hi-hat positions. "
                 f"Total planned takes: {sum(len(row.raw_filenames()) for row in rows)}."

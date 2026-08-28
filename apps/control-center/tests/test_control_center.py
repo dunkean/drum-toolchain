@@ -198,6 +198,8 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(quality[1:4], ("-m", "drum_sampler.cli", "audit-quality"))
         with self.assertRaisesRegex(ValueError, "note map"):
             center.sampler_command("export-drumgizmo", run)
+        with self.assertRaisesRegex(ValueError, "MegaKit plan"):
+            center.sampler_command("export-drumgizmo", run, note_map=Path("drumgizmo-midimap.json"))
 
     def test_v1_electronic_additions_have_unique_raw_capture_cells(self) -> None:
         filenames = [filename for row in METALCORE_ELECTRONIC_V1_ADDITIONS for filename in row.raw_filenames()]
@@ -228,7 +230,7 @@ class ControlCenterTests(unittest.TestCase):
             command = [
                 sys.executable, "-m", "control_center.cli", "create-sd3-campaign", str(plan),
                 "--output", str(output), "--id", "greg_hybrid_r15_full",
-                "--preset", "Greg_Hybrid_r15_MegaKit", "--midi-output", "SD3_MEGA_INPUT",
+                "--preset", "Greg_Hybrid_r15_MegaKit_v2", "--midi-output", "SD3_MEGA_INPUT",
                 "--audio-input", "SD3_PRINT_LOOPBACK",
             ]
             completed = subprocess.run(command, capture_output=True, text=True)

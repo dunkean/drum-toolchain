@@ -3,7 +3,7 @@
 schema_version: 1
 kind: sd3-megakit-plan
 id: greg_hybrid_r15_megakit
-sd3p_output: "captures/sd3/Greg_Hybrid_r15_MegaKit.sd3p"
+sd3p_output: "captures/sd3/Greg_Hybrid_r15_MegaKit_v2.sd3p"
 build_recipe: "profiles/sd3/metalcore-r15-megakit-build.yaml"
 status: generated-local-validation-required
 base_preset:
@@ -20,9 +20,14 @@ sources:
   progressive_foundry: {product: "Progressive Foundry SDX", role: "Sleep Token snare"}
 mixer:
   buses:
-    - {id: kit_close, purpose: "capture source; close microphones, no master limiter"}
-    - {id: kit_room, purpose: "optional ambience; excluded from raw DDrum4 capture"}
-    - {id: electronic, purpose: "Electronic Edge/Hip Hop instruments"}
+    - {id: kit_close, sd3_bus: "0..3", purpose: "Modern Metal close microphones and acoustic groups"}
+    - {id: kit_room, sd3_bus: "4..9", purpose: "Modern Metal ambience and parallel groups"}
+    - {id: dnb_kicks, sd3_bus: 10, purpose: "DnB kicks, DNBKit inserts and gain staging"}
+    - {id: dnb_snares, sd3_bus: 11, purpose: "DnB snares, DNBKit snare inserts and gain staging"}
+    - {id: electronic_toms, sd3_bus: 12, purpose: "Electronic Edge high/mid/low tom family"}
+    - {id: electronic_hats, sd3_bus: 13, purpose: "Electronic Edge closed/open hats"}
+    - {id: industrial_drums, sd3_bus: 14, purpose: "Industrial kick/snare family with separate effects"}
+    - {id: electro_drums, sd3_bus: 15, purpose: "Electro/trap kick/snare family with separate effects"}
     - {id: print, purpose: "stereo capture output, fixed gain and sample rate"}
   rules:
     - "Route every capture through print with fixed gain; disable master limiting and global reverb while capturing."
@@ -44,11 +49,15 @@ articulations:
   - {logical: rim2.cross, note: 41, source: death_darkness, capture: true, velocities: dense4, rr: 2}
   - {logical: snare1.sleep, note: 42, source: progressive_foundry, selection: "Snare7 center", capture: true, velocities: dense7, rr: 3}
   - {logical: snare2.sleep, note: 43, source: progressive_foundry, selection: "Snare7 alternate", capture: true, velocities: dense7, rr: 3}
-  - {logical: snare1.electro, note: 47, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
-  - {logical: snare1.industrial, note: 48, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
+  - {logical: snare1.dnb, note: 47, source: electronic_edge, selection: "SD1_34 routed to DnB Snares", capture: true, velocities: dense5, rr: 2}
+  - {logical: snare1.electro, note: 48, source: electronic_edge, selection: "SD2_35 routed to Electro Drums", capture: true, velocities: dense5, rr: 2}
   - {logical: snare2.electro, note: 49, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: perc.clap, note: 50, source: hip_hop, capture: true, velocities: dense4, rr: 2}
   - {logical: perc.click, note: 51, source: hip_hop, selection: "Sidestick2", capture: true, velocities: dense4, rr: 1}
+  - {logical: tom1.electronic, note: 52, source: electronic_edge, selection: "TH06", capture: true, velocities: dense5, rr: 2}
+  - {logical: tom2.electronic, note: 53, source: electronic_edge, selection: "TM06", capture: true, velocities: dense5, rr: 2}
+  - {logical: tom3.electronic, note: 54, source: electronic_edge, selection: "TL06", capture: true, velocities: dense5, rr: 2}
+  - {logical: snare1.industrial, note: 55, source: metal_foundry, selection: "SD_ZEPPELIN4 close/OH routed to Industrial Drums", capture: true, velocities: dense7, rr: 3}
   - {logical: tom1.acoustic, note: 56, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: tom2.acoustic, note: 57, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: tom3.acoustic, note: 58, source: modern_metal, capture: true, velocities: dense5, rr: 3}
@@ -118,6 +127,6 @@ scenes:
   metalcore: {base: modern_metal, palettes: [vp1_snare1, vp2_flex, vp3_percussion_family, vp4_percussion_variant]}
   sleep_token: {base: progressive_foundry, overrides: [kick.sleep, snare1.sleep, snare2.sleep, tom1.sleep, tom2.sleep, tom3.sleep]}
   deftones: {base: modern_metal, overrides: [snare1.deftones, snare2.deftones]}
-  dnb: {base: electronic_edge, overrides: [kick.dnb, snare1.electro, snare2.electro, hh.electronic_closed, hh.electronic_open, stack.glitch, perc.click]}
-  industrial: {base: electronic_edge, overrides: [kick.industrial, snare1.industrial, snare2.electro, stack.metallic, perc.metallic]}
-  electro: {base: hip_hop, overrides: [kick.trap, snare1.electro, snare2.electro, hh.electronic_closed, hh.electronic_open, stack.clap, perc.clap]}
+  dnb: {base: electronic_edge, overrides: [kick.dnb, snare1.dnb, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, hh.electronic_closed, hh.electronic_open, stack.glitch, perc.click]}
+  industrial: {base: electronic_edge, overrides: [kick.industrial, snare1.industrial, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, stack.metallic, perc.metallic]}
+  electro: {base: hip_hop, overrides: [kick.trap, snare1.electro, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, hh.electronic_closed, hh.electronic_open, stack.clap, perc.clap]}

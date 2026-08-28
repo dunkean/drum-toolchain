@@ -1,8 +1,8 @@
 # Greg Hybrid r15 — SD3 MegaKit
 
-- Preset: `Greg_Hybrid_r15_MegaKit.sd3p`
-- Preset SHA-256: `6118a343c9f2a36117d5ec7038b7bf10b1632dc0755d176ca5afa17ef0d4ab33`
-- Instruments SD3: **38**
+- Preset: `Greg_Hybrid_r15_MegaKit_v2.sd3p`
+- Preset SHA-256: `83af031a6c855374ef730e91819fc9500931e2bf9877d2bc0e7c6cf1c9d36725`
+- Instruments SD3: **41**
 Convention de nommage: MIDI 0 = C-1.
 
 Une ligne `variation partagée` ne duplique aucun WAV : elle réutilise exactement la note et le son indiqués par `shared_with`.
@@ -24,14 +24,18 @@ Une ligne `variation partagée` ne duplique aucun WAV : elle réutilise exacteme
 | `rim2.cross` | 41 (F2) | SP-DeathAndDarkness / SD30 / snareSL | 40, 64, 88, 112 | 2 | deftones, dnb, electro, industrial, metalcore, sleep_token | capture dédiée |
 | `snare1.sleep` | 42 (F#2) | SL-PROGRESSIVEFOUNDRY / Snare7 / snareR | 24, 40, 56, 72, 88, 104, 120 | 3 | metalcore (vp1_snare1-3), sleep_token | capture dédiée |
 | `snare2.sleep` | 43 (G2) | SL-PROGRESSIVEFOUNDRY / Snare7 / snareFO | 24, 40, 56, 72, 88, 104, 120 | 3 | metalcore (vp2_flex-4), sleep_token | capture dédiée |
-| `snare1.electro` | 47 (B2) | EZX2_ElectronicEdge / snare1 / snare1 | 24, 48, 72, 96, 120 | 2 | dnb, electro, metalcore (vp1_snare1-5) | capture dédiée |
-| `snare1.industrial` | 48 (C3) | EZX2_ElectronicEdge / SD2_35 / snare2 | 24, 48, 72, 96, 120 | 2 | industrial, metalcore (vp1_snare1-4) | capture dédiée |
+| `snare1.dnb` | 47 (B2) | EZX2_ElectronicEdge / snare1 / snare1 | 24, 48, 72, 96, 120 | 2 | dnb | capture dédiée |
+| `snare1.electro` | 48 (C3) | EZX2_ElectronicEdge / SD2_35 / snare2 | 24, 48, 72, 96, 120 | 2 | electro, metalcore (vp1_snare1-5) | capture dédiée |
 | `snare2.electro` | 49 (C#3) | EZX2_ElectronicEdge / SD3_34 / snare3 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial, metalcore (vp2_flex-5) | capture dédiée |
 | `perc.clap` | 50 (D3) | EZX2_HipHop / Claps19 / claps | 40, 64, 88, 112 | 2 | deftones (vp4_percussion_variant-5), electro, metalcore (vp4_percussion_variant-5), sleep_token (vp4_percussion_variant-5) | capture dédiée |
 | `perc.click` | 51 (D#3) | EZX2_HipHop / Sidestick2 / sidestick | 40, 64, 88, 112 | 1 | deftones (vp4_percussion_variant-4), dnb, metalcore (vp4_percussion_variant-4), sleep_token (vp4_percussion_variant-4) | capture dédiée |
-| `tom1.acoustic` | 56 (G#3) | EZX2_ModernMetal / TO05_01 / tom1R | 24, 48, 72, 96, 120 | 3 | deftones, dnb, electro, industrial, metalcore | capture dédiée |
-| `tom2.acoustic` | 57 (A3) | EZX2_ModernMetal / TO05_02 / tom2R | 24, 48, 72, 96, 120 | 3 | deftones, dnb, electro, industrial, metalcore | capture dédiée |
-| `tom3.acoustic` | 58 (A#3) | EZX2_ModernMetal / TO05_04 / tom4R | 24, 48, 72, 96, 120 | 3 | deftones, dnb, electro, industrial, metalcore | capture dédiée |
+| `tom1.electronic` | 52 (E3) | EZX2_ElectronicEdge / tom1 / tom1 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
+| `tom2.electronic` | 53 (F3) | EZX2_ElectronicEdge / tom2 / tom2 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
+| `tom3.electronic` | 54 (F#3) | EZX2_ElectronicEdge / TL06 / tom4 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
+| `snare1.industrial` | 55 (G3) | SL-DFH / SD_ZEPPELIN4 / snareR | 24, 40, 56, 72, 88, 104, 120 | 3 | industrial, metalcore (vp1_snare1-4) | capture dédiée |
+| `tom1.acoustic` | 56 (G#3) | EZX2_ModernMetal / TO05_01 / tom1R | 24, 48, 72, 96, 120 | 3 | deftones, metalcore | capture dédiée |
+| `tom2.acoustic` | 57 (A3) | EZX2_ModernMetal / TO05_02 / tom2R | 24, 48, 72, 96, 120 | 3 | deftones, metalcore | capture dédiée |
+| `tom3.acoustic` | 58 (A#3) | EZX2_ModernMetal / TO05_04 / tom4R | 24, 48, 72, 96, 120 | 3 | deftones, metalcore | capture dédiée |
 | `tom4.acoustic` | 59 (B3) | EZX2_ModernMetal / TO05_05 / tom5R | 24, 48, 72, 96, 120 | 3 | metalcore | capture dédiée |
 | `tom1.sleep` | 60 (C4) | SL-DEATH / TO03_01 / tom1R | 24, 48, 72, 96, 120 | 2 | sleep_token | capture dédiée |
 | `tom2.sleep` | 61 (C#4) | SL-DEATH / TO03_02 / tom2R | 24, 48, 72, 96, 120 | 2 | sleep_token | capture dédiée |
