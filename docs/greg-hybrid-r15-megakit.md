@@ -1,7 +1,7 @@
 # Greg Hybrid r15 — SD3 MegaKit
 
 - Preset: `Greg_Hybrid_r15_MegaKit_v2.sd3p`
-- Preset SHA-256: `742b94f1be736a36c6faedebc6bac14d182ae69351af70f2336ab8dded76f443`
+- Preset SHA-256: `03d56aec076cd7006185c150bbf8d1458fbcb5d0b59ffa20d674975b23a0e2d6`
 - Instruments SD3: **42**
 Convention de nommage: MIDI 0 = C-1.
 
@@ -30,7 +30,7 @@ Une ligne `variation partagée` ne duplique aucun WAV : elle réutilise exacteme
 | `perc.clap` | 50 (D3) | EZX2_HipHop / Claps19 / claps | 40, 64, 88, 112 | 2 | deftones (vp4_percussion_variant-5), electro, metalcore (vp4_percussion_variant-5), sleep_token (vp4_percussion_variant-5) | capture dédiée |
 | `perc.click` | 51 (D#3) | EZX2_HipHop / Sidestick2 / sidestick | 40, 64, 88, 112 | 1 | deftones (vp4_percussion_variant-4), dnb, metalcore (vp4_percussion_variant-4), sleep_token (vp4_percussion_variant-4) | capture dédiée |
 | `tom1.electronic` | 52 (E3) | EZX2_ElectronicEdge / tom1 / tom1 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
-| `tom2.electronic` | 53 (F3) | EZX2_ElectronicEdge / tom2 / tom2 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
+| `tom2.electronic` | 53 (F3) | EZX2_ElectronicEdge / tom4 / tom4 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
 | `tom3.electronic` | 54 (F#3) | EZX2_ElectronicEdge / TL06 / tom4 | 24, 48, 72, 96, 120 | 2 | dnb, electro, industrial | capture dédiée |
 | `snare1.industrial` | 55 (G3) | SL-DFH / SD_ZEPPELIN4 / snareR | 24, 40, 56, 72, 88, 104, 120 | 3 | industrial, metalcore (vp1_snare1-4) | capture dédiée |
 | `tom1.acoustic` | 56 (G#3) | EZX2_ModernMetal / TO05_01 / tom1R | 24, 48, 72, 96, 120 | 3 | deftones, metalcore | capture dédiée |

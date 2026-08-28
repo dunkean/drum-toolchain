@@ -191,6 +191,37 @@ class Sd3ReverseTests(unittest.TestCase):
             pad_block = payload[pad_start:pad_end]
             self.assertEqual(pad_block.count("pvolume 0.562341"), 1)
 
+    def test_megakit_build_applies_reviewed_clone_pitch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.sd3p"
+            source = root / "source.sd3p"
+            output = root / "out.sd3p"
+            recipe = root / "recipe.yaml"
+            base.write_bytes(self._preset([self._instbox(0, "BASE", "TO01", "tom1", "52")]))
+            source.write_bytes(self._preset([self._instbox(2, "ALT", "TL06", "tom4", "54")]))
+            recipe.write_text(
+                "\n".join([
+                    "schema_version: 1",
+                    "kind: sd3-preset-build",
+                    f"base_sha256: {scan_binary(base)['sha256']}",
+                    "clones:",
+                    "  - source: source.sd3p",
+                    f"    source_sha256: {scan_binary(source)['sha256']}",
+                    "    source_instbox: 2",
+                    "    target_instbox: 1",
+                    "    aliases: {tom4: [53]}",
+                    "    pad_overrides: {tom4: {pitch: 1.189207}}",
+                    "expected_unique_notes: [52, 53]",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            build_megakit_preset(base, recipe, root, output)
+            payload = output.read_text(encoding="latin-1")
+            pad_start = payload.rindex("pad tom4 {")
+            pad_end = payload.index("\n}", pad_start)
+            self.assertIn("pitch 1.189207", payload[pad_start:pad_end])
+
     def test_megakit_build_rejects_nonfinite_or_extreme_pad_volume(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -293,6 +324,44 @@ class Sd3ReverseTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "explicit map or null"):
+                build_megakit_preset(base, recipe, root, output)
+
+    def test_megakit_build_requires_each_used_clone_mic_to_be_mapped_or_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.sd3p"
+            source = root / "source.sd3p"
+            output = root / "out.sd3p"
+            recipe = root / "recipe.yaml"
+            base_payload = self._preset([self._instbox(0, "BASE", "SD01", "snareR", "32")])
+            base.write_bytes(base_payload.replace(
+                b"mastermics {\nnrmaster 0\n}",
+                b'mastermics {\nnrmaster 1\n"X-Bus" "X Bus" 0 0\n}',
+            ).replace(b"micmap {\nnrmaster 0\n}", b"micmap {\nnrmaster 1\n}"))
+            source_payload = self._preset([self._instbox(2, "ALT", "SD30", "snareR", "5")])
+            source.write_bytes(source_payload.replace(
+                b"micmap {\nnrmaster 0\n}",
+                b'micmap {\nnrmaster 2\n"Close" "Close" 0 0\n"Room" "Room" 1 1\n}',
+            ).replace(b"pad snareR {\n", b'pad snareR {\nusemic "Close" "Room" "RoomR"\n'))
+            recipe.write_text(
+                "\n".join([
+                    "schema_version: 1",
+                    "kind: sd3-preset-build",
+                    f"base_sha256: {scan_binary(base)['sha256']}",
+                    "clones:",
+                    "  - source: source.sd3p",
+                    f"    source_sha256: {scan_binary(source)['sha256']}",
+                    "    source_instbox: 2",
+                    "    target_instbox: 1",
+                    "    aliases: {snareR: [37]}",
+                    "    micmap_exact_match: false",
+                    "    micmap_require_used_explicit: true",
+                    "    micmap_overrides: {Close: X-Bus}",
+                    "expected_unique_notes: [32, 37]",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "used micmap entries require explicit map or null:.*Room"):
                 build_megakit_preset(base, recipe, root, output)
 
     def test_megakit_build_applies_validated_mixer_overrides(self) -> None:

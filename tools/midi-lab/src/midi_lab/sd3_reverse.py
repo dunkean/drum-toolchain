@@ -559,8 +559,8 @@ def _rewrite_aliases(block: list[str], aliases: dict[str, list[Any]], drop_unspe
 
 
 def _rewrite_pad_overrides(block: list[str], overrides: dict[str, dict[str, Any]]) -> list[str]:
-    """Apply reviewed per-instrument gain without changing shared mixer channels."""
-    supported = {"pvolume"}
+    """Apply reviewed per-articulation scalar properties to a cloned instrument."""
+    supported = {"pitch", "pvolume"}
     unknown_properties = {
         property_name
         for values in overrides.values()
@@ -626,7 +626,8 @@ def _master_entries(mastermics: list[str]) -> dict[str, int]:
 
 def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_count: int,
                      overrides: dict[str, Any], exact_match: bool,
-                     require_explicit: bool) -> list[str]:
+                     require_explicit: bool,
+                     require_used_explicit_pads: set[str] | None = None) -> list[str]:
     entries = _master_entries(base_mastermics)
     resolved: dict[str, int] = {}
     for source_name, target in overrides.items():
@@ -661,6 +662,29 @@ def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_coun
         missing_explicit = sorted(source_names - set(overrides))
         if missing_explicit:
             raise ValueError(f"micmap entries require explicit map or null: {missing_explicit}")
+    if require_used_explicit_pads:
+        used_sources: set[str] = set()
+        found_pads: set[str] = set()
+        for index, line in enumerate(block):
+            match = re.match(r"^pad\s+(\S+)\s+\{$", line.strip())
+            if not match or match.group(1) not in require_used_explicit_pads:
+                continue
+            found_pads.add(match.group(1))
+            end = _block_end(block, index)
+            for pad_line in block[index:end]:
+                if not pad_line.strip().startswith("usemic "):
+                    continue
+                for used_name in re.findall(r'"([^"]+)"', pad_line):
+                    if used_name in source_names:
+                        used_sources.add(used_name)
+                    elif used_name.endswith("R") and used_name[:-1] in source_names:
+                        used_sources.add(used_name[:-1])
+        missing_pads = sorted(require_used_explicit_pads - found_pads)
+        if missing_pads:
+            raise ValueError(f"aliased pads have no source pad block: {missing_pads}")
+        missing_used = sorted(used_sources - set(overrides))
+        if missing_used:
+            raise ValueError(f"used micmap entries require explicit map or null: {missing_used}")
 
     rewritten = list(block)
     micmap_starts = [index for index, line in enumerate(rewritten) if line.strip() == "micmap {"]
@@ -697,6 +721,7 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
                  aliases: dict[str, list[Any]], base_mastermics: list[str], base_mic_count: int,
                  micmap_overrides: dict[str, Any], micmap_exact_match: bool,
                  micmap_require_explicit: bool,
+                 micmap_require_used_explicit: bool,
                  pad_overrides: dict[str, dict[str, Any]]) -> list[str]:
     lines, _ = _preset_lines(source)
     spans = _instrument_spans(lines)
@@ -715,6 +740,7 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
         micmap_overrides,
         micmap_exact_match,
         micmap_require_explicit,
+        set(aliases) if micmap_require_used_explicit else None,
     )
     block = _rewrite_pad_overrides(block, pad_overrides)
     return _rewrite_aliases(block, aliases, drop_unspecified=True)
@@ -785,6 +811,7 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
             clone.get("micmap_overrides", {}),
             bool(clone.get("micmap_exact_match", True)),
             bool(clone.get("micmap_require_explicit", False)),
+            bool(clone.get("micmap_require_used_explicit", False)),
             clone.get("pad_overrides", {}),
         ))
 
