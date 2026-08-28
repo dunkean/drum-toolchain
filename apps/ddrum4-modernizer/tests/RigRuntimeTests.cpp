@@ -89,5 +89,18 @@ int main() {
     expressionDrumGizmoRejected=true;
   }
   assert(expressionDrumGizmoRejected);
+  const auto quantizedDrumGizmo=loadRuntimeProfile(std::filesystem::path(DDRUM4_TEST_CONFIG_DIR)/"runtime-expression-drumgizmo.yaml", RuntimeRendererTarget::DrumGizmo);
+  assert(quantizedDrumGizmo.hihatQuantization && quantizedDrumGizmo.hihatQuantization->zones.size()==2);
+  RigRuntime quantizedDrumGizmoRuntime{quantizedDrumGizmo};
+  assert(quantizedDrumGizmoRuntime.process("edrumin",{MidiType::ControlChange,1,4,127,119},out)==0);
+  count=quantizedDrumGizmoRuntime.process("edrumin",{MidiType::NoteOn,1,42,96,120},out);
+  assert(count==1 && out[0].type==MidiType::NoteOn && out[0].data1==64);
+  count=quantizedDrumGizmoRuntime.process("edrumin",{MidiType::NoteOff,1,42,0,121},out);
+  assert(count==1 && out[0].type==MidiType::NoteOff && out[0].data1==64);
+  assert(quantizedDrumGizmoRuntime.process("edrumin",{MidiType::ControlChange,1,4,0,122},out)==0);
+  count=quantizedDrumGizmoRuntime.process("edrumin",{MidiType::NoteOn,1,46,96,123},out);
+  assert(count==1 && out[0].type==MidiType::NoteOn && out[0].data1==75);
+  count=quantizedDrumGizmoRuntime.process("edrumin",{MidiType::NoteOff,1,46,0,124},out);
+  assert(count==1 && out[0].type==MidiType::NoteOff && out[0].data1==75);
   std::cout << "rig runtime tests passed\n";
 }

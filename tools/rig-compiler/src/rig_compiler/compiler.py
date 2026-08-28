@@ -244,8 +244,14 @@ def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str
         articulations = event.get("articulations")
         if not isinstance(articulations, list):
             continue
+        # A simulator profile may deliberately model the route without an
+        # installed bank.  Do not lower it to firmware in that case: a live
+        # profile still has to provide the bank so every generated Note-P slot
+        # can be verified before flashing the Uno.
         if bank_facts is None:
-            raise RigCompilerError("reviewed DDrum4 hi-hat quantization requires a linked ddrum4_bank before firmware can be flashable")
+            if document.get("deployment") == "live":
+                raise RigCompilerError("reviewed DDrum4 hi-hat quantization requires a linked ddrum4_bank before firmware can be flashable")
+            return None
         for articulation in articulations:
             physical, notes = articulation.get("physical"), articulation.get("notes")
             if not isinstance(physical, str) or not isinstance(notes, list) or not notes:
@@ -297,10 +303,18 @@ def _runtime_expression_reason(document: dict[str, Any], record: dict[str, Any],
     if target_config["status"] not in {"measured", "user-confirmed"}:
         return f"expression target is {target_config['status']!r}"
     event = target_config["event"]
-    if target != "sd3" or matcher != "cc" or route["expression"] != "openness":
-        return "this runtime implements only the measured openness -> SD3 CC vertical"
-    if event.get("type") != "cc" or event.get("transform") != "passthrough":
-        return "expression target is not a passthrough CC event"
+    if matcher != "cc" or route["expression"] != "openness":
+        return "this runtime implements only CC openness expression routes"
+    if target == "sd3":
+        if event.get("type") != "cc" or event.get("transform") != "passthrough":
+            return "expression target is not a passthrough CC event"
+    elif target == "drumgizmo":
+        if event.get("type") != "quantized_note":
+            return "expression target is not a reviewed quantized DrumGizmo hi-hat route"
+        if not isinstance(event.get("input_closed"), int) or not isinstance(event.get("input_open"), int):
+            return "quantized DrumGizmo hi-hat route has no measured pedal endpoints"
+    else:
+        return "unknown runtime renderer"
     return None
 
 

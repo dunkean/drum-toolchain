@@ -6,6 +6,7 @@ RigRuntime::RigRuntime(const RuntimeProfile& profile) : profile_(profile) {
   uint64_t initial=profile.defaultScene;
   for(size_t i=0;i<profile.variables.size() && i<4;++i) initial|=static_cast<uint64_t>(profile.variables[i].defaultValue)<<(16+i*8);
   state_.store(initial,std::memory_order_relaxed);
+  if(profile_.hihatQuantization) hihatOpenness_.store(profile_.hihatQuantization->inputClosed,std::memory_order_relaxed);
 }
 int RigRuntime::endpointSourceIndex(std::string_view endpoint, uint8_t channel) const noexcept {
   const auto count=std::min(profile_.sources.size(),maxSources);
@@ -46,6 +47,14 @@ bool RigRuntime::recall(uint16_t source, const MidiEvent& input, Active& active)
 uint8_t RigRuntime::stateVariable(uint64_t state, size_t index) const noexcept { return index<4 ? static_cast<uint8_t>(state>>(16+index*8)) : 0; }
 uint8_t RigRuntime::variable(size_t index) const noexcept { return stateVariable(state_.load(std::memory_order_acquire),index); }
 void RigRuntime::setStateVariable(size_t index,uint8_t value) noexcept { if(index>=4) return; const auto shift=16+index*8; const auto mask=uint64_t{0xff}<<shift; auto current=state_.load(std::memory_order_relaxed); do { const auto next=(current&~mask)|(static_cast<uint64_t>(value)<<shift); if(state_.compare_exchange_weak(current,next,std::memory_order_release,std::memory_order_relaxed)) return; } while(true); }
+uint8_t RigRuntime::normalizedHihatOpenness() const noexcept {
+  const auto& config=*profile_.hihatQuantization;
+  const int raw=hihatOpenness_.load(std::memory_order_acquire);
+  const int closed=config.inputClosed, opened=config.inputOpen;
+  const int numerator=opened>closed ? raw-closed : closed-raw;
+  const int denominator=opened>closed ? opened-closed : closed-opened;
+  return static_cast<uint8_t>(std::clamp((numerator*127)/denominator,0,127));
+}
 bool RigRuntime::selectScene(uint16_t scene) noexcept {
   if (scene>=profile_.scenes.size()) return false;
   auto current=state_.load(std::memory_order_relaxed);
@@ -89,6 +98,13 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
     controls_.fetch_add(1,std::memory_order_relaxed);
     return 0;
   }
+  if(profile_.rendererTarget==RuntimeRendererTarget::DrumGizmo && profile_.hihatQuantization &&
+     input.type==MidiType::ControlChange && static_cast<uint16_t>(source)==profile_.hihatQuantization->source &&
+     input.data1==profile_.hihatQuantization->controller) {
+    hihatOpenness_.store(input.data2,std::memory_order_release);
+    decoded_.fetch_add(1,std::memory_order_relaxed);
+    return 0;
+  }
   if (isNoteOff(input)) { Active active; if(!recall(static_cast<uint16_t>(source),input,active)) { ignore(); return 0; } output[0]={MidiType::NoteOff,active.channel,active.note,0,input.timestampUs}; rendered_.fetch_add(1,std::memory_order_relaxed); return 1; }
   const RuntimeDecoder* decoder=nullptr;
   for(const auto& d:profile_.decoders) {
@@ -124,7 +140,21 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
     output[count++]={MidiType::ControlChange,renderer->channel,renderer->controller,value,input.timestampUs};
   }
   else if(input.type==MidiType::PolyAftertouch) output[count++]={MidiType::PolyAftertouch,renderer->channel,renderer->note,value,input.timestampUs};
-  else { remember(static_cast<uint16_t>(source),input,*renderer); output[count++]={MidiType::NoteOn,renderer->channel,renderer->note,value,input.timestampUs}; }
+  else {
+    RuntimeRenderer rendered=*renderer;
+    if(profile_.rendererTarget==RuntimeRendererTarget::DrumGizmo && profile_.hihatQuantization &&
+       static_cast<uint16_t>(source)==profile_.hihatQuantization->source) {
+      for(const auto& zone:profile_.hihatQuantization->zones) {
+        if(zone.physical!=decoder->physical || rendered.note!=zone.baseNote) continue;
+        const auto openness=normalizedHihatOpenness(); uint8_t position=0;
+        while(position+1<zone.count && openness>zone.upperBoundaries[position]) ++position;
+        rendered.note=zone.notes[position];
+        break;
+      }
+    }
+    remember(static_cast<uint16_t>(source),input,rendered);
+    output[count++]={MidiType::NoteOn,rendered.channel,rendered.note,value,input.timestampUs};
+  }
   rendered_.fetch_add(count,std::memory_order_relaxed); return count;
 }
 size_t RigRuntime::processEndpoint(std::string_view endpoint,const MidiEvent& input,std::array<MidiEvent,maxOutputEvents>& output) noexcept { auto source=endpointSourceIndex(endpoint,input.channel); if(source<0 && (input.channel==14||input.channel==15)) for(size_t i=0;i<profile_.sources.size();++i) if(profile_.sources[i].endpoint==endpoint) { source=static_cast<int>(i); break; } if(source<0) { received_.fetch_add(1,std::memory_order_relaxed); ignore(); return 0; } return process(profile_.sources[static_cast<size_t>(source)].id,input,output); }

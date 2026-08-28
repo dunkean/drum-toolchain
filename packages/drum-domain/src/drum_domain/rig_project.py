@@ -328,6 +328,7 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                 expression_decoders[key] = decoder
     expression_keys: set[tuple[str, str, str]] = set()
     reviewed_ddrum4_hihat_quantizations = 0
+    reviewed_drumgizmo_hihat_quantizations = 0
     for index, route in enumerate(expression_routes):
         key = (route["source"], route["physical"], route["expression"])
         if key in expression_keys:
@@ -349,7 +350,40 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                     _fail(f"expression_routing[{index}].targets.{target_name}: unsupported target needs reason and event.type: unsupported")
                 continue
             if target_name == "drumgizmo":
-                _fail(f"expression_routing[{index}].targets.drumgizmo: only unsupported is valid in the note-only MVP")
+                if event_type != "quantized_note":
+                    _fail(f"expression_routing[{index}].targets.drumgizmo: only quantized_note is representable")
+                if status in {"measured", "user-confirmed"}:
+                    reviewed_drumgizmo_hihat_quantizations += 1
+                    closed, opened = event.get("input_closed"), event.get("input_open")
+                    articulations = event.get("articulations")
+                    if (not isinstance(closed, int) or not isinstance(opened, int) or
+                            not 0 <= closed <= 127 or not 0 <= opened <= 127 or closed == opened):
+                        _fail(f"expression_routing[{index}].targets.drumgizmo: reviewed quantization needs distinct measured input_closed/input_open")
+                    if not isinstance(articulations, list) or not articulations:
+                        _fail(f"expression_routing[{index}].targets.drumgizmo: reviewed quantization needs articulation zones")
+                    seen_articulations: set[str] = set()
+                    for articulation in articulations:
+                        physical = articulation.get("physical") if isinstance(articulation, Mapping) else None
+                        notes = articulation.get("notes") if isinstance(articulation, Mapping) else None
+                        boundaries = articulation.get("upper_boundaries") if isinstance(articulation, Mapping) else None
+                        if physical not in physical_events or physical in seen_articulations:
+                            _fail(f"expression_routing[{index}].targets.drumgizmo: invalid or duplicate hihat articulation")
+                        seen_articulations.add(physical)
+                        if (not isinstance(notes, list) or not 1 <= len(notes) <= 8 or
+                                not all(isinstance(note, int) and 0 <= note <= 127 for note in notes) or
+                                not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1 or
+                                not all(isinstance(boundary, int) and 0 <= boundary <= 127 for boundary in boundaries) or
+                                any(boundary >= 127 for boundary in boundaries) or
+                                any(right <= left for left, right in zip(boundaries, boundaries[1:]))):
+                            _fail(f"expression_routing[{index}].targets.drumgizmo: hihat zone notes/boundaries are invalid")
+                        for scene in scenes:
+                            variants = logical_route_variants(routes[scene][physical])
+                            if not any(document["renderers"]["drumgizmo"][variant.logical_target]["note"] == notes[0]
+                                       for variant in variants):
+                                _fail(f"expression_routing[{index}].targets.drumgizmo: {physical!r} has no matching renderer base note")
+                elif status != "planned":
+                    _fail(f"expression_routing[{index}].targets.drumgizmo: quantized_note is planned, measured, or user-confirmed only")
+                continue
             if target_name == "ddrum4":
                 if event_type != "quantized_note_p":
                     _fail(f"expression_routing[{index}].targets.ddrum4: only planned quantized_note_p is currently representable")
@@ -392,6 +426,8 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                         _fail(f"expression_routing[{index}].targets.sd3: renderer {variant.logical_target!r} must declare the same channel and cc")
     if reviewed_ddrum4_hihat_quantizations > 1:
         _fail("only one reviewed DDrum4 hi-hat quantization is supported by the Uno profile")
+    if reviewed_drumgizmo_hihat_quantizations > 1:
+        _fail("only one reviewed DrumGizmo hi-hat quantization is supported by the runtime profile")
 
     # A DrumGizmo midimap is one MIDI-note address per logical sound. The
     # all-zero M1 fixture is explicitly unresolved and therefore exempt until

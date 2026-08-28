@@ -52,6 +52,14 @@ Conditional predicates must not overlap.  The compiler places them before the
 fallback in `runtime-profile.yaml`, so the C++ Converter resolves Scene and VP
 before selecting the SD3, DDrum4, or DrumGizmo renderer note.
 
+## Stable inputs, profile-owned outputs
+
+`source_decoders` are the raw contracts of the DDrum4, DDTi and eDRUMin. Their
+channels, notes and CC numbers are stable across Scenes and palettes. A
+profile may therefore change only the selected logical sound and the renderer
+destination: Arduino -> DDrum4 note/Note-P, or PC -> SD3/DrumGizmo note. It
+must never rewrite a module's input note to express a kit or palette change.
+
 ## Filling placeholders
 
 Replace a placeholder only with the capture/bench reference that established

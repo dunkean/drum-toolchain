@@ -169,11 +169,16 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
     if(!decoderExists) result.decoders.push_back(std::move(decoder));
     const auto scene=sceneIndex(result,record["scene"].as<std::string>()); const auto physical=record["physical"].as<std::string>(); const auto logical=record["logical_target"].as<std::string>();
     RuntimeRoute route; route.scene=scene; route.physical=physical; route.logical=logical; const auto predicates=record["state_predicates"] ? record["state_predicates"] : record["predicates"]; if(predicates) { if(!predicates.IsMap()) invalid("state predicates must be a map"); for(const auto& predicate:predicates) { if(route.predicateCount>=route.predicates.size()) invalid("too many state predicates"); const auto name=predicate.first.as<std::string>(); auto it=std::find_if(result.variables.begin(),result.variables.end(),[&](const RuntimeControl& c){return c.name==name;}); if(it==result.variables.end()) invalid("unknown state predicate "+name); route.predicates[route.predicateCount++]={static_cast<uint8_t>(it-result.variables.begin()),midiValue(predicate.second)}; } std::sort(route.predicates.begin(),route.predicates.begin()+route.predicateCount,[](const RuntimePredicate& left,const RuntimePredicate& right){return left.variable<right.variable;}); }
-    bool routeExists=false; for(const auto& item:result.routes) { if(item.scene!=route.scene||item.physical!=route.physical||item.logical!=route.logical||item.predicateCount!=route.predicateCount) continue; bool same=true; for(uint8_t i=0;i<route.predicateCount;++i) if(item.predicates[i].variable!=route.predicates[i].variable||item.predicates[i].value!=route.predicates[i].value) {same=false;break;} if(same) routeExists=true; }
-    if(!routeExists) result.routes.push_back(std::move(route));
+    // DrumGizmo openness is state for the next note, not an independently
+    // routed logical sound. Keeping its CC decoder out of the route table
+    // also permits it to share `hh.bow` with the raw bow Note decoder.
+    if(!(target==RuntimeRendererTarget::DrumGizmo && (matcherName=="cc" || matcherName=="poly_aftertouch"))) {
+      bool routeExists=false; for(const auto& item:result.routes) { if(item.scene!=route.scene||item.physical!=route.physical||item.logical!=route.logical||item.predicateCount!=route.predicateCount) continue; bool same=true; for(uint8_t i=0;i<route.predicateCount;++i) if(item.predicates[i].variable!=route.predicates[i].variable||item.predicates[i].value!=route.predicates[i].value) {same=false;break;} if(same) routeExists=true; }
+      if(!routeExists) result.routes.push_back(std::move(route));
+    }
     const auto targetRenderer=record["renderers"][rendererName]; if(!targetRenderer["note"]&&!targetRenderer["cc"]) invalid(std::string("runtime ")+rendererName+" renderer needs note or cc"); RuntimeRenderer renderer; renderer.logical=logical; renderer.note=targetRenderer["note"]?midi(targetRenderer,"note"):0; renderer.channel=channel(targetRenderer,"channel",10); if(targetRenderer["position_cc"]) renderer.positionCc=midi(targetRenderer,"position_cc"); if(targetRenderer["cc"]) renderer.controller=midi(targetRenderer,"cc");
     if(matcherName=="cc" || matcherName=="poly_aftertouch") {
-      if(target!=RuntimeRendererTarget::Sd3 || matcherName!="cc") invalid("runtime expression is unsupported for the selected renderer");
+      if(matcherName!="cc") invalid("runtime expression is unsupported for the selected renderer");
       bool accepted=false;
       const auto expressions=emit["expressions"];
       if(expressions && root["expression_routing"]) for(const auto& expression:expressions) {
@@ -184,15 +189,42 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
              candidate["physical"].as<std::string>()!=physical || candidate["expression"].as<std::string>()!="openness") continue;
           if(!candidate["correlation"] || candidate["correlation"].as<std::string>()!="none")
             invalid("runtime openness expression route requires correlation: none");
-          const auto expressionTarget=candidate["targets"] ? candidate["targets"]["sd3"] : YAML::Node{};
+          const auto expressionTarget=candidate["targets"] ? candidate["targets"][rendererName] : YAML::Node{};
           const auto event=expressionTarget ? expressionTarget["event"] : YAML::Node{};
-          if(!expressionTarget||!event||!expressionTarget["status"]||!event["type"]||!event["transform"]||!event["channel"]||!event["cc"])
+          if(!expressionTarget||!event||!expressionTarget["status"]||!event["type"])
             invalid("runtime expression route is incomplete");
           const auto expressionStatus=expressionTarget["status"].as<std::string>();
-          if((expressionStatus!="measured"&&expressionStatus!="user-confirmed") || event["type"].as<std::string>()!="cc" || event["transform"].as<std::string>()!="passthrough")
-            invalid("runtime expression route is not a reviewed passthrough CC");
-          if(renderer.channel!=channel(event,"channel",10)||renderer.controller!=midi(event,"cc"))
-            invalid("runtime expression route differs from its SD3 renderer address");
+          if((expressionStatus!="measured"&&expressionStatus!="user-confirmed"))
+            invalid("runtime expression route is not reviewed");
+          if(target==RuntimeRendererTarget::Sd3) {
+            if(!event["transform"]||!event["channel"]||!event["cc"] || event["type"].as<std::string>()!="cc" || event["transform"].as<std::string>()!="passthrough")
+              invalid("runtime expression route is not a reviewed passthrough CC");
+            if(renderer.channel!=channel(event,"channel",10)||renderer.controller!=midi(event,"cc"))
+              invalid("runtime expression route differs from its SD3 renderer address");
+          } else {
+            if(event["type"].as<std::string>()!="quantized_note" || !event["input_closed"] || !event["input_open"] || !event["articulations"])
+              invalid("runtime DrumGizmo hi-hat route is incomplete");
+            RuntimeHihatQuantization quantization;
+            quantization.source=source; quantization.controller=decoder.first;
+            quantization.inputClosed=midi(event,"input_closed"); quantization.inputOpen=midi(event,"input_open");
+            if(quantization.inputClosed==quantization.inputOpen) invalid("runtime DrumGizmo hi-hat endpoints must differ");
+            for(const auto& item:event["articulations"]) {
+              if(!item["physical"]||!item["notes"]||!item["upper_boundaries"]) invalid("runtime DrumGizmo hi-hat zone is incomplete");
+              RuntimeHihatZone zone; zone.physical=item["physical"].as<std::string>();
+              const auto notes=item["notes"]; const auto boundaries=item["upper_boundaries"];
+              if(notes.size()<1||notes.size()>zone.notes.size()||boundaries.size()+1!=notes.size()) invalid("runtime DrumGizmo hi-hat zone count is invalid");
+              zone.count=static_cast<uint8_t>(notes.size());
+              for(size_t index=0;index<notes.size();++index) zone.notes[index]=midiValue(notes[index]);
+              zone.baseNote=zone.notes[0];
+              for(size_t index=0;index<boundaries.size();++index) { zone.upperBoundaries[index]=midiValue(boundaries[index]); if(zone.upperBoundaries[index]>=127 || (index&&zone.upperBoundaries[index]<=zone.upperBoundaries[index-1])) invalid("runtime DrumGizmo hi-hat boundaries are invalid"); }
+              for(const auto& existing:quantization.zones) if(existing.physical==zone.physical) invalid("runtime DrumGizmo hi-hat physical zone is duplicated");
+              quantization.zones.push_back(std::move(zone));
+            }
+            if(result.hihatQuantization) {
+              const auto& existing=*result.hihatQuantization;
+              if(existing.source!=quantization.source || existing.controller!=quantization.controller || existing.inputClosed!=quantization.inputClosed || existing.inputOpen!=quantization.inputOpen || existing.zones.size()!=quantization.zones.size()) invalid("runtime DrumGizmo hi-hat expression is inconsistent");
+            } else result.hihatQuantization=std::make_unique<RuntimeHihatQuantization>(std::move(quantization));
+          }
           accepted=true;
         }
       }
@@ -226,6 +258,20 @@ void validateRuntimeProfile(const RuntimeProfile& profile) {
   std::set<std::pair<std::string,uint8_t>> endpointChannels;
   for(const auto& source:profile.sources) { if(source.id.empty()||source.endpoint.empty()) invalid("runtime source id and endpoint may not be empty"); if(!endpointChannels.insert({source.endpoint,source.channel}).second) invalid("runtime sources sharing an endpoint must use distinct channels"); }
   for(const auto& decoder:profile.decoders) if(decoder.source>=profile.sources.size()||decoder.physical.empty()) invalid("runtime decoder is invalid");
+  if(profile.hihatQuantization) {
+    const auto& quantization=*profile.hihatQuantization;
+    if(quantization.source>=profile.sources.size() || quantization.zones.empty()) invalid("runtime DrumGizmo hi-hat quantization is invalid");
+    bool controllerDecoder=false;
+    for(const auto& decoder:profile.decoders) if(decoder.source==quantization.source && decoder.matcher==PhysicalMatcher::ControlChange && decoder.first==quantization.controller) controllerDecoder=true;
+    if(!controllerDecoder) invalid("runtime DrumGizmo hi-hat quantization has no CC decoder");
+    for(const auto& zone:quantization.zones) {
+      if(zone.physical.empty() || zone.count==0 || zone.count>zone.notes.size()) invalid("runtime DrumGizmo hi-hat zone is invalid");
+      bool noteDecoder=false;
+      for(const auto& decoder:profile.decoders) if(decoder.source==quantization.source && decoder.physical==zone.physical && (decoder.matcher==PhysicalMatcher::Note || decoder.matcher==PhysicalMatcher::NoteRange)) noteDecoder=true;
+      if(!noteDecoder) invalid("runtime DrumGizmo hi-hat zone has no note decoder");
+      for(uint8_t index=1;index<zone.count;++index) if(zone.upperBoundaries[index-1]>=127 || (index>1 && zone.upperBoundaries[index-1]<=zone.upperBoundaries[index-2])) invalid("runtime DrumGizmo hi-hat boundaries are invalid");
+    }
+  }
   for(const auto& route:profile.routes) if(route.scene>=profile.scenes.size()||route.physical.empty()||route.logical.empty()) invalid("runtime route is invalid");
   for(size_t i=0;i<profile.routes.size();++i) {
     const auto& route=profile.routes[i]; size_t fallbackCount=0;

@@ -277,6 +277,15 @@ La première cible validable est note-only : note-on/off et vélocité. Le CC4
 continu, la position de snare et les chokes ne sont pas émis vers DrumGizmo
 tant qu'un kit/backend n'a pas prouvé une convention MIDI stable pour eux.
 
+Quand le kit DrumGizmo contient des articulations de charleston discrètes
+validées, le profil peut toutefois déclarer `quantized_note` pour sa cible
+DrumGizmo : le Converter mémorise le CC4 brut de l'eDRUMin puis choisit la
+note bow/edge de la zone déclarée à la frappe suivante. Cette quantification
+est propre au renderer DrumGizmo (notes et seuils explicitement mesurés) ;
+elle ne réutilise ni les notes sources, ni les seuils `NOTE P` du DDrum4.
+Elle reste `planned` tant que les captures et le kit exporté ne l'ont pas
+validée.
+
 ## 7.4 Contrat commun recommandé
 
 Pour faciliter les répétitions, le live et le fallback, les deux renderers doivent idéalement respecter les mêmes quatre familles de stems :

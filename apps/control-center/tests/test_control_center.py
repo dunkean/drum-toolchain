@@ -272,6 +272,34 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(step.message["zone"], 5)
         self.assertFalse(result.renders_audio)
 
+    def test_simulator_previews_reviewed_cc4_drumgizmo_hihat_note_for_the_next_hit(self) -> None:
+        source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "reviewed-drumgizmo-hihat.yaml"
+            document = yaml.safe_load(source.read_text(encoding="utf-8"))
+            document["ddrum4_bank"]["manifest"] = str((source.parent.parent / "banks" / "metalcore-r15-installed.yaml").resolve())
+            document["expression_routing"][0]["targets"]["sd3"] = {
+                "status": "unsupported", "reason": "fixture isolates the DrumGizmo vertical", "event": {"type": "unsupported"},
+            }
+            target = document["expression_routing"][0]["targets"]["drumgizmo"]
+            target.update({
+                "status": "user-confirmed",
+                "event": {
+                    "type": "quantized_note", "input_closed": 127, "input_open": 0,
+                    "articulations": [
+                        {"physical": "hh.bow", "notes": [64, 100], "upper_boundaries": [63]},
+                        {"physical": "hh.edge", "notes": [65, 101], "upper_boundaries": [63]},
+                    ],
+                },
+            })
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            result = RigSimulator.from_path(project).simulate_expression("edrumin", "cc", 4, 0)
+
+        step = next(item for item in result.steps if item.stage == "DrumGizmo renderer")
+        self.assertEqual(step.message["next_hit_note"], 100)
+        self.assertEqual(step.message["zone"], 2)
+        self.assertFalse(result.renders_audio)
+
     def test_r15_simulator_models_the_declared_module_ownership(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         simulator = RigSimulator.from_path(project)

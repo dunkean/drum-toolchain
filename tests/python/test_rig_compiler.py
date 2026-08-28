@@ -139,6 +139,35 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(sd3_map["mappings"][-1]["event"], {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"})
             self.assertEqual(sd3_map["unsupported_source_expressions"], [])
 
+    def test_reviewed_drumgizmo_hihat_quantization_is_a_runtime_profile_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "brain", "type": "cc", "cc": 4},
+                "emit": {"physical": "kick.head", "expressions": ["openness"], "normalize": "cc7"},
+            })
+            document["renderers"]["sd3"]["kick.hit"]["cc"] = 4
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "kick.head", "expression": "openness", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "planned", "event": {"type": "quantized_note_p"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "user-confirmed", "event": {
+                        "type": "quantized_note", "input_closed": 127, "input_open": 0,
+                        "articulations": [{"physical": "kick.head", "notes": [36, 44], "upper_boundaries": [63]}],
+                    }},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            compile_project(project, root / "out")
+
+            runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "ready"})
+            report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["expressions"][0]["targets"]["drumgizmo"]["status"], "supported")
+
     def test_live_non_exact_note_route_never_creates_a_flashable_firmware_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

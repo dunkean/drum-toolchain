@@ -1,0 +1,48 @@
+format: rig-runtime-profile/v1
+status: ready
+target_status: {sd3: planned, drumgizmo: ready}
+state:
+  scenes: [metal]
+  defaults: {scene: metal}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+policies: {echo: measured_only}
+expression_routing:
+  - source: edrumin
+    physical: hihat.bow
+    expression: openness
+    correlation: none
+    targets:
+      ddrum4: {status: planned, event: {type: quantized_note_p}}
+      sd3: {status: unsupported, reason: fixture uses only the DrumGizmo vertical, event: {type: unsupported}}
+      drumgizmo:
+        status: user-confirmed
+        event:
+          type: quantized_note
+          input_closed: 127
+          input_open: 0
+          articulations:
+            - {physical: hihat.bow, notes: [64, 74], upper_boundaries: [63]}
+            - {physical: hihat.edge, notes: [65, 75], upper_boundaries: [63]}
+records:
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: note, note: 42}
+    emit: {physical: hihat.bow, expressions: [velocity]}
+    physical: hihat.bow
+    logical_target: hihat.bow
+    renderers: {sd3: {note: 42, channel: 10}, drumgizmo: {note: 64, channel: 10, instrument: hihat, articulation: bow}}
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: note, note: 46}
+    emit: {physical: hihat.edge, expressions: [velocity]}
+    physical: hihat.edge
+    logical_target: hihat.edge
+    renderers: {sd3: {note: 46, channel: 10}, drumgizmo: {note: 65, channel: 10, instrument: hihat, articulation: edge}}
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: cc, cc: 4}
+    emit: {physical: hihat.bow, expressions: [openness], normalize: cc7}
+    physical: hihat.bow
+    logical_target: hihat.bow
+    renderers: {sd3: {note: 46, channel: 10, cc: 4}, drumgizmo: {note: 64, channel: 10, instrument: hihat, articulation: bow}}

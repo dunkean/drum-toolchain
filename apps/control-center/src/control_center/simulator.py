@@ -270,11 +270,11 @@ class RigSimulator:
             TraceStep("logical sound", logical),
         ]
         expression = self._expression_route(source, physical, decoder.emit.get("expressions", ()))
-        if (message_type == "cc" and expression is not None and expression["expression"] == "openness"
-                and expression["targets"]["sd3"]["status"] in {"measured", "user-confirmed"}):
+        if message_type == "cc" and expression is not None and expression["expression"] == "openness":
             sd3_event = expression["targets"]["sd3"]["event"]
             sd3_status = expression["targets"]["sd3"]["status"]
             ddrum_target = expression["targets"]["ddrum4"]
+            drumgizmo_target = expression["targets"]["drumgizmo"]
             ddrum_event = ddrum_target["event"]
             ddrum_status = ddrum_target["status"]
             if ddrum_status in {"measured", "user-confirmed"} and ddrum_event.get("type") == "quantized_note_p":
@@ -290,13 +290,36 @@ class RigSimulator:
                     "planned: quantized NOTE P needs measured CC polarity and thresholds",
                     ddrum_target,
                 )
+            drumgizmo_event = drumgizmo_target["event"]
+            drumgizmo_status = drumgizmo_target["status"]
+            if (drumgizmo_status in {"measured", "user-confirmed"}
+                    and drumgizmo_event.get("type") == "quantized_note"):
+                preview = self._quantized_hihat_preview(physical, value, drumgizmo_event)
+                drumgizmo_step = TraceStep(
+                    "DrumGizmo renderer",
+                    f"{drumgizmo_status} CC4 state; next {physical} hit selects DrumGizmo note {preview['next_hit_note']}",
+                    preview,
+                )
+            else:
+                drumgizmo_step = TraceStep(
+                    "DrumGizmo renderer", "unsupported: declared DrumGizmo map is note-only", drumgizmo_target,
+                )
+            if (sd3_status in {"measured", "user-confirmed"}
+                    and sd3_event.get("type") == "cc" and sd3_event.get("transform") == "passthrough"):
+                sd3_step = TraceStep("SD3 renderer", f"{sd3_status} passthrough expression route", {
+                    "type": "control_change", "channel": sd3_event["channel"], "cc": sd3_event["cc"], "value": value,
+                })
+                sd3_target_step = TraceStep(
+                    "SD3 declared target", f"The selected SD3 kit would receive {physical} openness without a new hit",
+                )
+            else:
+                sd3_step = TraceStep("SD3 renderer", "unsupported: no reviewed SD3 openness route", expression["targets"]["sd3"])
+                sd3_target_step = TraceStep("SD3 declared target", "no SD3 expression is emitted")
             steps.extend((
                 ddrum_step,
-                TraceStep("SD3 renderer", f"{sd3_status} passthrough expression route", {
-                    "type": "control_change", "channel": sd3_event["channel"], "cc": sd3_event["cc"], "value": value,
-                }),
-                TraceStep("SD3 declared target", f"The selected SD3 kit would receive {physical} openness without a new hit"),
-                TraceStep("DrumGizmo renderer", "unsupported: declared DrumGizmo map is note-only", expression["targets"]["drumgizmo"]),
+                sd3_step,
+                sd3_target_step,
+                drumgizmo_step,
             ))
         else:
             steps.extend((
@@ -556,19 +579,19 @@ class RigSimulator:
 
     @staticmethod
     def _quantized_hihat_preview(physical: str, value: int, event: Mapping[str, Any]) -> dict[str, Any]:
-        """Preview the next Note-P hit for a reviewed CC4 calibration."""
+        """Preview the next discrete hi-hat hit for a reviewed CC4 calibration."""
         closed, opened = event.get("input_closed"), event.get("input_open")
         articulations = event.get("articulations")
         if not isinstance(closed, int) or not isinstance(opened, int) or closed == opened:
-            raise SimulationError("reviewed DDrum4 hi-hat event has no valid pedal endpoints")
+            raise SimulationError("reviewed hi-hat event has no valid pedal endpoints")
         if not isinstance(articulations, list):
-            raise SimulationError("reviewed DDrum4 hi-hat event has no articulation zones")
+            raise SimulationError("reviewed hi-hat event has no articulation zones")
         selected = next((item for item in articulations if isinstance(item, Mapping) and item.get("physical") == physical), None)
         if selected is None:
-            raise SimulationError(f"reviewed DDrum4 hi-hat event has no zones for {physical}")
+            raise SimulationError(f"reviewed hi-hat event has no zones for {physical}")
         notes, boundaries = selected.get("notes"), selected.get("upper_boundaries")
         if not isinstance(notes, list) or not notes or not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1:
-            raise SimulationError("reviewed DDrum4 hi-hat zones are invalid")
+            raise SimulationError("reviewed hi-hat zones are invalid")
         normalized = round((value - closed) * 127 / (opened - closed))
         normalized = min(127, max(0, normalized))
         zone = next((index for index, boundary in enumerate(boundaries) if normalized <= boundary), len(notes) - 1)

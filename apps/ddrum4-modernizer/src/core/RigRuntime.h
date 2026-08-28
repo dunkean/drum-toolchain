@@ -23,6 +23,17 @@ struct RuntimeDecoder {
   std::string physical; bool velocity{}; bool position{};
 };
 struct RuntimeRenderer { std::string logical; uint8_t note{}; uint8_t channel{10}; uint8_t positionCc{255}; uint8_t controller{255}; };
+// DrumGizmo has no common continuous-hi-hat MIDI contract.  When a capture
+// proves discrete notes for each openness position, keep that conversion in
+// the profile instead of mutating the stable eDRUMin source notes.
+struct RuntimeHihatZone {
+  std::string physical; uint8_t baseNote{}; std::array<uint8_t, 8> notes{};
+  std::array<uint8_t, 7> upperBoundaries{}; uint8_t count{};
+};
+struct RuntimeHihatQuantization {
+  uint16_t source{}; uint8_t controller{}; uint8_t inputClosed{}; uint8_t inputOpen{};
+  std::vector<RuntimeHihatZone> zones;
+};
 struct RuntimePredicate { uint8_t variable{}; uint8_t value{}; };
 struct RuntimeRoute { uint16_t scene{}; std::string physical; std::string logical; std::array<RuntimePredicate, 4> predicates{}; uint8_t predicateCount{}; };
 struct RuntimeControl { std::string name; uint8_t cc{}; uint8_t defaultValue{}; };
@@ -33,6 +44,7 @@ struct RuntimeProfile {
   std::vector<RuntimeSource> sources; std::vector<std::string> scenes;
   std::vector<RuntimeDecoder> decoders; std::vector<RuntimeRoute> routes;
   std::vector<RuntimeRenderer> renderers; std::vector<RuntimeControl> variables; std::vector<RuntimeNativeControl> nativeControls;
+  std::unique_ptr<RuntimeHihatQuantization> hihatQuantization;
   std::string sourceSha256; uint16_t defaultScene{}; bool echoMeasuredOnly{}; uint64_t dedupWindowUs{10000};
   // A PC renderer may publish only logical CH14/15 control to this explicit
   // endpoint. It is off unless the compiled source project is live and the
@@ -63,6 +75,7 @@ class RigRuntime {
   struct Active { uint8_t channel{}; uint8_t note{}; };
   struct ActiveQueue { std::array<Active, 16> entries{}; uint8_t head{}; uint8_t size{}; uint16_t discardedOffs{}; };
   const RuntimeProfile& profile_; std::atomic<uint64_t> state_{};
+  std::atomic<uint8_t> hihatOpenness_{};
   std::array<Seen, 32> seen_{};
   static constexpr size_t maxSources=8;
   using ActiveLedgers = std::array<std::array<std::array<ActiveQueue, 128>, 16>, maxSources>;
@@ -78,6 +91,7 @@ class RigRuntime {
   bool recall(uint16_t source, const MidiEvent& input, Active& active) noexcept;
   uint8_t stateVariable(uint64_t state, size_t index) const noexcept;
   void setStateVariable(size_t index, uint8_t value) noexcept;
+  uint8_t normalizedHihatOpenness() const noexcept;
   void ignore() noexcept { ignored_.fetch_add(1, std::memory_order_relaxed); }
 };
 }
