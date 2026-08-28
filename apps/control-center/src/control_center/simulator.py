@@ -237,11 +237,11 @@ class RigSimulator:
     def simulate_expression(self, source: str, message_type: str, data1: int, value: int = 64) -> SimulationResult:
         """Inspect a declared expression without inventing renderer support.
 
-        The compiler can currently lower only exact Note decoders to Arduino.
-        A measured ``expression-routing/v1`` route can nevertheless prove the
-        first PC vertical (openness CC passthrough to SD3). All other targets
-        remain explicit planned/unsupported trace steps rather than inferred
-        audio behavior.
+        A reviewed ``expression-routing/v1`` route can prove both available
+        verticals: openness CC passthrough to SD3 and retained CC4 state that
+        selects the next DDrum4 Note-P hit.  The latter never invents audio on
+        a bare CC message: it previews the note chosen for the next declared
+        bow/edge hit. Other targets remain explicit planned/unsupported steps.
         """
         if source not in self.project.sources:
             raise SimulationError(f"unknown source module {source!r}")
@@ -274,8 +274,24 @@ class RigSimulator:
                 and expression["targets"]["sd3"]["status"] in {"measured", "user-confirmed"}):
             sd3_event = expression["targets"]["sd3"]["event"]
             sd3_status = expression["targets"]["sd3"]["status"]
+            ddrum_target = expression["targets"]["ddrum4"]
+            ddrum_event = ddrum_target["event"]
+            ddrum_status = ddrum_target["status"]
+            if ddrum_status in {"measured", "user-confirmed"} and ddrum_event.get("type") == "quantized_note_p":
+                preview = self._quantized_hihat_preview(physical, value, ddrum_event)
+                ddrum_step = TraceStep(
+                    "Arduino DDrum4 renderer",
+                    f"{ddrum_status} CC4 state; next {physical} hit selects DDrum4 Note-P note {preview['next_hit_note']}",
+                    preview,
+                )
+            else:
+                ddrum_step = TraceStep(
+                    "Arduino DDrum4 renderer",
+                    "planned: quantized NOTE P needs measured CC polarity and thresholds",
+                    ddrum_target,
+                )
             steps.extend((
-                TraceStep("Arduino DDrum4 renderer", "planned: quantized NOTE P needs measured CC polarity and thresholds", expression["targets"]["ddrum4"]),
+                ddrum_step,
                 TraceStep("SD3 renderer", f"{sd3_status} passthrough expression route", {
                     "type": "control_change", "channel": sd3_event["channel"], "cc": sd3_event["cc"], "value": value,
                 }),
@@ -537,3 +553,28 @@ class RigSimulator:
             if all(self._state[name] == value for name, value in variant.predicates.items()):
                 return variant.logical_target
         raise SimulationError(f"no logical route for {physical!r} in scene {scene!r}")
+
+    @staticmethod
+    def _quantized_hihat_preview(physical: str, value: int, event: Mapping[str, Any]) -> dict[str, Any]:
+        """Preview the next Note-P hit for a reviewed CC4 calibration."""
+        closed, opened = event.get("input_closed"), event.get("input_open")
+        articulations = event.get("articulations")
+        if not isinstance(closed, int) or not isinstance(opened, int) or closed == opened:
+            raise SimulationError("reviewed DDrum4 hi-hat event has no valid pedal endpoints")
+        if not isinstance(articulations, list):
+            raise SimulationError("reviewed DDrum4 hi-hat event has no articulation zones")
+        selected = next((item for item in articulations if isinstance(item, Mapping) and item.get("physical") == physical), None)
+        if selected is None:
+            raise SimulationError(f"reviewed DDrum4 hi-hat event has no zones for {physical}")
+        notes, boundaries = selected.get("notes"), selected.get("upper_boundaries")
+        if not isinstance(notes, list) or not notes or not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1:
+            raise SimulationError("reviewed DDrum4 hi-hat zones are invalid")
+        normalized = round((value - closed) * 127 / (opened - closed))
+        normalized = min(127, max(0, normalized))
+        zone = next((index for index, boundary in enumerate(boundaries) if normalized <= boundary), len(notes) - 1)
+        return {
+            "type": "cc4_state", "input_cc": 4, "value": value,
+            "normalized_openness": normalized, "physical": physical,
+            "zone": zone + 1, "next_hit_note": notes[zone], "notes": notes,
+            "upper_boundaries": boundaries,
+        }
