@@ -19,10 +19,10 @@ change aucun réglage de module.
   routes compilées ; c'est le contrat de parité des trois renderers.
 - [x] `expression-routing/v1` rend explicite, par source/physique/expression,
   le comportement de chaque renderer. Première verticale réellement
-  implémentée : `openness` CC en passthrough vers SD3 (CC et canal explicites,
-  testés de l'artefact au runtime C++). DDrum4 reste `planned` et DrumGizmo
-  `unsupported` : ni le simulateur ni le compilateur ne les font passer pour
-  fonctionnels.
+  implémentées : `openness` CC en passthrough vers SD3 (CC et canal explicites)
+  et, lorsqu'un kit le mesure, CC4 → note de zone discrète vers DrumGizmo.
+  DDrum4 reste `planned` tant que polarité et seuils `NOTE P` ne sont pas
+  capturés ; aucune cible ne devient fonctionnelle par défaut.
 - [x] Un diagnostic offline « no-pad » parcourt chaque entrée Note, scène,
   état VP connu et contrôle natif déclaré, puis produit un rapport sans ouvrir
   de port MIDI (`drum-control-center diagnose <projet>`). Les CC et
@@ -56,7 +56,8 @@ change aucun réglage de module.
 
 - [x] Le Control Center crée une campagne de mesures versionnée depuis le
   projet sauvegardé : checklist des entrées, état DDrum4 et control-bus, hash
-  du projet source, et interdiction explicite de recopier les adresses `SIM_*`.
+  du projet source, traces isolées Note/CC/aftertouch, et interdiction
+  explicite de recopier les adresses `SIM_*`.
 - [x] Cette campagne relit les traces isolées et refuse une adresse absente ou
   ambiguë ; même une campagne complète ne crée pas automatiquement un profil
   live ni un firmware flashable.
@@ -88,9 +89,10 @@ change aucun réglage de module.
   Les valeurs de simulation ne peuvent jamais être flashées.
 - [ ] Ajouter la pression/choke corrélée avec le ledger borné
   `source/channel/note → destination` commun au runtime PC et au firmware.
-- [ ] Décider et prouver le comportement DrumGizmo pour les expressions ;
-  jusque-là, le sacrifice note-only reste explicite et le diagnostic global
-  d'expression reste négatif.
+- [x] Définir la verticale DrumGizmo `CC4 → note de zone` avec seuils et notes
+  explicites par profil ; elle reste `planned` sans captures du kit exporté.
+- [ ] Décider et prouver les autres expressions DrumGizmo (choke, pression,
+  position) ; elles restent explicitement non supportées.
 
 ## Règle de flash
 

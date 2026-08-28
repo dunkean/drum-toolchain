@@ -42,6 +42,7 @@ class ControlCenterTests(unittest.TestCase):
         self.assertTrue(document["do_not_copy_simulation_addresses"])
         self.assertEqual(document["target_deployment"], "live")
         self.assertEqual({item["id"] for item in document["inputs"]}, {"ddrum4", "ddti", "edrumin"})
+        self.assertIn("edrumin.hh.bow.cc", {item["id"] for item in document["trace_requests"]})
         self.assertIn("SIM_", document["inputs"][0]["declared_endpoint"])
         self.assertIn("Do not copy any `SIM_*`", guide_text)
 
@@ -59,12 +60,17 @@ class ControlCenterTests(unittest.TestCase):
             observed = next(row for row in initial["rows"] if row["id"] == f"{first.source}.{first.physical}")
             self.assertEqual(observed, {"id": f"{first.source}.{first.physical}",
                                         "trace": campaign.trace_relative_path(first.source, first.physical),
-                                        "status": "observed", "channel": 12, "note": 36})
+                                        "message_type": "note", "status": "observed", "channel": 12,
+                                        "data1": 36, "note": 36})
             self.assertEqual(initial["status"], "incomplete")
             for index, decoder in enumerate((item for item in campaign.project.source_decoders if item.message_type == "note"), start=1):
                 path = root / campaign.trace_relative_path(decoder.source, decoder.physical)
                 path.parent.mkdir(exist_ok=True)
                 MidiTrace("captured source", (TraceEvent(0, "note_on", 1, index, 100),)).write(path)
+            expression = next(item for item in campaign.project.source_decoders if item.message_type == "cc")
+            expression_path = root / campaign.trace_relative_path(expression.source, expression.physical, expression.message_type)
+            MidiTrace("captured source", (TraceEvent(0, "control_change", 1, 4, 0),
+                                            TraceEvent(1, "control_change", 1, 4, 127))).write(expression_path)
             complete = campaign.review_traces(root)
 
         self.assertEqual(complete["status"], "capture-complete-not-live")
@@ -82,6 +88,11 @@ class ControlCenterTests(unittest.TestCase):
                 path.parent.mkdir(exist_ok=True)
                 channel, note = per_source[decoder.source]
                 MidiTrace("captured source", (TraceEvent(0, "note_on", channel, note + offset, 100),)).write(path)
+            expression = next(item for item in campaign.project.source_decoders if item.message_type == "cc")
+            channel, _note = per_source[expression.source]
+            expression_path = root / campaign.trace_relative_path(expression.source, expression.physical, expression.message_type)
+            MidiTrace("captured source", (TraceEvent(0, "control_change", channel, 4, 0),
+                                            TraceEvent(1, "control_change", channel, 4, 127))).write(expression_path)
             destination = root / "metalcore-r15-live.yaml"
             result = campaign.promote_live(
                 root, destination,
@@ -94,6 +105,7 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(live["sources"]["ddrum4"]["endpoint"], "UMC MIDI In")
         self.assertEqual(live["sources"]["ddti"]["channel"], 2)
         self.assertEqual(live["control_bus"], {"endpoint": "UMC MIDI Out", "channel": 15, "status": "user-confirmed"})
+        self.assertEqual(next(item for item in live["source_decoders"] if item["match"]["type"] == "cc")["match"]["cc"], 4)
         self.assertTrue(all(not source["endpoint"].startswith("SIM_") for source in live["sources"].values()))
 
     def test_sd3_campaign_writes_resumable_sampler_session_and_reports_file_progress(self) -> None:

@@ -72,17 +72,21 @@ class LiveMeasurementCampaign:
                 ],
                 "status": "needs-live-measurement",
             })
-        trace_requests = [
-            {
-                "id": f"{decoder.source}.{decoder.physical}",
+        trace_requests = []
+        for decoder in self.project.source_decoders:
+            if decoder.message_type not in {"note", "cc", "poly_aftertouch"}:
+                continue
+            expression = decoder.message_type in {"cc", "poly_aftertouch"}
+            trace_requests.append({
+                "id": self.trace_identifier(decoder.source, decoder.physical, decoder.message_type),
                 "source": decoder.source,
                 "physical": decoder.physical,
-                "trace": self.trace_relative_path(decoder.source, decoder.physical),
-                "acceptance": "one isolated Note On address (channel + note); record expressions separately",
+                "message_type": decoder.message_type,
+                "trace": self.trace_relative_path(decoder.source, decoder.physical, decoder.message_type),
+                "acceptance": ("one isolated Note On address (channel + note)" if not expression else
+                               "one isolated controller/aftertouch address (channel + data1); retain every observed value"),
                 "status": "pending",
-            }
-            for decoder in self.project.source_decoders if decoder.message_type == "note"
-        ]
+            })
         state_actions = []
         for scene, actions in self.project.ddrum_state_actions.items():
             for index, action in enumerate(actions, start=1):
@@ -129,16 +133,25 @@ class LiveMeasurementCampaign:
         for item in document["inputs"]:  # type: ignore[index]
             lines.append(f"- **{item['id']}** — declared {item['declared_endpoint']} / C{item['declared_channel']}; "
                          f"measure: {', '.join(item['physical_events']) or 'no input declared'}.")
+        lines.extend(["", "## Isolated traces", ""])
+        for request in document["trace_requests"]:  # type: ignore[index]
+            lines.append(f"- `{request['trace']}` — **{request['id']}**: {request['acceptance']}.")
         lines.extend(["", "## Flash gate", ""])
         lines.extend(f"1. {step}" for step in document["flash_gate"])  # type: ignore[index]
         lines.append("")
         return "\n".join(lines)
 
     @staticmethod
-    def trace_relative_path(source: str, physical: str) -> str:
+    def trace_relative_path(source: str, physical: str, message_type: str = "note") -> str:
         """Stable relative location for one intentionally isolated hit trace."""
         safe_physical = physical.replace(".", "-")
-        return f"traces/{source}__{safe_physical}.jsonl"
+        suffix = "" if message_type == "note" else f"__{message_type.replace('_', '-')}"
+        return f"traces/{source}__{safe_physical}{suffix}.jsonl"
+
+    @staticmethod
+    def trace_identifier(source: str, physical: str, message_type: str = "note") -> str:
+        """Keep legacy Note IDs compact while making expression rows unique."""
+        return f"{source}.{physical}" if message_type == "note" else f"{source}.{physical}.{message_type}"
 
     @classmethod
     def read(cls, directory: Path) -> "LiveMeasurementCampaign":
@@ -161,37 +174,51 @@ class LiveMeasurementCampaign:
         """Review isolated capture files without changing the rig project.
 
         A route becomes *observed* only when an isolated trace contains one
-        unambiguous Note On address.  A review is evidence for a later human
-        edit of ``deployment: live``; it never writes that profile itself.
+        unambiguous MIDI address. Controller and aftertouch rows retain their
+        real observed value range but do not infer pedal thresholds, choke
+        semantics, or renderer support. A review is evidence for a later
+        human edit of ``deployment: live``; it never writes that profile.
         """
         rows = []
         for decoder in self.project.source_decoders:
-            if decoder.message_type != "note":
+            if decoder.message_type not in {"note", "cc", "poly_aftertouch"}:
                 continue
-            relative = self.trace_relative_path(decoder.source, decoder.physical)
+            identifier = self.trace_identifier(decoder.source, decoder.physical, decoder.message_type)
+            relative = self.trace_relative_path(decoder.source, decoder.physical, decoder.message_type)
             trace_path = directory / relative
             if not trace_path.is_file():
-                rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
-                             "status": "missing", "reason": "capture one isolated hit"})
+                rows.append({"id": identifier, "trace": relative, "message_type": decoder.message_type,
+                             "status": "missing", "reason": "capture one isolated MIDI event"})
                 continue
             try:
                 trace = MidiTrace.read(trace_path)
+                expected_type = {"note": "note_on", "cc": "control_change",
+                                 "poly_aftertouch": "poly_aftertouch"}[decoder.message_type]
                 addresses = {(event.channel, event.data1) for event in trace.events
-                             if event.message_type == "note_on" and event.channel is not None
-                             and event.data1 is not None and event.data2 is not None and event.data2 > 0}
+                             if event.message_type == expected_type and event.channel is not None and event.data1 is not None
+                             and event.data2 is not None and (expected_type != "note_on" or event.data2 > 0)}
+                values = sorted({event.data2 for event in trace.events
+                                 if event.message_type == expected_type and event.channel is not None
+                                 and event.data1 is not None and event.data2 is not None
+                                 and (expected_type != "note_on" or event.data2 > 0)})
             except (OSError, ValueError, json.JSONDecodeError) as error:
-                rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
+                rows.append({"id": identifier, "trace": relative, "message_type": decoder.message_type,
                              "status": "invalid", "reason": str(error)})
                 continue
             if len(addresses) != 1:
-                rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
+                rows.append({"id": identifier, "trace": relative, "message_type": decoder.message_type,
                              "status": "ambiguous" if addresses else "empty",
                              "addresses": [{"channel": channel, "note": note} for channel, note in sorted(addresses)],
-                             "reason": "one isolated Note On address is required"})
+                             "reason": "one isolated MIDI address is required"})
                 continue
             channel, note = next(iter(addresses))
-            rows.append({"id": f"{decoder.source}.{decoder.physical}", "trace": relative,
-                         "status": "observed", "channel": channel, "note": note})
+            row = {"id": identifier, "trace": relative, "message_type": decoder.message_type,
+                   "status": "observed", "channel": channel, "data1": note}
+            if decoder.message_type == "note":
+                row["note"] = note
+            else:
+                row["observed_values"] = values
+            rows.append(row)
         passed = bool(rows) and all(row["status"] == "observed" for row in rows)
         return {"kind": "drum-live-measurement-review/v1", "hardware_io": "disabled",
                 "source_project": str(self.project_path), "source_sha256": self.project_sha256,
@@ -240,15 +267,16 @@ class LiveMeasurementCampaign:
         source_channels: dict[str, int] = {}
         notes: dict[tuple[str, str], int] = {}
         for decoder in self.project.source_decoders:
-            if decoder.message_type != "note":
+            if decoder.message_type not in {"note", "cc", "poly_aftertouch"}:
                 continue
-            row = observed.get(f"{decoder.source}.{decoder.physical}")
-            if not isinstance(row, dict) or not isinstance(row.get("channel"), int) or not isinstance(row.get("note"), int):
+            row = observed.get(self.trace_identifier(decoder.source, decoder.physical, decoder.message_type))
+            if not isinstance(row, dict) or not isinstance(row.get("channel"), int) or not isinstance(row.get("data1"), int):
                 raise ValueError(f"missing observed address for {decoder.source}.{decoder.physical}")
             prior_channel = source_channels.setdefault(decoder.source, row["channel"])
             if prior_channel != row["channel"]:
                 raise ValueError(f"source {decoder.source} has inconsistent observed MIDI channels")
-            notes[(decoder.source, decoder.physical)] = row["note"]
+            if decoder.message_type == "note":
+                notes[(decoder.source, decoder.physical)] = row["data1"]
 
         document = yaml.safe_load(self.project_path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):  # defensive; the project was validated at campaign creation.
@@ -271,6 +299,12 @@ class LiveMeasurementCampaign:
             match, emit = decoder["match"], decoder["emit"]
             if match["type"] == "note":
                 match["note"] = notes[(match["source"], emit["physical"])]
+            elif match["type"] == "cc":
+                row = observed[self.trace_identifier(match["source"], emit["physical"], "cc")]
+                match["cc"] = row["data1"]
+            elif match["type"] == "poly_aftertouch" and "note" in match:
+                row = observed[self.trace_identifier(match["source"], emit["physical"], "poly_aftertouch")]
+                match["note"] = row["data1"]
         document["ddrum4_output_channel"] = source_channels["ddrum4"]
         if document.get("control_bus") is not None:
             document["control_bus"]["endpoint"] = control_endpoint
