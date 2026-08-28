@@ -59,9 +59,15 @@ change aucun réglage de module.
   du projet source, traces isolées Note/CC/aftertouch, et interdiction
   explicite de recopier les adresses `SIM_*`.
 - [x] Cette campagne relit les traces isolées et refuse une adresse absente ou
-  ambiguë ; même une campagne complète ne crée pas automatiquement un profil
-  live ni un firmware flashable.
-- [ ] Créer une copie `deployment: live` du projet, avec les noms de ports
+  ambiguë. Chaque décodeur MIDI brut possède sa propre trace : deux zones du
+  même pad ne peuvent donc jamais être fusionnées lors de la promotion. Une
+  `note_range` exige encore une calibration manuelle et bloque explicitement
+  toute promotion automatique plutôt que de conserver une plage simulée.
+- [x] Une campagne complète permet une action explicite « créer le profil live
+  mesuré » dans un **nouveau** YAML, avec les noms de ports fournis par
+  l’opérateur. Cela ne crée ni firmware flashable ni écriture MIDI : le
+  compilateur conserve le gate matériel suivant.
+- [ ] Réaliser cette promotion sur le rig physique avec les noms de ports
   réellement observés, les canaux de sortie des trois modules et le canal
   global DDrum4 identique à son entrée (`C12` aujourd'hui).
 - [ ] Relever les notes physiques de chaque pad et de chaque zone; ne pas
