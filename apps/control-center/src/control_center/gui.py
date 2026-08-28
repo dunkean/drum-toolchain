@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import yaml
 
@@ -23,7 +24,7 @@ from .live_measurement import LiveMeasurementCampaign, discover_midi_port_invent
 
 def launch() -> int:
     try:
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QTimer
         from PySide6.QtCore import QProcess
         from PySide6.QtGui import QTextCursor
         from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog,
@@ -93,6 +94,22 @@ def launch() -> int:
             holder = QWidget(); holder.setLayout(layout)
             tabs.addTab(holder, "Rig, DDrum4, and applications")
             self.setCentralWidget(tabs)
+            if os.environ.get("DRUM_CONTROL_CENTER_PROJECT", "").strip():
+                QTimer.singleShot(0, self.load_default_workspace)
+
+        def load_default_workspace(self) -> None:
+            """Load the launcher-selected project and its simulator without hardware I/O."""
+            project = os.environ.get("DRUM_CONTROL_CENTER_PROJECT", "").strip()
+            if not project:
+                return
+            self.editor_project.setText(project)
+            self.project.setText(project)
+            output = os.environ.get("DRUM_CONTROL_CENTER_OUTPUT", "").strip()
+            if output:
+                self.output.setText(output)
+            self.load_editor_project()
+            if self.editor_project.text().strip() == project:
+                self.load_virtual_kit_workspace()
 
         def _project_editor_workspace(self) -> QWidget:
             """Editable source-of-truth project document, always validated before save.

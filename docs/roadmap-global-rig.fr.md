@@ -37,6 +37,8 @@ change aucun réglage de module.
   simulateur permet de déclencher directement chaque Program/Palette. Un smoke
   test Qt hors écran charge les 29 articulations, les 30 commandes natives et
   applique une commande sans ouvrir de port MIDI.
+- [x] `Launch-Control-Center.cmd` précharge le projet r15, son dossier de build
+  et le kit virtuel : l'application ne s'ouvre plus sur un workspace vide.
 - [x] Un `control_bus` explicite sépare la sortie renderer PC (SD3/DrumGizmo)
   de la sortie logique PC → Master Merger/Arduino. Seul un profil `live` avec
   endpoint `user-confirmed` peut ouvrir ce second port sur CH14 ou CH15.

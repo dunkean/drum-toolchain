@@ -580,10 +580,8 @@ class ControlCenterTests(unittest.TestCase):
                     assert app is not None
                     window = max(app.topLevelWidgets(), key=lambda item: item.width() * item.height())
                     project = repository / "profiles/projects/metalcore-r15-chain-simulator.yaml"
-                    window.editor_project.setText(str(project))
-                    window.load_editor_project()
+                    assert Path(window.editor_project.text()) == project
                     assert window.visual_native_controls.rowCount() == 30
-                    window.load_virtual_kit_workspace()
                     assert window.studio_native_control.count() == 30
                     assert window.virtual_kit_table.rowCount() == 29
                     window.studio_native_control.setCurrentIndex(1)
@@ -607,6 +605,10 @@ class ControlCenterTests(unittest.TestCase):
         """)
         environment = dict(os.environ)
         environment["QT_QPA_PLATFORM"] = "offscreen"
+        environment["DRUM_CONTROL_CENTER_PROJECT"] = str(
+            repository / "profiles/projects/metalcore-r15-chain-simulator.yaml"
+        )
+        environment["DRUM_CONTROL_CENTER_OUTPUT"] = str(repository / "build/rig/metalcore-r15")
 
         completed = subprocess.run(
             [sys.executable, "-c", script], cwd=repository, env=environment,
@@ -614,6 +616,13 @@ class ControlCenterTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_control_center_shortcut_selects_the_r15_project_and_build_output(self) -> None:
+        repository = Path(__file__).resolve().parents[3]
+        shortcut = (repository / "Launch-Control-Center.cmd").read_text(encoding="utf-8")
+
+        self.assertIn("DRUM_CONTROL_CENTER_PROJECT=%~dp0profiles\\projects\\metalcore-r15-chain-simulator.yaml", shortcut)
+        self.assertIn("DRUM_CONTROL_CENTER_OUTPUT=%~dp0build\\rig\\metalcore-r15", shortcut)
 
     def test_installed_r15_keeps_unmeasured_hihat_targets_out_of_firmware(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
