@@ -914,9 +914,9 @@ def launch() -> int:
             body = QSplitter(Qt.Orientation.Horizontal)
             left = QWidget(); left_layout = QVBoxLayout()
             left_layout.addWidget(QLabel("Pads / articulations — use ▶ (or double-click a row) to route that articulation at the selected velocity. Raw input notes remain visible for all declared modules."))
-            self.virtual_kit_table = QTableWidget(0, 9)
+            self.virtual_kit_table = QTableWidget(0, 8)
             self.virtual_kit_table.setHorizontalHeaderLabels((
-                "Trigger", "Pad / articulation", "eDRUMin", "DDTi", "DDrum4", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
+                "Trigger", "Physical event", "Hardware pad / zone", "Raw MIDI", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
             ))
             self.virtual_kit_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.virtual_kit_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -1148,8 +1148,8 @@ def launch() -> int:
                 sd3_text = f"C{kit_row.sd3_channel} · note {kit_row.sd3_note}" if kit_row.sd3_note is not None else "MISSING"
                 gizmo_text = (f"{kit_row.drumgizmo_instrument} / {kit_row.drumgizmo_articulation} · note {kit_row.drumgizmo_note}"
                               if kit_row.drumgizmo_note is not None and kit_row.drumgizmo_instrument and kit_row.drumgizmo_articulation else "MISSING")
-                values = (kit_row.physical, kit_row.raw_notes.get("edrumin", "—"), kit_row.raw_notes.get("ddti", "—"),
-                          kit_row.raw_notes.get("ddrum4", "—"), logical, ddrum_text, sd3_text, gizmo_text)
+                values = (kit_row.physical, kit_row.hardware_summary, kit_row.raw_note_summary,
+                          logical, ddrum_text, sd3_text, gizmo_text)
                 trigger = QPushButton("▶")
                 trigger.setObjectName("padTrigger")
                 trigger.setToolTip(f"Simulate {kit_row.physical} at the selected velocity")
@@ -1157,9 +1157,8 @@ def launch() -> int:
                 self.virtual_kit_table.setCellWidget(row, 0, trigger)
                 for column, value in enumerate(values, start=1):
                     item = QTableWidgetItem(str(value))
-                    if column != 1:
-                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    if column == 6:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if column == 5:
                         item.setToolTip(kit_row.ddrum4_content_summary)
                     if value == "MISSING":
                         item.setBackground(Qt.GlobalColor.darkRed)

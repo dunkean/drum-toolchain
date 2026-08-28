@@ -19,6 +19,8 @@ class VirtualKitRow:
     """One physical articulation resolved in the current Scene/VP state."""
 
     physical: str
+    physical_instrument: str | None
+    physical_zone: str | None
     raw_notes: Mapping[str, int]
     logical_sound: str | None
     ddrum4_slot: int | None
@@ -44,6 +46,23 @@ class VirtualKitRow:
     @property
     def status(self) -> str:
         return "complete" if self.complete else "missing renderer destination"
+
+    @property
+    def hardware_summary(self) -> str:
+        """Compact source-module and physical pad/zone label for the UI."""
+        source = next(iter(self.raw_notes), None)
+        source_label = {"edrumin": "eDRUMin", "ddti": "DDTi", "ddrum4": "DDrum4"}.get(
+            source or "", source or "unknown source",
+        )
+        if self.physical_instrument and self.physical_zone:
+            return f"{source_label} · {self.physical_instrument} / {self.physical_zone}"
+        return f"{source_label} · binding missing"
+
+    @property
+    def raw_note_summary(self) -> str:
+        """Show exact decoder notes without reserving one column per module."""
+        labels = {"edrumin": "eDRUMin", "ddti": "DDTi", "ddrum4": "DDrum4"}
+        return " · ".join(f"{labels.get(source, source)} N{note}" for source, note in self.raw_notes.items()) or "MISSING"
 
     @property
     def ddrum4_content_summary(self) -> str:
@@ -87,6 +106,7 @@ def build_virtual_kit(simulator: RigSimulator) -> tuple[VirtualKitRow, ...]:
     if simulator.project.ddrum4_bank_facts is not None:
         matrix = load_kit_matrix(simulator.project.ddrum4_bank_facts.manifest)
     for physical in simulator.project.physical_events:
+        binding = simulator.project.physical_bindings.get(physical, {})
         raw_notes = {
             decoder.source: decoder.match["note"]
             for decoder in simulator.project.source_decoders
@@ -103,7 +123,9 @@ def build_virtual_kit(simulator: RigSimulator) -> tuple[VirtualKitRow, ...]:
         note_p = (ddrum["note"] - bank_sound.note_base + 1) if bank_sound and bank_sound.note_base is not None else None
         candidates = tuple(layer for layer in (bank_sound.layers if bank_sound else ()) if layer.position == note_p)
         rows.append(VirtualKitRow(
-            physical=physical, raw_notes=raw_notes, logical_sound=logical,
+            physical=physical,
+            physical_instrument=binding.get("instrument"), physical_zone=binding.get("zone"),
+            raw_notes=raw_notes, logical_sound=logical,
             ddrum4_slot=bank_sound.slot if bank_sound else None, ddrum4_sound_id=bank_sound.sound_id if bank_sound else None,
             ddrum4_note_p=note_p, ddrum4_variations=bank_sound.variations if bank_sound else (),
             ddrum4_layer_candidates=candidates,

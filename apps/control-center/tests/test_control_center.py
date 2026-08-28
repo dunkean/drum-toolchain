@@ -523,6 +523,9 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(len(rows), 29)
         self.assertTrue(all(row.complete for row in rows))
         self.assertEqual(rows[0].physical, "kick.hit")
+        self.assertEqual((rows[0].physical_instrument, rows[0].physical_zone), ("kick_main", "head"))
+        self.assertEqual(rows[0].hardware_summary, "DDrum4 · kick_main / head")
+        self.assertEqual(rows[0].raw_note_summary, "DDrum4 N0")
         self.assertEqual(rows[0].raw_notes, {"ddrum4": 0})
         self.assertEqual((rows[0].ddrum4_slot, rows[0].ddrum4_sound_id, rows[0].ddrum4_note_p),
                          (1, "KICK_981", 1))
