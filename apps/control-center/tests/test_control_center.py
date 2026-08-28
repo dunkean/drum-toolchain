@@ -16,8 +16,8 @@ from control_center.ddrum4_matrix import UNKNOWN, audition_command, load_kit_mat
 from control_center.live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
 from control_center.simulator import RigSimulator
 from control_center.virtual_kit import build_virtual_kit
-from control_center.campaign import (CaptureRow, Sd3CaptureCampaign,
-                                     METALCORE_ELECTRONIC_V1_ADDITIONS)
+from control_center.campaign import (CaptureRow, Sd3CaptureCampaign, capture_rows_from_megakit_plan,
+                                     STARTER_ROWS, METALCORE_ELECTRONIC_V1_ADDITIONS)
 from midi_lab.traces import MidiTrace, TraceEvent
 
 
@@ -203,6 +203,16 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(len(filenames), len(set(filenames)))
         self.assertEqual({row.note for row in METALCORE_ELECTRONIC_V1_ADDITIONS} & {26, 47, 68, 85, 93},
                          {26, 47, 68, 85, 93})
+
+    def test_r15_megakit_plan_generates_complete_nonduplicated_capture_rows(self) -> None:
+        plan = Path(__file__).resolve().parents[3] / "profiles" / "sd3" / "metalcore-r15-megakit-plan.yaml"
+        rows = capture_rows_from_megakit_plan(plan)
+
+        self.assertGreater(len(rows), len(STARTER_ROWS))
+        self.assertEqual(len({row.note for row in rows}), len(rows))
+        self.assertIn(CaptureRow("snare1_deftones", "hit", 37, (24, 40, 56, 72, 88, 104, 120), 3), rows)
+        self.assertNotIn("perc_cowbell", {row.instrument for row in rows})
+        self.assertNotIn("stack_metallic", {row.instrument for row in rows})
 
     def test_complete_chain_simulator_traces_ddrum4_return_and_both_software_renderers(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"

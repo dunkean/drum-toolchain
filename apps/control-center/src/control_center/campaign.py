@@ -10,6 +10,9 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+from typing import Mapping
+
+import yaml
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -199,6 +202,42 @@ class Sd3CaptureCampaign:
             quality_report_exists=(run_directory / "reports" / "quality.json").is_file(),
             drumgizmo_export_exists=(run_directory / "drumgizmo-kit").is_dir(),
         )
+
+
+def capture_rows_from_megakit_plan(path: Path) -> tuple[CaptureRow, ...]:
+    """Build the exact raw-capture grid from a reviewed SD3 MegaKit plan.
+
+    Rows marked ``capture: false`` deliberately share the audio of another
+    logical target.  They remain in the renderer map but must not consume
+    duplicate SD3 takes or DrumGizmo source files.
+    """
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ValueError(f"cannot read SD3 MegaKit plan: {path}") from error
+    if not isinstance(document, Mapping) or document.get("kind") != "sd3-megakit-plan":
+        raise ValueError("unsupported SD3 MegaKit plan")
+    velocity_sets = document.get("velocity_sets")
+    articulations = document.get("articulations")
+    if not isinstance(velocity_sets, Mapping) or not isinstance(articulations, list):
+        raise ValueError("SD3 MegaKit plan needs velocity_sets and articulations")
+    rows: list[CaptureRow] = []
+    notes: set[int] = set()
+    for item in articulations:
+        if not isinstance(item, Mapping) or item.get("capture") is not True:
+            continue
+        logical, note, velocity_name, repetitions = item.get("logical"), item.get("note"), item.get("velocities"), item.get("rr")
+        velocities = velocity_sets.get(velocity_name) if isinstance(velocity_name, str) else None
+        if (not isinstance(logical, str) or not isinstance(note, int) or not isinstance(repetitions, int)
+                or not isinstance(velocities, list) or not all(isinstance(value, int) for value in velocities)):
+            raise ValueError(f"invalid capture articulation in SD3 MegaKit plan: {logical!r}")
+        if note in notes:
+            raise ValueError(f"SD3 MegaKit plan captures duplicate MIDI note {note}")
+        notes.add(note)
+        rows.append(CaptureRow(logical.replace(".", "_"), "hit", note, tuple(velocities), repetitions))
+    if not rows:
+        raise ValueError("SD3 MegaKit plan has no capture rows")
+    return tuple(rows)
 
 
 STARTER_ROWS: tuple[CaptureRow, ...] = (
