@@ -390,6 +390,12 @@ class RigCompilerTests(unittest.TestCase):
             document["deployment"] = "live"
             document["control_bus"] = {"endpoint": "verified-control-bus", "channel": 15,
                                        "status": "user-confirmed"}
+            bank = root / "bank.yaml"
+            bank.write_text(yaml.safe_dump({"bank": {"id": "fixture-bank", "midi_channel": 10}, "sounds": [
+                {"note_base": 36, "note_p": 1}, {"note_base": 38, "note_p": 1}, {"note_base": 41, "note_p": 1},
+                {"note_base": 72, "note_p": 8},
+            ]}, sort_keys=False), encoding="utf-8")
+            document["ddrum4_bank"] = {"manifest": "bank.yaml", "bank_id": "fixture-bank"}
             document["sources"]["ddrum4"] = document["sources"].pop("brain")
             for decoder in document["source_decoders"]:
                 decoder["match"]["source"] = "ddrum4"

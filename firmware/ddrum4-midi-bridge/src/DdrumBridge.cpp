@@ -100,7 +100,9 @@ const NoteRoute* DdrumBridge::findHihatRoute(uint8_t inputChannel, uint8_t input
     HihatHitRoute route = readHihatHitRoute(index);
     if (route.inputChannel != inputChannel || route.inputNote != inputNote ||
         route.baseOutputNote != resolvedRoute.outputNote) continue;
-    hihatRouteBuffer_ = {route.inputChannel, route.inputNote, route.outputNotes[hihatZone(route)], 1, 127, 1, 127};
+    hihatRouteBuffer_ = {route.inputChannel, route.inputNote, route.outputNotes[hihatZone(route)],
+                          resolvedRoute.inputVelocityMin, resolvedRoute.inputVelocityMax,
+                          resolvedRoute.outputVelocityMin, resolvedRoute.outputVelocityMax};
     return &hihatRouteBuffer_;
   }
   return nullptr;

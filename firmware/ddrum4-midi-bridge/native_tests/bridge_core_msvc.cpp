@@ -266,7 +266,7 @@ void test_quantized_hihat_selects_note_p_from_last_cc4() {
       {3, 4, 40, 4, {31, 63, 95, 0, 0, 0, 0}, {40, 41, 42, 43, 0, 0, 0, 0}},
   };
   const StateRoute acousticScene[] = {
-      {3, 3, 0, 0xff, 0xff, 0xff, 0xff, 72, 1, 127, 1, 127},
+      {3, 3, 0, 0xff, 0xff, 0xff, 0xff, 72, 1, 127, 13, 24},
       {3, 4, 0, 0xff, 0xff, 0xff, 0xff, 40, 1, 127, 1, 127},
   };
   const BridgeConfig quantized = {
@@ -279,7 +279,7 @@ void test_quantized_hihat_selects_note_p_from_last_cc4() {
   MidiEvent output{};
   require(bridge.process({MidiEventType::ControlChange, 3, 4, 0}, &output, 1) == 0,
           "quantized CC4 must be state only");
-  require(bridge.process({MidiEventType::NoteOn, 3, 3, 111}, &output, 1) == 1 && output.data1 == 72,
+  require(bridge.process({MidiEventType::NoteOn, 3, 3, 64}, &output, 1) == 1 && output.data1 == 72 && output.data2 == 19,
           "closed bow did not select first Note-P slot");
   require(bridge.process({MidiEventType::ControlChange, 3, 4, 127}, &output, 1) == 0,
           "open quantized CC4 must be state only");

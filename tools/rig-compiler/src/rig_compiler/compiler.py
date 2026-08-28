@@ -244,6 +244,8 @@ def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str
         articulations = event.get("articulations")
         if not isinstance(articulations, list):
             continue
+        if bank_facts is None:
+            raise RigCompilerError("reviewed DDrum4 hi-hat quantization requires a linked ddrum4_bank before firmware can be flashable")
         for articulation in articulations:
             physical, notes = articulation.get("physical"), articulation.get("notes")
             if not isinstance(physical, str) or not isinstance(notes, list) or not notes:
