@@ -84,10 +84,10 @@ change aucun réglage de module.
 - [x] Générer le MegaKit SD3 déterministe à partir du preset Metalcore et des
   presets utilisateur validés par SHA-256 ; les notes, sources, scènes et VP
   sont publiées dans `docs/greg-hybrid-r15-megakit.md` et son PDF.
-- [x] Générer la campagne complète v2 de 736 prises sur 58 articulations, dont cinq ouvertures HH bow
+- [x] Générer la campagne complète v2 de 746 prises sur 59 articulations, dont cinq ouvertures HH bow
   et trois toms Electronic Edge dédiés
   et quatre edge pilotées par CC4, ainsi que l'export DrumGizmo reprenable.
-- [ ] Exécuter les 736 captures lorsque le port MIDI SD3 et le retour audio
+- [ ] Exécuter les 746 captures lorsque le port MIDI SD3 et le retour audio
   UMC seront visibles, puis valider les WAV et le kit DrumGizmo réel.
 - [ ] Autoriser explicitement le mode MIDI live du convertisseur seulement
   après ces mesures.

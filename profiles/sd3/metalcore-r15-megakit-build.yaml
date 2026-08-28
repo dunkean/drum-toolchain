@@ -20,6 +20,8 @@ base_aliases:
     tom2R: [57]
   5:
     tom4R: [58]
+  6:
+    tom5R: [59]
   13:
     splash3: [77]
   27:
@@ -215,7 +217,16 @@ clones:
       AmbMono-Near: null
       AmbMono-Far: null
       Chamber: null
-expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]
+  - source: Kit_SleepToken.sd3p
+    source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
+    source_instbox: 7
+    target_instbox: 41
+    purpose: Sleep Token fourth tom for the flexible snare/tom surface
+    aliases:
+      tom4R: [63]
+    micmap_overrides:
+      TomU4: Tom5
+expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]
 expected_mappings:
   47: {instbox: 26, pad: snare1, library: EZX2_ElectronicEdge, drum_id: ""}
   48: {instbox: 27, pad: snare2, library: EZX2_ElectronicEdge, drum_id: SD2_35}
@@ -224,3 +235,4 @@ expected_mappings:
   53: {instbox: 39, pad: tom2, library: EZX2_ElectronicEdge, drum_id: ""}
   54: {instbox: 29, pad: tom4, library: EZX2_ElectronicEdge, drum_id: TL06}
   55: {instbox: 40, pad: snareR, library: SL-DFH, drum_id: SD_ZEPPELIN4}
+  63: {instbox: 41, pad: tom4R, library: SL-DEATH, drum_id: TO03_04}

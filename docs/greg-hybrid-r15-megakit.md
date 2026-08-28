@@ -1,8 +1,8 @@
 # Greg Hybrid r15 — SD3 MegaKit
 
 - Preset: `Greg_Hybrid_r15_MegaKit_v2.sd3p`
-- Preset SHA-256: `83af031a6c855374ef730e91819fc9500931e2bf9877d2bc0e7c6cf1c9d36725`
-- Instruments SD3: **41**
+- Preset SHA-256: `ad1612b3f093335d188a6857b4efa5e1eeaf2d2551bf203c5505094a4cd7341a`
+- Instruments SD3: **42**
 Convention de nommage: MIDI 0 = C-1.
 
 Une ligne `variation partagée` ne duplique aucun WAV : elle réutilise exactement la note et le son indiqués par `shared_with`.
@@ -40,6 +40,7 @@ Une ligne `variation partagée` ne duplique aucun WAV : elle réutilise exacteme
 | `tom1.sleep` | 60 (C4) | SL-DEATH / TO03_01 / tom1R | 24, 48, 72, 96, 120 | 2 | sleep_token | capture dédiée |
 | `tom2.sleep` | 61 (C#4) | SL-DEATH / TO03_02 / tom2R | 24, 48, 72, 96, 120 | 2 | sleep_token | capture dédiée |
 | `tom3.sleep` | 62 (D4) | SL-DEATH / TO03_03 / tom3R | 24, 48, 72, 96, 120 | 2 | sleep_token | capture dédiée |
+| `tom4.sleep` | 63 (D#4) | SL-DEATH / TO03_04 / tom4R | 24, 48, 72, 96, 120 | 2 | metalcore (vp2_flex-6), sleep_token (vp2_flex-6) | capture dédiée |
 | `hh.bow` | 64 (E4) | EZX2_ModernMetal / HA02_01 / hatsTipTrig | 24, 48, 72, 96, 120 | 3 | deftones, dnb, electro, industrial, metalcore, sleep_token | captures positionnelles: bow_closed CC4=127 → DG 112; bow_quarter CC4=96 → DG 113; bow_half CC4=64 → DG 114; bow_three_quarter CC4=32 → DG 115; bow_open CC4=0 → DG 116 |
 | `hh.edge` | 65 (F4) | EZX2_ModernMetal / HA02_01 / hatsTrig | 24, 48, 72, 96, 120 | 3 | deftones, dnb, electro, industrial, metalcore, sleep_token | captures positionnelles: edge_closed CC4=127 → DG 117; edge_third CC4=85 → DG 118; edge_two_thirds CC4=42 → DG 119; edge_open CC4=0 → DG 120 |
 | `hh.pedal_close` | 66 (F#4) | EZX2_ModernMetal / HA02_01 / hatsPL | 40, 64, 88, 112 | 2 | deftones, dnb, electro, industrial, metalcore, sleep_token | capture dédiée |

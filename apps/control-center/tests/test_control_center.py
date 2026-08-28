@@ -214,6 +214,7 @@ class ControlCenterTests(unittest.TestCase):
         self.assertGreater(len(rows), len(STARTER_ROWS))
         self.assertEqual(len({row.raw_filenames() for row in rows}), len(rows))
         self.assertIn(CaptureRow("snare1", "deftones", 37, (24, 40, 56, 72, 88, 104, 120), 3), rows)
+        self.assertIn(CaptureRow("tom4", "sleep", 63, (24, 48, 72, 96, 120), 2), rows)
         bow = [row for row in rows if row.instrument == "hh" and row.articulation.startswith("bow_")]
         edge = [row for row in rows if row.instrument == "hh" and row.articulation.startswith("edge_")]
         self.assertEqual((len(bow), len(edge)), (5, 4))

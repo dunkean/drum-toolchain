@@ -30,7 +30,9 @@ class ProjectProfileFixtureTests(unittest.TestCase):
             self.assertEqual(planned[logical]["note"], renderer["note"])
         self.assertEqual(plan["status"], "generated-local-validation-required")
         self.assertEqual(project.logical_routes["sleep_token"]["snare1.head"], "snare1.sleep")
-        self.assertEqual(project.logical_routes["sleep_token"]["snare2.head"], "snare2.sleep")
+        sleep_flex = project.logical_routes["sleep_token"]["snare2.head"]
+        self.assertEqual(sleep_flex[0], {"logical_target": "tom4.sleep", "when": {"vp2_flex": 6}})
+        self.assertEqual(sleep_flex[1], {"logical_target": "snare2.sleep"})
 
 
 if __name__ == "__main__":

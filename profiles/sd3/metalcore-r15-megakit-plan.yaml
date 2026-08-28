@@ -65,6 +65,7 @@ articulations:
   - {logical: tom1.sleep, note: 60, source: death_darkness, selection: "TO03_01", capture: true, velocities: dense5, rr: 2}
   - {logical: tom2.sleep, note: 61, source: death_darkness, selection: "TO03_02", capture: true, velocities: dense5, rr: 2}
   - {logical: tom3.sleep, note: 62, source: death_darkness, selection: "TO03_03", capture: true, velocities: dense5, rr: 2}
+  - {logical: tom4.sleep, note: 63, source: death_darkness, selection: "TO03_04 for flexible snare/tom surface", capture: true, velocities: dense5, rr: 2}
   - logical: hh.bow
     note: 64
     source: modern_metal
@@ -125,7 +126,7 @@ positional_reserve:
   - {logical: snare1.sleep_edge, note: 44, source: progressive_foundry, status: not-routed-until-pad-measurement}
 scenes:
   metalcore: {base: modern_metal, palettes: [vp1_snare1, vp2_flex, vp3_percussion_family, vp4_percussion_variant]}
-  sleep_token: {base: progressive_foundry, overrides: [kick.sleep, snare1.sleep, snare2.sleep, tom1.sleep, tom2.sleep, tom3.sleep]}
+  sleep_token: {base: progressive_foundry, overrides: [kick.sleep, snare1.sleep, snare2.sleep, tom1.sleep, tom2.sleep, tom3.sleep, tom4.sleep]}
   deftones: {base: modern_metal, overrides: [snare1.deftones, snare2.deftones]}
   dnb: {base: electronic_edge, overrides: [kick.dnb, snare1.dnb, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, hh.electronic_closed, hh.electronic_open, stack.glitch, perc.click]}
   industrial: {base: electronic_edge, overrides: [kick.industrial, snare1.industrial, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, stack.metallic, perc.metallic]}
