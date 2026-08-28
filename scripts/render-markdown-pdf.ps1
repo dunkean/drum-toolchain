@@ -46,6 +46,29 @@ try {
     if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
         throw "PDF renderer failed with exit code $($process.ExitCode)."
     }
+    # Chromium may delegate the final flush to a child process and let the
+    # process returned by Start-Process exit first.  Do not return a PDF which
+    # is still changing underneath a following git add or file copy.
+    $previousHash = ''
+    $stablePasses = 0
+    for ($attempt = 0; $attempt -lt 100 -and $stablePasses -lt 5; $attempt++) {
+        try {
+            $pdfBytes = [IO.File]::ReadAllBytes($outputPath)
+            $tailStart = [Math]::Max(0, $pdfBytes.Length - 32)
+            $tail = [Text.Encoding]::ASCII.GetString($pdfBytes, $tailStart, $pdfBytes.Length - $tailStart)
+            $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
+            if ($pdfBytes.Length -gt 8 -and $tail.Contains('%%EOF') -and $hash -eq $previousHash) {
+                $stablePasses++
+            } else {
+                $stablePasses = 0
+            }
+            $previousHash = $hash
+        } catch {
+            $stablePasses = 0
+        }
+        if ($stablePasses -lt 5) { Start-Sleep -Milliseconds 100 }
+    }
+    if ($stablePasses -lt 5) { throw 'PDF renderer did not produce a stable, complete file.' }
 } finally {
     for ($attempt = 0; $attempt -lt 20 -and (Test-Path -LiteralPath $temporary); $attempt++) {
         try { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop } catch {
