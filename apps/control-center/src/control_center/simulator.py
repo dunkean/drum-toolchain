@@ -253,11 +253,18 @@ class RigSimulator:
         if decoder is None:
             raise SimulationError(f"{source} {message_type} {data1} has no declared physical-pad decoder")
         if message_type == "poly_aftertouch" and decoder.match.get("active_note"):
-            raise SimulationError(
-                "poly_aftertouch with active_note requires a live note ledger; "
-                "the offline simulator cannot assert source_channel_note correlation"
-            )
-        physical = decoder.physical
+            # ``data1`` is the raw key to correlate with a preceding hit. The
+            # simulator has no clock or mutable live ledger, but it can still
+            # prove the declared correlation only when that exact raw key is a
+            # primary Note decoder for the same physical articulation.
+            primary = self._note_decoder(source, data1)
+            if primary is None or primary.physical != decoder.physical:
+                raise SimulationError(
+                    "poly_aftertouch active_note must name a declared primary Note for the same physical event"
+                )
+            physical = primary.physical
+        else:
+            physical = decoder.physical
         logical = self._logical_target(physical)
         source_channel = self.project.sources[source].channel
         raw_type = "control_change" if message_type == "cc" else "poly_aftertouch"
@@ -270,7 +277,43 @@ class RigSimulator:
             TraceStep("logical sound", logical),
         ]
         expression = self._expression_route(source, physical, decoder.emit.get("expressions", ()))
-        if message_type == "cc" and expression is not None and expression["expression"] == "openness":
+        if message_type == "poly_aftertouch" and expression is not None and expression["expression"] == "pressure":
+            if expression.get("correlation") != "source_channel_note":
+                raise SimulationError("pressure route must correlate source_channel_note")
+            ddrum_target = expression["targets"]["ddrum4"]
+            sd3_target = expression["targets"]["sd3"]
+            drumgizmo_target = expression["targets"]["drumgizmo"]
+            ddrum_event = ddrum_target.get("event", {})
+            sd3_event = sd3_target.get("event", {})
+            ddrum = self.project.renderers["ddrum4"][logical]
+            sd3 = self.project.renderers["sd3"][logical]
+            if (ddrum_target.get("status") in {"measured", "user-confirmed"}
+                    and ddrum_event.get("type") == "poly_aftertouch"
+                    and ddrum_event.get("note_from") == "active_rendered_hit"):
+                ddrum_step = TraceStep("Arduino DDrum4 renderer", "declared pressure follows the active rendered hit", {
+                    "type": "poly_aftertouch", "channel": self.project.ddrum4_output_channel,
+                    "note": ddrum["note"], "value": value, "correlated_raw_note": data1,
+                })
+            else:
+                ddrum_step = TraceStep("Arduino DDrum4 renderer", "unsupported: no reviewed active-rendered-hit pressure route", ddrum_target)
+            if (sd3_target.get("status") in {"measured", "user-confirmed"}
+                    and sd3_event.get("type") == "poly_aftertouch"
+                    and sd3_event.get("note_from") == "active_rendered_hit"):
+                sd3_step = TraceStep("SD3 renderer", "declared pressure follows the active rendered hit", {
+                    "type": "poly_aftertouch", "channel": sd3.get("channel", 10),
+                    "note": sd3["note"], "value": value, "correlated_raw_note": data1,
+                })
+                sd3_target_step = TraceStep("SD3 declared target", f"The selected SD3 kit would receive {physical} pressure on its active hit")
+            else:
+                sd3_step = TraceStep("SD3 renderer", "unsupported: no reviewed active-rendered-hit pressure route", sd3_target)
+                sd3_target_step = TraceStep("SD3 declared target", "no SD3 pressure is emitted")
+            steps.extend((
+                ddrum_step,
+                sd3_step,
+                sd3_target_step,
+                TraceStep("DrumGizmo renderer", "unsupported: declared DrumGizmo pressure behavior", drumgizmo_target),
+            ))
+        elif message_type == "cc" and expression is not None and expression["expression"] == "openness":
             sd3_event = expression["targets"]["sd3"]["event"]
             sd3_status = expression["targets"]["sd3"]["status"]
             ddrum_target = expression["targets"]["ddrum4"]
@@ -451,19 +494,29 @@ class RigSimulator:
                             except SimulationError as error:
                                 cases.append(DiagnosticCase(identifier, False, str(error)))
                 elif decoder.message_type in {"cc", "poly_aftertouch"}:
-                    data1 = decoder.match["cc"] if decoder.message_type == "cc" else decoder.match.get("note", 0)
-                    identifier = self._diagnostic_id(decoder.message_type, decoder.source, data1, scene, values)
-                    candidate = RigSimulator(self.project)
-                    try:
-                        candidate.set_state(scene=scene, values=values)
-                        result = candidate.simulate_expression(decoder.source, decoder.message_type, data1, 64)
-                        declared_sd3 = next((step for step in result.steps if step.stage == "SD3 renderer"), None)
-                        if declared_sd3 is None or "unverified" in declared_sd3.detail:
-                            raise SimulationError("no declared shared expression route")
-                        cases.append(DiagnosticCase(identifier, True,
-                            f"{result.physical} expression reaches declared SD3 route; DDrum4 calibration remains planned"))
-                    except SimulationError as error:
-                        cases.append(DiagnosticCase(identifier, False, str(error)))
+                    if decoder.message_type == "cc":
+                        addresses = (decoder.match["cc"],)
+                    elif decoder.match.get("active_note"):
+                        addresses = tuple(item.match["note"] for item in self.project.source_decoders
+                                          if item.source == decoder.source and item.physical == decoder.physical
+                                          and item.message_type == "note")
+                    else:
+                        addresses = (decoder.match.get("note", 0),)
+                    if not addresses:
+                        addresses = (0,)
+                    for data1 in addresses:
+                        identifier = self._diagnostic_id(decoder.message_type, decoder.source, data1, scene, values)
+                        candidate = RigSimulator(self.project)
+                        try:
+                            candidate.set_state(scene=scene, values=values)
+                            result = candidate.simulate_expression(decoder.source, decoder.message_type, data1, 64)
+                            declared_sd3 = next((step for step in result.steps if step.stage == "SD3 renderer"), None)
+                            if declared_sd3 is None or "unverified" in declared_sd3.detail or "unsupported" in declared_sd3.detail:
+                                raise SimulationError("no declared reviewed SD3 expression route")
+                            cases.append(DiagnosticCase(identifier, True,
+                                f"{result.physical} expression reaches its declared active renderer route"))
+                        except SimulationError as error:
+                            cases.append(DiagnosticCase(identifier, False, str(error)))
         scene_control = self.project.logical_control_protocol["scene"]
         for index, scene in enumerate(self.project.scenes):
             for channel_index, channel in enumerate(scene_control["channels"]):
@@ -550,7 +603,8 @@ class RigSimulator:
                 continue
             if message_type == "cc" and decoder.match["cc"] == data1:
                 return decoder
-            if message_type == "poly_aftertouch" and not decoder.match.get("active_note") and ("note" not in decoder.match or decoder.match["note"] == data1):
+            if message_type == "poly_aftertouch" and (decoder.match.get("active_note")
+                                                        or ("note" not in decoder.match or decoder.match["note"] == data1)):
                 return decoder
         return None
 

@@ -265,6 +265,35 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(steps["Arduino DDrum4 renderer"].message["status"], "planned")
         self.assertFalse(result.renders_audio)
 
+    def test_simulator_previews_declared_pressure_on_the_correlated_active_hit(self) -> None:
+        source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "pressure.yaml"
+            document = yaml.safe_load(source.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "edrumin", "type": "poly_aftertouch", "active_note": True},
+                "emit": {"physical": "snare.head", "expressions": ["pressure"], "correlate": "source_channel_note"},
+            })
+            document["expression_routing"] = [{
+                "source": "edrumin", "physical": "snare.head", "expression": "pressure", "correlation": "source_channel_note",
+                "targets": {
+                    "ddrum4": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "no measured choke behavior", "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            simulator = RigSimulator.from_path(project)
+            result = simulator.simulate_expression("edrumin", "poly_aftertouch", 38, 91)
+            report = simulator.run_offline_diagnostic()
+
+        steps = {step.stage: step for step in result.steps}
+        self.assertEqual(steps["Arduino DDrum4 renderer"].message,
+                         {"type": "poly_aftertouch", "channel": 12, "note": 38, "value": 91, "correlated_raw_note": 38})
+        self.assertEqual(steps["SD3 renderer"].message,
+                         {"type": "poly_aftertouch", "channel": 10, "note": 38, "value": 91, "correlated_raw_note": 38})
+        self.assertTrue(report.passed, report.render_text())
+
     def test_simulator_previews_reviewed_cc4_note_p_for_the_next_hihat_hit(self) -> None:
         source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         with tempfile.TemporaryDirectory() as temporary:
