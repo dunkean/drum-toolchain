@@ -303,6 +303,30 @@ class RigCompilerTests(unittest.TestCase):
                 {"logical_target": "snare.alt", "when": {"vp1": 1}},
                 {"logical_target": "snare.head"},
             ]
+            document["physical_events"].append("hh.bow")
+            document["source_decoders"].extend([
+                {"match": {"source": "brain", "type": "note", "note": 42},
+                 "emit": {"physical": "hh.bow", "expressions": ["velocity"]}},
+                {"match": {"source": "brain", "type": "cc", "cc": 4},
+                 "emit": {"physical": "hh.bow", "expressions": ["openness"], "normalize": "cc7"}},
+            ])
+            document["logical_routes"]["metal"]["hh.bow"] = "hh.bow"
+            document["renderers"]["ddrum4"]["hh.bow"] = {"note": 72}
+            document["renderers"]["sd3"]["hh.bow"] = {"note": 64, "channel": 10, "cc": 4}
+            document["renderers"]["drumgizmo"]["hh.bow"] = {"note": 64, "instrument": "hihat", "articulation": "bow"}
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "hh.bow", "expression": "openness", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "user-confirmed", "event": {
+                        "type": "quantized_note_p", "note_from": "active_rendered_hit",
+                        "input_closed": 127, "input_open": 0,
+                        "articulations": [{"physical": "hh.bow", "notes": [72, 73, 74, 75, 76],
+                                           "upper_boundaries": [25, 50, 75, 100]}],
+                    }},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "note-only", "event": {"type": "unsupported"}},
+                },
+            }]
             for renderer, note in (("ddrum4", 41), ("sd3", 51), ("drumgizmo", 61)):
                 target = {"note": note}
                 if renderer == "drumgizmo":
@@ -334,6 +358,30 @@ class RigCompilerTests(unittest.TestCase):
                 {"logical_target": "snare.alt", "when": {"vp1": 1}},
                 {"logical_target": "snare.head"},
             ]
+            document["physical_events"].append("hh.bow")
+            document["source_decoders"].extend([
+                {"match": {"source": "brain", "type": "note", "note": 42},
+                 "emit": {"physical": "hh.bow", "expressions": ["velocity"]}},
+                {"match": {"source": "brain", "type": "cc", "cc": 4},
+                 "emit": {"physical": "hh.bow", "expressions": ["openness"], "normalize": "cc7"}},
+            ])
+            document["logical_routes"]["metal"]["hh.bow"] = "hh.bow"
+            document["renderers"]["ddrum4"]["hh.bow"] = {"note": 72}
+            document["renderers"]["sd3"]["hh.bow"] = {"note": 64, "channel": 10, "cc": 4}
+            document["renderers"]["drumgizmo"]["hh.bow"] = {"note": 64, "instrument": "hihat", "articulation": "bow"}
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "hh.bow", "expression": "openness", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "user-confirmed", "event": {
+                        "type": "quantized_note_p", "note_from": "active_rendered_hit",
+                        "input_closed": 127, "input_open": 0,
+                        "articulations": [{"physical": "hh.bow", "notes": [72, 73, 74, 75, 76],
+                                           "upper_boundaries": [25, 50, 75, 100]}],
+                    }},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "note-only", "event": {"type": "unsupported"}},
+                },
+            }]
             for renderer, note in (("ddrum4", 41), ("sd3", 51), ("drumgizmo", 61)):
                 target = {"note": note}
                 if renderer == "drumgizmo":
@@ -345,6 +393,7 @@ class RigCompilerTests(unittest.TestCase):
             document["sources"]["ddrum4"] = document["sources"].pop("brain")
             for decoder in document["source_decoders"]:
                 decoder["match"]["source"] = "ddrum4"
+            document["expression_routing"][0]["source"] = "ddrum4"
             document["native_control_map"]["brain_program"]["source"] = "ddrum4"
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             output = root / "out"
@@ -363,6 +412,8 @@ class RigCompilerTests(unittest.TestCase):
             self.assertIn("constexpr size_t NATIVE_CONTROL_COUNT = 1;", generated)
             self.assertIn("constexpr LogicalControlConfig LOGICAL_CONTROLS = {20, 255, 255, 255, 1};", generated)
             self.assertIn("constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};", generated)
+            self.assertIn("constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {10, 4, 127, 0, true};", generated)
+            self.assertIn("{10, 42, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}}", generated)
             runtime = yaml.safe_load((output / "runtime-profile.yaml").read_text(encoding="utf-8"))
             self.assertEqual(runtime["hardware_io"], "logical-control-only")
 

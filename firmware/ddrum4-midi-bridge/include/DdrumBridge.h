@@ -69,6 +69,28 @@ struct HihatDirectCc4Config {
   bool enabled = true;
 };
 
+// DDrum4 does not consume a continuous pedal controller for the resident
+// r15 sounds.  Instead the last observed CC4 value selects a Note-P position
+// when the bow or edge is struck.  Zone zero is closed and the last zone is
+// open, regardless of the electrical polarity of the pedal values.
+struct HihatQuantizedConfig {
+  uint8_t sourceChannel;
+  uint8_t inputCc;
+  uint8_t inputClosed;
+  uint8_t inputOpen;
+  bool enabled = false;
+};
+
+struct HihatHitRoute {
+  uint8_t inputChannel;
+  uint8_t inputNote;
+  uint8_t zoneCount;
+  // Upper normalized (0..127) boundary for every zone except the final one.
+  // Only the first zoneCount - 1 values are read and must be strictly rising.
+  uint8_t upperBoundaries[7];
+  uint8_t outputNotes[8];
+};
+
 enum class EchoGuardMode : uint8_t {
   Disabled,
   // Only for a physically declared second-DDrum renderer return path.
@@ -172,6 +194,9 @@ struct BridgeConfig {
   size_t nativeControlCount = 0;
   const DdrumStateAction* stateActions = nullptr;
   size_t stateActionCount = 0;
+  HihatQuantizedConfig hihatQuantized = {0, 0, 0, 0, false};
+  const HihatHitRoute* hihatHitRoutes = nullptr;
+  size_t hihatHitRouteCount = 0;
 };
 
 // Pure, allocation-free routing core. It has no Arduino dependency so tests can
@@ -218,9 +243,14 @@ class DdrumBridge {
   // One compact state record is decoded at a time; state tables can therefore
   // live in AVR program memory rather than consuming Uno SRAM.
   mutable NoteRoute stateRouteBuffer_{};
+  mutable NoteRoute hihatRouteBuffer_{};
+  uint8_t lastHihatCc_ = 0;
 
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   StateRoute readStateRoute(size_t index) const;
+  HihatHitRoute readHihatHitRoute(size_t index) const;
+  const NoteRoute* findHihatRoute(uint8_t inputChannel, uint8_t inputNote) const;
+  uint8_t hihatZone(const HihatHitRoute& route) const;
   NativeControlRoute readNativeControl(size_t index) const;
   DdrumStateAction readStateAction(size_t index) const;
   const NoteRoute* findLedgerRoute(uint8_t inputChannel, uint8_t inputNote, uint32_t nowMs);

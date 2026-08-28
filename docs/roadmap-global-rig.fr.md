@@ -78,10 +78,14 @@ change aucun réglage de module.
 - [ ] Autoriser explicitement le mode MIDI live du convertisseur seulement
   après ces mesures.
 
-## Prochain incrément de contrat — expressions communes
+## Incrément de contrat — expressions communes
 
-- [ ] Mesurer puis abaisser CC4 vers `NOTE P` DDrum4 (polarité, seuils,
-  articulations bow/edge) sans modifier le profil live avant capture réelle.
+- [x] Implémenter le moteur Uno borné `CC4 → Note P` : il conserve le CC4 brut
+  pour le PC et sélectionne, au coup, les cinq slots bow ou quatre slots edge
+  définis par le profil renderer.
+- [ ] Mesurer puis valider CC4 vers `NOTE P` DDrum4 (polarité, seuils,
+  articulations bow/edge) dans une **nouvelle** copie `deployment: live`.
+  Les valeurs de simulation ne peuvent jamais être flashées.
 - [ ] Ajouter la pression/choke corrélée avec le ledger borné
   `source/channel/note → destination` commun au runtime PC et au firmware.
 - [ ] Décider et prouver le comportement DrumGizmo pour les expressions ;

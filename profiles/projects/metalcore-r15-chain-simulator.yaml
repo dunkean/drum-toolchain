@@ -55,7 +55,9 @@ expression_routing:
     expression: openness
     correlation: none
     targets:
-      ddrum4: {status: planned, event: {type: quantized_note_p, note_from: active_rendered_hit}}
+      # Output mapping only: the eDRUMin raw notes remain 3/4.  CC4 must be
+      # measured (closed/open polarity + thresholds) before this is flashable.
+      ddrum4: {status: planned, event: {type: quantized_note_p, note_from: active_rendered_hit, articulations: [{physical: hh.bow, notes: [72, 73, 74, 75, 76]}, {physical: hh.edge, notes: [40, 41, 42, 43]}]}}
       sd3: {status: user-confirmed, event: {type: cc, channel: 10, cc: 4, transform: passthrough}}
       drumgizmo: {status: unsupported, reason: "DrumGizmo MVP is note-only", event: {type: unsupported}}
 physical_events: [kick.hit, tom1.hit, tom2.hit, tom3.hit, snare2.head, snare2.rimshot, snare2.cross, snare1.head, snare1.rimshot, snare1.cross, hh.bow, hh.edge, hh.pedal_close, hh.pedal_splash, ride.bow, ride.bell, crash1.bow, crash1.edge, crash2.bow, crash2.edge, crash3.edge, splash1.hit, splash2.hit, china1.edge, china1.bell, china2.edge, china2.bell, perc.hit, stack.hit]

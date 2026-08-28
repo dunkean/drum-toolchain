@@ -3,8 +3,8 @@
 #include "generated_mapping.h"
 #include "MidiDinAdapter.h"
 
-static_assert(!HIHAT_NOTE_P_SUPPORTED && !HIHAT_THREE_ZONE_SUPPORTED,
-              "unvalidated hi-hat Note-P/three-zone policies must stay disabled");
+// The generated mapping can enable CC4 -> Note-P only after the compiler has
+// accepted a reviewed live measurement.  The header is the flash gate.
 
 #ifndef ROUTER_USE_SD
 #define ROUTER_USE_SD 0
@@ -51,6 +51,8 @@ const BridgeConfig BRIDGE_CONFIG = {
   LOGICAL_CONTROLS,
   NATIVE_CONTROLS, NATIVE_CONTROL_COUNT,
   STATE_ACTIONS, STATE_ACTION_COUNT,
+  HIHAT_QUANTIZED,
+  HIHAT_HIT_ROUTES, HIHAT_HIT_ROUTE_COUNT,
 };
 DdrumBridge bridge(BRIDGE_CONFIG);
 // CC119 on channel 16 selects nested / PC-clean / bypass without a cable swap.

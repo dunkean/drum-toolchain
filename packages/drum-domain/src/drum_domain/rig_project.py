@@ -352,8 +352,29 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
             if target_name == "ddrum4":
                 if event_type != "quantized_note_p":
                     _fail(f"expression_routing[{index}].targets.ddrum4: only planned quantized_note_p is currently representable")
-                if status != "planned":
-                    _fail(f"expression_routing[{index}].targets.ddrum4: quantized_note_p remains planned until thresholds are measured")
+                if status in {"measured", "user-confirmed"}:
+                    closed, opened = event.get("input_closed"), event.get("input_open")
+                    articulations = event.get("articulations")
+                    if not isinstance(closed, int) or not isinstance(opened, int) or not 0 <= closed <= 127 or not 0 <= opened <= 127 or closed == opened:
+                        _fail(f"expression_routing[{index}].targets.ddrum4: reviewed quantization needs distinct measured input_closed/input_open")
+                    if not isinstance(articulations, list) or not articulations:
+                        _fail(f"expression_routing[{index}].targets.ddrum4: reviewed quantization needs articulation zones")
+                    seen_articulations: set[str] = set()
+                    for articulation in articulations:
+                        physical = articulation.get("physical") if isinstance(articulation, Mapping) else None
+                        notes = articulation.get("notes") if isinstance(articulation, Mapping) else None
+                        boundaries = articulation.get("upper_boundaries") if isinstance(articulation, Mapping) else None
+                        if physical not in physical_events or physical in seen_articulations:
+                            _fail(f"expression_routing[{index}].targets.ddrum4: invalid or duplicate hihat articulation")
+                        seen_articulations.add(physical)
+                        if (not isinstance(notes, list) or not 1 <= len(notes) <= 8 or
+                                not all(isinstance(note, int) and 0 <= note <= 127 for note in notes) or
+                                not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1 or
+                                not all(isinstance(boundary, int) and 0 <= boundary <= 127 for boundary in boundaries) or
+                                any(right <= left for left, right in zip(boundaries, boundaries[1:]))):
+                            _fail(f"expression_routing[{index}].targets.ddrum4: hihat zone notes/boundaries are invalid")
+                elif status != "planned":
+                    _fail(f"expression_routing[{index}].targets.ddrum4: quantized_note_p is planned, measured, or user-confirmed only")
                 continue
             if route["expression"] != "openness" or event_type != "cc" or event.get("transform") != "passthrough":
                 _fail(f"expression_routing[{index}].targets.sd3: the implemented vertical is openness -> passthrough CC")

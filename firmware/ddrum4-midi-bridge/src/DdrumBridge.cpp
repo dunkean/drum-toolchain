@@ -4,7 +4,8 @@
 #include <avr/pgmspace.h>
 #endif
 
-DdrumBridge::DdrumBridge(const BridgeConfig& config) : config_(config), logicalState_(config.initialState) {
+DdrumBridge::DdrumBridge(const BridgeConfig& config) : config_(config), logicalState_(config.initialState),
+    lastHihatCc_(config.hihatQuantized.inputClosed) {
   configValid_ = validConfig();
   if (!configValid_) ++invalidConfigurations_;
 }
@@ -67,6 +68,42 @@ NativeControlRoute DdrumBridge::readNativeControl(size_t index) const {
 #endif
 }
 
+HihatHitRoute DdrumBridge::readHihatHitRoute(size_t index) const {
+#if defined(ARDUINO_ARCH_AVR)
+  HihatHitRoute result{};
+  const uint8_t* source = reinterpret_cast<const uint8_t*>(config_.hihatHitRoutes) + index * sizeof(HihatHitRoute);
+  uint8_t* destination = reinterpret_cast<uint8_t*>(&result);
+  for (size_t byte = 0; byte < sizeof(HihatHitRoute); ++byte) destination[byte] = pgm_read_byte(source + byte);
+  return result;
+#else
+  return config_.hihatHitRoutes[index];
+#endif
+}
+
+uint8_t DdrumBridge::hihatZone(const HihatHitRoute& route) const {
+  const HihatQuantizedConfig& h = config_.hihatQuantized;
+  const int16_t span = static_cast<int16_t>(h.inputOpen) - static_cast<int16_t>(h.inputClosed);
+  int16_t normalized = span
+      ? ((static_cast<int16_t>(lastHihatCc_) - static_cast<int16_t>(h.inputClosed)) * 127 + span / 2) / span
+      : 0;
+  if (normalized < 0) normalized = 0;
+  if (normalized > 127) normalized = 127;
+  for (uint8_t zone = 0; zone + 1 < route.zoneCount; ++zone)
+    if (normalized <= route.upperBoundaries[zone]) return zone;
+  return route.zoneCount - 1;
+}
+
+const NoteRoute* DdrumBridge::findHihatRoute(uint8_t inputChannel, uint8_t inputNote) const {
+  if (!config_.hihatQuantized.enabled) return nullptr;
+  for (size_t index = 0; index < config_.hihatHitRouteCount; ++index) {
+    HihatHitRoute route = readHihatHitRoute(index);
+    if (route.inputChannel != inputChannel || route.inputNote != inputNote) continue;
+    hihatRouteBuffer_ = {route.inputChannel, route.inputNote, route.outputNotes[hihatZone(route)], 1, 127, 1, 127};
+    return &hihatRouteBuffer_;
+  }
+  return nullptr;
+}
+
 DdrumStateAction DdrumBridge::readStateAction(size_t index) const {
 #if defined(ARDUINO_ARCH_AVR)
   DdrumStateAction result{};
@@ -127,6 +164,7 @@ bool DdrumBridge::validConfig() const {
   if (config_.stateRouteCount && !config_.stateRoutes) return false;
   if (config_.nativeControlCount && !config_.nativeControls) return false;
   if (config_.stateActionCount && !config_.stateActions) return false;
+  if (config_.hihatQuantized.enabled && (!config_.hihatHitRouteCount || !config_.hihatHitRoutes)) return false;
   if (config_.echoGuard.mode != EchoGuardMode::Disabled &&
       config_.echoGuard.mode != EchoGuardMode::DualDdrum) return false;
   if (config_.echoGuard.mode == EchoGuardMode::DualDdrum &&
@@ -135,6 +173,22 @@ bool DdrumBridge::validConfig() const {
   if (h.enabled && (h.sourceChannel < 1 || h.sourceChannel > 16 || h.inputCc > 127 || h.outputCc > 127 ||
       h.inputClosed == h.inputOpen || h.inputClosed > 127 || h.inputOpen > 127 ||
       h.outputClosed > 127 || h.outputOpen > 127)) return false;
+  const HihatQuantizedConfig& q = config_.hihatQuantized;
+  if (q.enabled && (h.enabled || q.sourceChannel < 1 || q.sourceChannel > 16 || q.inputCc > 127 ||
+      q.inputClosed == q.inputOpen)) return false;
+  for (size_t i = 0; i < config_.hihatHitRouteCount; ++i) {
+    HihatHitRoute route = readHihatHitRoute(i);
+    if (!q.enabled || route.inputChannel != q.sourceChannel || route.inputNote > 127 ||
+        route.zoneCount < 1 || route.zoneCount > 8) return false;
+    for (uint8_t zone = 0; zone < route.zoneCount; ++zone) {
+      if (route.outputNotes[zone] > 127) return false;
+      if (zone >= 2 && route.upperBoundaries[zone - 1] <= route.upperBoundaries[zone - 2]) return false;
+    }
+    for (size_t otherIndex = i + 1; otherIndex < config_.hihatHitRouteCount; ++otherIndex) {
+      HihatHitRoute other = readHihatHitRoute(otherIndex);
+      if (route.inputChannel == other.inputChannel && route.inputNote == other.inputNote) return false;
+    }
+  }
   for (size_t i = 0; i < config_.relayProgramChannelCount; ++i)
     if (config_.relayProgramChannels[i] < 1 || config_.relayProgramChannels[i] > 16) return false;
   for (size_t i = 0; i < config_.noteRouteCount; ++i) {
@@ -374,8 +428,17 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
     return 1;
   }
 
-  // The direct CC4 engine is deliberately handled before note routing. CC4 is
-  // recognised by ddrum4; quantisation is an explicit future fallback only.
+  // A quantized profile retains CC4 state and chooses the DDrum4 Note-P slot
+  // on the following bow/edge hit. No controller is emitted to DDrum4.
+  const HihatQuantizedConfig& q = config_.hihatQuantized;
+  if (q.enabled && input.type == MidiEventType::ControlChange && input.channel == q.sourceChannel &&
+      input.data1 == q.inputCc) {
+    lastHihatCc_ = input.data2;
+    return 0;
+  }
+
+  // Legacy/direct controller profiles remain supported for modules that do
+  // understand CC4, but cannot be enabled together with Note-P quantization.
   const HihatDirectCc4Config& h = config_.hihat;
   if (h.enabled && input.type == MidiEventType::ControlChange && input.channel == h.sourceChannel &&
       input.data1 == h.inputCc) {
@@ -410,8 +473,13 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
 
   // Pressure/choke belongs to the latest actual primary hit for this source
   // note; it must not be re-routed through a changed Scene/VP state.
-  const NoteRoute* route = input.type == MidiEventType::PolyAftertouch
-      ? findLedgerRoute(input.channel, input.data1, nowMs) : findNoteRoute(input.channel, input.data1);
+  const NoteRoute* route = nullptr;
+  if (input.type == MidiEventType::PolyAftertouch) {
+    route = findLedgerRoute(input.channel, input.data1, nowMs);
+  } else {
+    route = findHihatRoute(input.channel, input.data1);
+    if (!route) route = findNoteRoute(input.channel, input.data1);
+  }
   if (!route) {
     ++ignoredMessages_;
     return 0;

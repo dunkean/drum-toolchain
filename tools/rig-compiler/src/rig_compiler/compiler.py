@@ -173,7 +173,7 @@ def _has_unresolved_values(value: Any) -> bool:
     return False
 
 
-def _firmware_lowering_reason(record: dict[str, Any]) -> str | None:
+def _firmware_lowering_reason(document: dict[str, Any], record: dict[str, Any]) -> str | None:
     """Return why a route cannot be represented by the current Uno generator.
 
     Keep this intentionally as narrow as ``project_mapping_header``: any
@@ -182,6 +182,13 @@ def _firmware_lowering_reason(record: dict[str, Any]) -> str | None:
     generated ``StateRoute``.
     """
     matcher = record["match"].get("type")
+    if matcher == "note":
+        return None
+    expression = _expression_route(document, record)
+    if (matcher == "cc" and expression is not None and expression.get("expression") == "openness"
+            and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
+            and expression["targets"]["ddrum4"].get("event", {}).get("type") == "quantized_note_p"):
+        return None
     if matcher != "note":
         return f"firmware-project mapping lowers exact Note decoders only (got {matcher!r})"
     return None
@@ -207,6 +214,34 @@ def _firmware_action_lowering_blockers(document: dict[str, Any]) -> list[dict[st
             elif action.get("type") != "program_change":
                 blockers.append({"id": identifier, "reason": "Uno mapping supports reviewed Program Change actions only"})
     return blockers
+
+
+def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Lower one reviewed openness CC route into the bounded Uno contract."""
+    for record in routes:
+        if record["match"].get("type") != "cc":
+            continue
+        expression = _expression_route(document, record)
+        if expression is None or expression.get("expression") != "openness":
+            continue
+        target = expression["targets"]["ddrum4"]
+        if target.get("status") not in {"measured", "user-confirmed"}:
+            continue
+        event = target.get("event", {})
+        if event.get("type") != "quantized_note_p":
+            continue
+        articulations = event.get("articulations")
+        if not isinstance(articulations, list):
+            continue
+        return {
+            "source": record["source"]["id"],
+            "source_channel": record["source"]["channel"],
+            "input_cc": record["match"]["cc"],
+            "input_closed": event.get("input_closed"),
+            "input_open": event.get("input_open"),
+            "articulations": articulations,
+        }
+    return None
 
 
 def _expression_route(document: dict[str, Any], record: dict[str, Any]) -> dict[str, Any] | None:
@@ -251,7 +286,7 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
     hidden by a renderer fallback or make a firmware plan look flashable.
     """
     expressions = [record for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"}]
-    non_exact = [record for record in routes if _firmware_lowering_reason(record) is not None]
+    non_exact = [record for record in routes if _firmware_lowering_reason(document, record) is not None]
     rows: list[dict[str, Any]] = []
     for record in expressions:
         kind = record["match"]["type"]
@@ -262,7 +297,10 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
             declared_name = "ddrum4" if name == "arduino_ddrum4" else name
             target = dict(declared["targets"][declared_name])
             if name == "arduino_ddrum4":
-                return {"status": "unsupported", "reason": _firmware_lowering_reason(record), "declared": target}
+                reason = _firmware_lowering_reason(document, record)
+                return ({"status": "unsupported", "reason": reason, "declared": target}
+                        if reason is not None else {"status": "supported", "event": target["event"],
+                                                     "declared_status": target["status"]})
             runtime_reason = _runtime_expression_reason(document, record, name)
             if runtime_reason is not None:
                 return {"status": "unsupported", "reason": runtime_reason, "declared": target}
@@ -281,7 +319,7 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
     firmware_rows = [{
         "id": record["id"], "source": record["source"]["id"], "physical": record["physical"],
         "raw_match": record["match"], "status": "unsupported",
-        "reason": _firmware_lowering_reason(record),
+        "reason": _firmware_lowering_reason(document, record),
     } for record in non_exact]
     return {**provenance, "format": "expression-capability-report/v1",
             "status": "ready" if not firmware_rows else "planned", "hardware_io": "disabled",
@@ -395,6 +433,9 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "lowering_blockers": firmware_lowering_blockers,
         "hardware_flash": "ready" if live_ready else "disabled",
     }
+    hihat_quantization = _firmware_hihat_quantization(document, routes)
+    if hihat_quantization is not None:
+        firmware["hihat_quantization"] = hihat_quantization
     def note_map(target: str, renderer: str) -> dict[str, Any]:
         mappings = []
         unsupported_source_expressions = []
@@ -464,6 +505,16 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
             "status": "manual-application-required",
             "note": "Apply the stable channel/note contract in the eDRUMin editor; no device-write API is assumed.",
         },
+        "ddrum4_hihat_quantization": [
+            {
+                "source": route["source"], "physical": route["physical"],
+                "status": route["targets"]["ddrum4"]["status"],
+                "event": route["targets"]["ddrum4"]["event"],
+                "rule": "CC4 stays raw for the PC; Arduino selects these output Note-P notes only after reviewed pedal endpoints and thresholds.",
+            }
+            for route in document.get("expression_routing", [])
+            if route.get("expression") == "openness"
+        ],
     }
     ddti_roles: dict[str, dict[str, int]] = {}
     for decoder in document["source_decoders"]:
@@ -554,7 +605,7 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
                     ddrum_target["layer_candidates"] = candidates
                 break
         matcher = route["match"].get("type")
-        firmware_reason = _firmware_lowering_reason(route)
+        firmware_reason = _firmware_lowering_reason(document, route)
         runtime_reason = _runtime_expression_reason(document, route, "sd3")
         drumgizmo_reason = _runtime_expression_reason(document, route, "drumgizmo")
         if firmware_reason is not None:

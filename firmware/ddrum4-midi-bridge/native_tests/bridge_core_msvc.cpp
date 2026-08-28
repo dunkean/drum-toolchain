@@ -258,6 +258,33 @@ void test_guard_is_not_generic_and_overflow_keeps_primary_hit() {
           "disabled dual guard suppressed ordinary MIDI traffic");
 }
 
+void test_quantized_hihat_selects_note_p_from_last_cc4() {
+  const HihatHitRoute hihatRoutes[] = {
+      // Bow closed / loose / quarter / half / open: r15 HHAT_981 positions 1..5.
+      {3, 3, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}},
+      // Edge closed / quarter / half / open: r15 CYMB_981 positions 1..4.
+      {3, 4, 4, {31, 63, 95, 0, 0, 0, 0}, {40, 41, 42, 43, 0, 0, 0, 0}},
+  };
+  const BridgeConfig quantized = {
+      12, programChannels, 3, {0, 0, 0, 0, 0, 0, 0, false, false},
+      routes, 4, false, nullptr, {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0},
+      nullptr, 0, {0, 1, 2, 3, 1}, nullptr, 0, nullptr, 0,
+      {3, 4, 0, 127, true}, hihatRoutes, 2,
+  };
+  DdrumBridge bridge(quantized);
+  MidiEvent output{};
+  require(bridge.process({MidiEventType::ControlChange, 3, 4, 0}, &output, 1) == 0,
+          "quantized CC4 must be state only");
+  require(bridge.process({MidiEventType::NoteOn, 3, 3, 111}, &output, 1) == 1 && output.data1 == 72,
+          "closed bow did not select first Note-P slot");
+  require(bridge.process({MidiEventType::ControlChange, 3, 4, 127}, &output, 1) == 0,
+          "open quantized CC4 must be state only");
+  require(bridge.process({MidiEventType::NoteOn, 3, 3, 112}, &output, 1) == 1 && output.data1 == 76,
+          "open bow did not select final Note-P slot");
+  require(bridge.process({MidiEventType::NoteOn, 3, 4, 113}, &output, 1) == 1 && output.data1 == 43,
+          "open edge did not select its final Note-P slot");
+}
+
 }  // namespace
 
 uint32_t millis() { return 0; }
@@ -282,6 +309,7 @@ int main() {
     test_ledger_expires_stale_aftertouch();
     test_malformed_configs_are_inert();
     test_guard_is_not_generic_and_overflow_keeps_primary_hit();
+    test_quantized_hihat_selects_note_p_from_last_cc4();
     std::cout << "firmware bridge and MIDI DIN tests passed\n";
     return 0;
   } catch (const std::exception& error) {

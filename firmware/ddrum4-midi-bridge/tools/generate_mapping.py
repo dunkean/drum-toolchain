@@ -39,7 +39,36 @@ def project_mapping_header(document, output_channel):
     state_actions_document = document.get("ddrum_state_actions", {})
     if (not isinstance(state, dict) or not isinstance(controls, dict) or not isinstance(records, list)
             or not isinstance(native_control_map, dict) or not isinstance(state_actions_document, dict)):
-        raise ValueError("firmware project mapping needs state, logical_control_protocol, native_control_map, and records")
+            raise ValueError("firmware project mapping needs state, logical_control_protocol, native_control_map, and records")
+    hihat_document = document.get("hihat_quantization")
+    hihat_routes = []
+    hihat_source_channel = hihat_cc = hihat_closed = hihat_open = None
+    if hihat_document is not None:
+        if not isinstance(hihat_document, dict):
+            raise ValueError("hihat_quantization must be an object")
+        hihat_source_channel = integer(hihat_document.get("source_channel"), "hihat source channel", 1, 16)
+        hihat_cc = integer(hihat_document.get("input_cc"), "hihat input CC", 0, 127)
+        hihat_closed = integer(hihat_document.get("input_closed"), "hihat closed value", 0, 127)
+        hihat_open = integer(hihat_document.get("input_open"), "hihat open value", 0, 127)
+        if hihat_closed == hihat_open:
+            raise ValueError("hihat closed and open values must differ")
+        articulations = hihat_document.get("articulations")
+        if not isinstance(articulations, list) or not articulations:
+            raise ValueError("hihat quantization needs articulations")
+        for item in articulations:
+            if not isinstance(item, dict):
+                raise ValueError("hihat articulation must be an object")
+            physical = item.get("physical", "hihat")
+            notes = item.get("notes")
+            boundaries = item.get("upper_boundaries")
+            if (not isinstance(notes, list) or not 1 <= len(notes) <= 8 or
+                    not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1):
+                raise ValueError(f"hihat articulation {physical!r} has invalid zone count")
+            notes = [integer(value, f"hihat {physical} note", 0, 127) for value in notes]
+            boundaries = [integer(value, f"hihat {physical} boundary", 0, 127) for value in boundaries]
+            if any(right <= left for left, right in zip(boundaries, boundaries[1:])):
+                raise ValueError(f"hihat articulation {physical!r} boundaries must rise")
+            hihat_routes.append((physical, notes, boundaries))
     scenes = state.get("scenes")
     variables = state.get("variables")
     defaults = state.get("defaults")
@@ -66,6 +95,9 @@ def project_mapping_header(document, output_channel):
         source, match, renderers = record.get("source"), record.get("match"), record.get("renderers")
         if not isinstance(source, dict) or not isinstance(match, dict) or not isinstance(renderers, dict):
             raise ValueError(f"record {index} is incomplete")
+        if (hihat_document is not None and match.get("type") == "cc" and
+                source.get("channel") == hihat_source_channel and match.get("cc") == hihat_cc):
+            continue
         if match.get("type") != "note":
             raise ValueError(f"record {index}: firmware generation supports only exact note decoders")
         channel = integer(source.get("channel"), f"record {index} source channel", 1, 16)
@@ -180,9 +212,41 @@ def project_mapping_header(document, output_channel):
         "constexpr LogicalControlConfig LOGICAL_CONTROLS = {" + ", ".join(str(value) for value in (*control_values, len(scenes))) + "};",
         "constexpr LogicalState INITIAL_LOGICAL_STATE = {" + ", ".join(str(value) for value in (scenes.index(defaults["scene"]), *initial_values)) + "};",
         "",
-        "// No CC4 policy is emitted until a measured project explicitly models one.",
         "constexpr HihatDirectCc4Config HIHAT_CC4 = {0, 0, 0, 0, 0, 0, 0, false, false};",
-        "constexpr bool HIHAT_NOTE_P_SUPPORTED = false;",
+    ])
+    if hihat_document is None:
+        lines.extend([
+            "constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {0, 0, 0, 0, false};",
+            "constexpr const HihatHitRoute* HIHAT_HIT_ROUTES = nullptr;",
+            "constexpr size_t HIHAT_HIT_ROUTE_COUNT = 0;",
+            "constexpr bool HIHAT_NOTE_P_SUPPORTED = false;",
+        ])
+    else:
+        lines.extend([
+            f"constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {{{hihat_source_channel}, {hihat_cc}, {hihat_closed}, {hihat_open}, true}};",
+            "const HihatHitRoute HIHAT_HIT_ROUTES[] PROGMEM = {",
+        ])
+        for physical, notes, boundaries in hihat_routes:
+            padded_notes = notes + [0] * (8 - len(notes))
+            padded_boundaries = boundaries + [0] * (7 - len(boundaries))
+            lines.append("  {" + f"{hihat_source_channel}, " + "0, " +
+                         f"{len(notes)}, {{" + ", ".join(str(value) for value in padded_boundaries) + "}, {" +
+                         ", ".join(str(value) for value in padded_notes) + f"}}}}, // {physical} input note is resolved below")
+        # The physical role is resolved from the source decoder, not guessed from a pad socket.
+        decoder_notes = {record["physical"]: record["match"]["note"] for record in records
+                         if isinstance(record, dict) and record.get("match", {}).get("type") == "note" and
+                         record.get("source", {}).get("channel") == hihat_source_channel}
+        start = len(lines) - len(hihat_routes)
+        for offset, (physical, _notes, _boundaries) in enumerate(hihat_routes):
+            if physical not in decoder_notes:
+                raise ValueError(f"hihat articulation {physical!r} has no exact Note source decoder")
+            lines[start + offset] = lines[start + offset].replace("0, " + str(len(_notes)) + ",", str(decoder_notes[physical]) + ", " + str(len(_notes)) + ",", 1)
+        lines.extend([
+            "};",
+            "constexpr size_t HIHAT_HIT_ROUTE_COUNT = sizeof(HIHAT_HIT_ROUTES) / sizeof(HIHAT_HIT_ROUTES[0]);",
+            "constexpr bool HIHAT_NOTE_P_SUPPORTED = true;",
+        ])
+    lines.extend([
         "constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;",
         "",
     ])
@@ -301,6 +365,9 @@ def main() -> int:
             f"  {integer(hihat['output_closed'], 'output_closed', 0, 127)}, {integer(hihat['output_open'], 'output_open', 0, 127)},",
             f"  {'true' if hihat.get('invert', False) else 'false'}",
             "};",
+            "constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {0, 0, 0, 0, false};",
+            "constexpr const HihatHitRoute* HIHAT_HIT_ROUTES = nullptr;",
+            "constexpr size_t HIHAT_HIT_ROUTE_COUNT = 0;",
             "// Deliberately unsupported until hardware captures validate them.",
             "constexpr bool HIHAT_NOTE_P_SUPPORTED = false;",
             "constexpr bool HIHAT_THREE_ZONE_SUPPORTED = false;",
