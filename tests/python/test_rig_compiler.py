@@ -58,7 +58,7 @@ class RigCompilerTests(unittest.TestCase):
             validated = validate_project(project)
             self.assertEqual(validated.source_sha256, __import__("hashlib").sha256(project.read_bytes()).hexdigest())
             result = compile_project(project, output)
-            self.assertEqual(len(result.artifacts), 12)
+            self.assertEqual(len(result.artifacts), 13)
             report = json.loads((output / "project-report.json").read_text(encoding="utf-8"))
             self.assertEqual(report["format"], "rig-project-report/v1")
             self.assertEqual(report["source_sha256"], validated.source_sha256)

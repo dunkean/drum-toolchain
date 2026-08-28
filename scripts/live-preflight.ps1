@@ -24,6 +24,11 @@ foreach ($name in @('converter', 'sd3')) {
 foreach ($port in @($session.required_ports)) {
     if ([string]::IsNullOrWhiteSpace([string]$port)) { $problems.Add('required_ports contains an empty name') }
 }
+$requiredInputs = @($session.required_inputs)
+$requiredOutputs = @($session.required_outputs)
+foreach ($port in @($requiredInputs + $requiredOutputs)) {
+    if ([string]::IsNullOrWhiteSpace([string]$port)) { $problems.Add('required_inputs/required_outputs contains an empty name') }
+}
 $duplicatePorts = @($session.required_ports | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
 if ($duplicatePorts.Count) {
     $problems.Add("required_ports must contain unique endpoint names; duplicates: $($duplicatePorts -join ', ')")
@@ -50,12 +55,38 @@ if ([string]::IsNullOrWhiteSpace([string]$session.asio_buffer_confirmation)) {
     $problems.Add('asio_buffer_confirmation must state the buffer verified manually in the driver')
 }
 
+# Listing names is deliberately read-only.  The preflight never opens an input
+# and never sends MIDI; it only catches a renamed/missing USB or loopMIDI port
+# before a live launch is attempted.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$venvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
+$python = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { (Get-Command python -ErrorAction Stop).Source }
+$midiInventory = $null
+try {
+    $inventoryJson = & $python -c "import json, mido; print(json.dumps({'inputs': list(mido.get_input_names()), 'outputs': list(mido.get_output_names())}))"
+    if ($LASTEXITCODE -ne 0) { throw 'Python MIDI backend returned a non-zero exit code.' }
+    $midiInventory = $inventoryJson | ConvertFrom-Json
+    $allPorts = @($midiInventory.inputs) + @($midiInventory.outputs)
+    foreach ($port in @($session.required_ports)) {
+        if ($allPorts -notcontains $port) { $problems.Add("required MIDI port is not visible: $port") }
+    }
+    foreach ($port in $requiredInputs) {
+        if (@($midiInventory.inputs) -notcontains $port) { $problems.Add("required MIDI input is not visible: $port") }
+    }
+    foreach ($port in $requiredOutputs) {
+        if (@($midiInventory.outputs) -notcontains $port) { $problems.Add("required MIDI output is not visible: $port") }
+    }
+} catch {
+    $problems.Add("Could not list MIDI ports read-only: $($_.Exception.Message)")
+}
+
 $report = [ordered]@{
     kind = 'live-preflight-report'; schema_version = 1; timestamp_utc = [DateTime]::UtcNow.ToString('o')
     config = $configPath.Path; required_ports = @($session.required_ports)
+    required_inputs = $requiredInputs; required_outputs = $requiredOutputs; midi_inventory = $midiInventory
     runtime_profile = $session.runtime_profile
     status = if ($problems.Count) { 'blocked' } else { 'ready' }; problems = @($problems)
-    note = 'Ports and ASIO buffer are declared/user-confirmed: this script intentionally does not open MIDI or change driver settings.'
+    note = 'MIDI ports were listed read-only; this script intentionally does not open MIDI, send MIDI, or change driver settings.'
 }
 $report | ConvertTo-Json -Depth 6
 if ($RequireAll -and $problems.Count) { exit 2 }

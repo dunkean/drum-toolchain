@@ -356,6 +356,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "ddrum4-bank-plan": "planned", "virtual-kit-map": "planned" if unresolved or firmware_unlowerable or runtime_expressions_unlowered else "ready",
         "expression-capability-report": expression_report["status"],
         "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
+        "source-note-contract": "simulation-only" if deployment == "simulation" else "ready",
     }
     report = {**provenance, "format": "rig-project-report/v1", "project": document.get("project", "unnamed-rig"),
               "artifacts": [{"name": key, "status": value} for key, value in report_status.items()],
@@ -432,6 +433,37 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         }
     markdown = _megakit_markdown(document, digest, routes)
     virtual_kit = _virtual_kit_map(provenance, document, routes, report_status["virtual-kit-map"], bank_facts)
+    source_note_contract = {
+        **provenance,
+        "format": "rig-source-note-contract/v1",
+        "project": document.get("project", "unnamed-rig"),
+        "deployment": deployment,
+        "status": report_status["source-note-contract"],
+        "hardware_io": "disabled",
+        "rule": "Modules emit stable raw addresses; Scene/VP changes only renderer output maps.",
+        "sources": {
+            identifier: {
+                "channel": source["channel"],
+                "endpoint": source["endpoint"],
+                "primary": source["primary"],
+                "decoders": [
+                    {"match": decoder["match"], "physical": decoder["emit"]["physical"],
+                     **({"expressions": decoder["emit"]["expressions"]} if "expressions" in decoder["emit"] else {})}
+                    for decoder in document["source_decoders"] if decoder["match"]["source"] == identifier
+                ],
+            }
+            for identifier, source in document["sources"].items()
+        },
+        "ddti_staging": {
+            "status": "blocked-without-captured-dump-and-input-layout",
+            "required": ["complete DDTi dump", "explicit Input/Tip/Ring layout", "reviewed staged diff"],
+            "note": "The contract is usable by the DDTi editor, but never guesses electrical input assignments.",
+        },
+        "edrumin": {
+            "status": "manual-application-required",
+            "note": "Apply the stable channel/note contract in the eDRUMin editor; no device-write API is assumed.",
+        },
+    }
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
         "ddrum4-routing-contract.json": contract, "firmware-project-mapping.json": firmware,
@@ -439,6 +471,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "drumgizmo-midimap.json": note_map("drumgizmo", "drumgizmo"), "sd3-megakit-map.md": markdown,
         "ddrum4-bank-plan.yaml": bank, "virtual-kit-map.json": virtual_kit,
         "expression-capability-report.json": expression_report,
+        "source-note-contract.yaml": source_note_contract,
         # This is intentionally a declarative request, never a sysex/dump artifact.
         "ddti-preset.yaml": {**provenance, "format": "ddti-preset/v1", "status": report_status["ddti-preset"],
                                    "reason": "base dump hash recorded; manual staging remains planned" if document.get("ddti_base_dump") else "--base-dump is required; no transferable dump was generated",

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "project": "profiles/projects/metalcore-r15-topology-simulator.yaml",
+  "renderer": "sd3",
+  "converter": { "path": "C:/replace/ddrum4_converter.exe", "arguments": [] },
+  "sd3": { "path": "C:/replace/Superior Drummer 3.exe", "arguments": [] },
+  "runtime_profile": {
+    "path": "C:/replace/build/rig/metalcore-r15-topology-simulator/runtime-profile.yaml",
+    "project_hash": "REPLACE_WITH_COMPILED_PROJECT_HASH"
+  },
+  "required_inputs": ["eDrumIn BLACK", "TriggerIO", "UMC404HD 192k MIDI In"],
+  "required_outputs": ["ddrum_converted"],
+  "required_ports": ["eDrumIn BLACK", "TriggerIO", "UMC404HD 192k MIDI In", "ddrum_converted"],
+  "asio_buffer_confirmation": "REPLACE: confirmed manually in the UMC/ASIO driver",
+  "low_latency_power_scheme_guid": "REPLACE_WITH_EXPLICIT_POWERCFG_GUID",
+  "note": "Copy this only after the live measurement campaign. The referenced project is simulation-only and cannot be flashed."
+}
