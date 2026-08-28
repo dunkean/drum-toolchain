@@ -77,6 +77,7 @@ $windowsLiveProfile = Get-Content -LiteralPath (Join-Path $repoRoot 'profiles\li
 if ([string]$windowsLiveProfile.renderer -ne 'sd3') {
     throw 'profiles/live-session.example.json must declare renderer: sd3 for the Windows live scripts.'
 }
+& (Join-Path $PSScriptRoot 'test-live-scripts.ps1')
 
 Write-Output 'Running shared Python domain, sampler, bank-builder, and MIDI-lab tests.'
 Push-Location $repoRoot

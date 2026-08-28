@@ -44,7 +44,19 @@ if ([string]::IsNullOrWhiteSpace([string]$session.runtime_profile.project_hash))
     $problems.Add('runtime_profile.project_hash must be a SHA-256 value')
 } elseif (Test-Path -LiteralPath $session.runtime_profile.path) {
     $runtimeText = Get-Content -LiteralPath $session.runtime_profile.path -Raw
+    $runtimeFormat = [regex]::Match($runtimeText, '(?m)^format:\s*["'']?([^\r\n"'']+)["'']?\s*$')
+    $runtimeStatus = [regex]::Match($runtimeText, '(?m)^status:\s*["'']?([^\r\n"'']+)["'']?\s*$')
+    $runtimeDeployment = [regex]::Match($runtimeText, '(?m)^deployment:\s*["'']?([^\r\n"'']+)["'']?\s*$')
     $runtimeHash = [regex]::Match($runtimeText, '(?m)^source_sha256:\s*["'']?([0-9a-fA-F]{64})["'']?\s*$')
+    if (-not $runtimeFormat.Success -or $runtimeFormat.Groups[1].Value.Trim() -ne 'rig-runtime-profile/v1') {
+        $problems.Add('runtime_profile.path is not a rig-runtime-profile/v1 artifact')
+    }
+    if (-not $runtimeStatus.Success -or $runtimeStatus.Groups[1].Value.Trim() -ne 'ready') {
+        $problems.Add('runtime_profile.status must be ready; compile a measured live project before launching')
+    }
+    if (-not $runtimeDeployment.Success -or $runtimeDeployment.Groups[1].Value.Trim() -ne 'live') {
+        $problems.Add('runtime_profile.deployment must be live; simulation artifacts cannot launch a live session')
+    }
     if (-not $runtimeHash.Success) {
         $problems.Add('runtime_profile.path does not contain a rig-runtime-profile source_sha256')
     } elseif (-not [string]::Equals($runtimeHash.Groups[1].Value, [string]$session.runtime_profile.project_hash, [StringComparison]::OrdinalIgnoreCase)) {
