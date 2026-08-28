@@ -15,7 +15,7 @@ from typing import Callable, Mapping, Sequence
 
 import yaml
 
-from drum_domain.rig_project import RigProject, load_rig_project
+from drum_domain.rig_project import RigProject, SourceDecoder, load_rig_project
 from midi_lab.traces import MidiTrace
 
 
@@ -74,18 +74,22 @@ class LiveMeasurementCampaign:
             })
         trace_requests = []
         for decoder in self.project.source_decoders:
-            if decoder.message_type not in {"note", "cc", "poly_aftertouch"}:
+            if decoder.message_type not in {"note", "note_range", "cc", "poly_aftertouch"}:
                 continue
             expression = decoder.message_type in {"cc", "poly_aftertouch"}
+            automatic_capture = decoder.message_type != "note_range"
             trace_requests.append({
-                "id": self.trace_identifier(decoder.source, decoder.physical, decoder.message_type),
+                "id": self.trace_identifier(decoder),
                 "source": decoder.source,
                 "physical": decoder.physical,
                 "message_type": decoder.message_type,
-                "trace": self.trace_relative_path(decoder.source, decoder.physical, decoder.message_type),
-                "acceptance": ("one isolated Note On address (channel + note)" if not expression else
+                "matcher": dict(decoder.match),
+                "trace": self.trace_relative_path(decoder) if automatic_capture else None,
+                "acceptance": ("one isolated Note On address (channel + note)" if decoder.message_type == "note" else
+                               "manual range calibration is required; automatic live promotion is intentionally blocked"
+                               if decoder.message_type == "note_range" else
                                "one isolated controller/aftertouch address (channel + data1); retain every observed value"),
-                "status": "pending",
+                "status": "pending" if automatic_capture else "manual-range-measurement-required",
             })
         state_actions = []
         for scene, actions in self.project.ddrum_state_actions.items():
@@ -135,23 +139,42 @@ class LiveMeasurementCampaign:
                          f"measure: {', '.join(item['physical_events']) or 'no input declared'}.")
         lines.extend(["", "## Isolated traces", ""])
         for request in document["trace_requests"]:  # type: ignore[index]
-            lines.append(f"- `{request['trace']}` — **{request['id']}**: {request['acceptance']}.")
+            trace = f"`{request['trace']}`" if request["trace"] else "**manual calibration**"
+            lines.append(f"- {trace} — **{request['id']}**: {request['acceptance']}.")
         lines.extend(["", "## Flash gate", ""])
         lines.extend(f"1. {step}" for step in document["flash_gate"])  # type: ignore[index]
         lines.append("")
         return "\n".join(lines)
 
     @staticmethod
-    def trace_relative_path(source: str, physical: str, message_type: str = "note") -> str:
-        """Stable relative location for one intentionally isolated hit trace."""
-        safe_physical = physical.replace(".", "-")
-        suffix = "" if message_type == "note" else f"__{message_type.replace('_', '-')}"
-        return f"traces/{source}__{safe_physical}{suffix}.jsonl"
+    def trace_relative_path(decoder: SourceDecoder) -> str:
+        """Stable trace location for one exact source-decoder address.
+
+        Physical IDs are deliberately insufficient: a positional pad can have
+        several raw Note decoders for the same physical event.  The matcher is
+        therefore part of the capture identity.
+        """
+        safe_physical = decoder.physical.replace(".", "-")
+        return f"traces/{decoder.source}__{safe_physical}__{LiveMeasurementCampaign._matcher_identifier(decoder)}.jsonl"
 
     @staticmethod
-    def trace_identifier(source: str, physical: str, message_type: str = "note") -> str:
-        """Keep legacy Note IDs compact while making expression rows unique."""
-        return f"{source}.{physical}" if message_type == "note" else f"{source}.{physical}.{message_type}"
+    def trace_identifier(decoder: SourceDecoder) -> str:
+        """Stable review/promote key for one declared source decoder."""
+        return f"{decoder.source}.{decoder.physical}.{LiveMeasurementCampaign._matcher_identifier(decoder)}"
+
+    @staticmethod
+    def _matcher_identifier(decoder: SourceDecoder) -> str:
+        match = decoder.match
+        if decoder.message_type == "note":
+            return f"note-n{match['note']:03d}"
+        if decoder.message_type == "note_range":
+            low, high = match["note_range"]
+            return f"note-range-n{low:03d}-n{high:03d}"
+        if decoder.message_type == "cc":
+            return f"cc-{match['cc']:03d}"
+        if match.get("active_note"):
+            return "poly-aftertouch-active-note"
+        return f"poly-aftertouch-n{match.get('note', 0):03d}"
 
     @classmethod
     def read(cls, directory: Path) -> "LiveMeasurementCampaign":
@@ -181,10 +204,15 @@ class LiveMeasurementCampaign:
         """
         rows = []
         for decoder in self.project.source_decoders:
+            if decoder.message_type == "note_range":
+                rows.append({"id": self.trace_identifier(decoder), "trace": None,
+                             "message_type": decoder.message_type, "status": "manual-range-measurement-required",
+                             "reason": "automatic live promotion cannot infer a measured note range"})
+                continue
             if decoder.message_type not in {"note", "cc", "poly_aftertouch"}:
                 continue
-            identifier = self.trace_identifier(decoder.source, decoder.physical, decoder.message_type)
-            relative = self.trace_relative_path(decoder.source, decoder.physical, decoder.message_type)
+            identifier = self.trace_identifier(decoder)
+            relative = self.trace_relative_path(decoder)
             trace_path = directory / relative
             if not trace_path.is_file():
                 rows.append({"id": identifier, "trace": relative, "message_type": decoder.message_type,
@@ -265,18 +293,19 @@ class LiveMeasurementCampaign:
 
         observed = {row["id"]: row for row in review["rows"] if isinstance(row, dict)}
         source_channels: dict[str, int] = {}
-        notes: dict[tuple[str, str], int] = {}
+        notes: dict[str, int] = {}
         for decoder in self.project.source_decoders:
             if decoder.message_type not in {"note", "cc", "poly_aftertouch"}:
                 continue
-            row = observed.get(self.trace_identifier(decoder.source, decoder.physical, decoder.message_type))
+            identifier = self.trace_identifier(decoder)
+            row = observed.get(identifier)
             if not isinstance(row, dict) or not isinstance(row.get("channel"), int) or not isinstance(row.get("data1"), int):
-                raise ValueError(f"missing observed address for {decoder.source}.{decoder.physical}")
+                raise ValueError(f"missing observed address for {identifier}")
             prior_channel = source_channels.setdefault(decoder.source, row["channel"])
             if prior_channel != row["channel"]:
                 raise ValueError(f"source {decoder.source} has inconsistent observed MIDI channels")
             if decoder.message_type == "note":
-                notes[(decoder.source, decoder.physical)] = row["data1"]
+                notes[identifier] = row["data1"]
 
         document = yaml.safe_load(self.project_path.read_text(encoding="utf-8"))
         if not isinstance(document, dict):  # defensive; the project was validated at campaign creation.
@@ -295,15 +324,15 @@ class LiveMeasurementCampaign:
         for identifier, source in document["sources"].items():
             source["endpoint"] = endpoints[identifier]
             source["channel"] = source_channels[identifier]
-        for decoder in document["source_decoders"]:
-            match, emit = decoder["match"], decoder["emit"]
+        for original, decoder in zip(self.project.source_decoders, document["source_decoders"], strict=True):
+            match = decoder["match"]
             if match["type"] == "note":
-                match["note"] = notes[(match["source"], emit["physical"])]
+                match["note"] = notes[self.trace_identifier(original)]
             elif match["type"] == "cc":
-                row = observed[self.trace_identifier(match["source"], emit["physical"], "cc")]
+                row = observed[self.trace_identifier(original)]
                 match["cc"] = row["data1"]
             elif match["type"] == "poly_aftertouch" and "note" in match:
-                row = observed[self.trace_identifier(match["source"], emit["physical"], "poly_aftertouch")]
+                row = observed[self.trace_identifier(original)]
                 match["note"] = row["data1"]
         document["ddrum4_output_channel"] = source_channels["ddrum4"]
         if document.get("control_bus") is not None:
