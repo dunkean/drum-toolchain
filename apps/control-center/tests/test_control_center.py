@@ -284,6 +284,10 @@ class ControlCenterTests(unittest.TestCase):
             }]
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             simulator = RigSimulator.from_path(project)
+            simulator.simulate_pad("edrumin", 38, 100)
+            # The active hit was rendered in metalcore. Pressure must retain
+            # that result after the current Scene changes to DnB.
+            simulator.set_state(scene="dnb")
             result = simulator.simulate_expression("edrumin", "poly_aftertouch", 38, 91)
             report = simulator.run_offline_diagnostic()
 
@@ -292,6 +296,7 @@ class ControlCenterTests(unittest.TestCase):
                          {"type": "poly_aftertouch", "channel": 12, "note": 38, "value": 91, "correlated_raw_note": 38})
         self.assertEqual(steps["SD3 renderer"].message,
                          {"type": "poly_aftertouch", "channel": 10, "note": 38, "value": 91, "correlated_raw_note": 38})
+        self.assertEqual(steps["active hit ledger"].message["hit_state"]["scene"], "metalcore")
         self.assertTrue(report.passed, report.render_text())
 
     def test_simulator_previews_reviewed_cc4_note_p_for_the_next_hihat_hit(self) -> None:

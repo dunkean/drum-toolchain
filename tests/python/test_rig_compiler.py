@@ -195,6 +195,32 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(targets["arduino_ddrum4"]["status"], "supported")
             self.assertEqual(targets["sd3"]["status"], "supported")
 
+    def test_pressure_with_a_ranged_primary_is_never_advertised_as_firmware_lowerable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["source_decoders"][0]["match"] = {"source": "brain", "type": "note_range", "note_range": [36, 37]}
+            document["source_decoders"].append({
+                "match": {"source": "brain", "type": "poly_aftertouch", "active_note": True},
+                "emit": {"physical": "kick.head", "expressions": ["pressure"], "correlate": "source_channel_note"},
+            })
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "kick.head", "expression": "pressure", "correlation": "source_channel_note",
+                "targets": {
+                    "ddrum4": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "no measured choke behavior", "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            compile_project(project, root / "out")
+
+            report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
+            arduino = report["expressions"][0]["targets"]["arduino_ddrum4"]
+            self.assertEqual(arduino["status"], "unsupported")
+            self.assertIn("exact primary Note", arduino["reason"])
+
     def test_live_non_exact_note_route_never_creates_a_flashable_firmware_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

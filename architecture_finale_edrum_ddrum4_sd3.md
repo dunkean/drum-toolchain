@@ -1657,7 +1657,10 @@ Le contrat `expression-routing` encode cette verticale comme
 `poly_aftertouch` avec `note_from: active_rendered_hit`. Arduino et le
 Converter PC utilisent alors le ledger borné de la frappe source (canal/note)
 pour ne pas appliquer le choke à une Scene ou une palette sélectionnée après
-la frappe. Aucun profil ne l'active sans trace isolée mesurée.
+la frappe. Le simulateur offline reproduit cette séquence (Note-On, changement
+d'état, aftertouch) avec son propre ledger : il ne réévalue donc jamais la
+nouvelle Scene pour un hit déjà joué. Aucun profil ne l'active sans trace
+isolée mesurée.
 
 ---
 # 39. MIDI Map E — vers SD3 : custom mega-kit

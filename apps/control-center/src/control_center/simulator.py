@@ -86,6 +86,17 @@ class SimulationResult:
 
 
 @dataclass(frozen=True)
+class _ActiveHit:
+    """A bounded offline analogue of the firmware/runtime active-hit ledger."""
+
+    physical: str
+    logical_target: str
+    state: Mapping[str, Any]
+    ddrum_message: Mapping[str, Any]
+    sd3_message: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
 class StateChangeResult:
     """Offline trace of one logical control travelling from PC/controller to DDrum4."""
 
@@ -166,6 +177,10 @@ class RigSimulator:
     def __init__(self, project: RigProject) -> None:
         self.project = project
         self._state: dict[str, Any] = dict(project.defaults)
+        # Same source/raw note replaces its prior entry, matching the bounded
+        # live ledgers. This simulator never opens MIDI, so reset/reload is the
+        # explicit boundary for an offline performance trace.
+        self._active_hits: dict[tuple[str, int], _ActiveHit] = {}
 
     @classmethod
     def from_path(cls, path: Path) -> "RigSimulator":
@@ -232,6 +247,13 @@ class RigSimulator:
             TraceStep("DrumGizmo renderer", "sends the declared note-only kit event", drumgizmo_message),
             TraceStep("DrumGizmo declared target", f"The selected kit would receive {drumgizmo['instrument']}/{drumgizmo['articulation']} when live"),
         ))
+        self._active_hits[(source, note)] = _ActiveHit(
+            physical=physical,
+            logical_target=logical,
+            state=dict(self._state),
+            ddrum_message=dict(ddrum_message),
+            sd3_message=dict(sd3_message),
+        )
         return SimulationResult(source, note, velocity, physical, logical, dict(self._state), tuple(steps))
 
     def simulate_expression(self, source: str, message_type: str, data1: int, value: int = 64) -> SimulationResult:
@@ -252,20 +274,20 @@ class RigSimulator:
         decoder = self._expression_decoder(source, message_type, data1)
         if decoder is None:
             raise SimulationError(f"{source} {message_type} {data1} has no declared physical-pad decoder")
+        active_hit: _ActiveHit | None = None
         if message_type == "poly_aftertouch" and decoder.match.get("active_note"):
-            # ``data1`` is the raw key to correlate with a preceding hit. The
-            # simulator has no clock or mutable live ledger, but it can still
-            # prove the declared correlation only when that exact raw key is a
-            # primary Note decoder for the same physical articulation.
-            primary = self._note_decoder(source, data1)
-            if primary is None or primary.physical != decoder.physical:
+            # The expression is valid only after an actual simulated Note-On.
+            # Do not re-resolve Scene/VP here: pressure follows the renderer
+            # destination selected when that preceding hit was played.
+            active_hit = self._active_hits.get((source, data1))
+            if active_hit is None or active_hit.physical != decoder.physical:
                 raise SimulationError(
-                    "poly_aftertouch active_note must name a declared primary Note for the same physical event"
+                    "poly_aftertouch active_note needs a preceding simulated Note-On for the same physical event"
                 )
-            physical = primary.physical
+            physical, logical = active_hit.physical, active_hit.logical_target
         else:
             physical = decoder.physical
-        logical = self._logical_target(physical)
+            logical = self._logical_target(physical)
         source_channel = self.project.sources[source].channel
         raw_type = "control_change" if message_type == "cc" else "poly_aftertouch"
         steps: list[TraceStep] = [
@@ -285,13 +307,18 @@ class RigSimulator:
             drumgizmo_target = expression["targets"]["drumgizmo"]
             ddrum_event = ddrum_target.get("event", {})
             sd3_event = sd3_target.get("event", {})
-            ddrum = self.project.renderers["ddrum4"][logical]
-            sd3 = self.project.renderers["sd3"][logical]
+            assert active_hit is not None
+            ddrum = active_hit.ddrum_message
+            sd3 = active_hit.sd3_message
+            steps.append(TraceStep("active hit ledger", "uses the renderer destination selected by the preceding Note-On", {
+                "physical": active_hit.physical, "logical_target": active_hit.logical_target,
+                "hit_state": dict(active_hit.state), "raw_note": data1,
+            }))
             if (ddrum_target.get("status") in {"measured", "user-confirmed"}
                     and ddrum_event.get("type") == "poly_aftertouch"
                     and ddrum_event.get("note_from") == "active_rendered_hit"):
                 ddrum_step = TraceStep("Arduino DDrum4 renderer", "declared pressure follows the active rendered hit", {
-                    "type": "poly_aftertouch", "channel": self.project.ddrum4_output_channel,
+                    "type": "poly_aftertouch", "channel": ddrum["channel"],
                     "note": ddrum["note"], "value": value, "correlated_raw_note": data1,
                 })
             else:
@@ -300,7 +327,7 @@ class RigSimulator:
                     and sd3_event.get("type") == "poly_aftertouch"
                     and sd3_event.get("note_from") == "active_rendered_hit"):
                 sd3_step = TraceStep("SD3 renderer", "declared pressure follows the active rendered hit", {
-                    "type": "poly_aftertouch", "channel": sd3.get("channel", 10),
+                    "type": "poly_aftertouch", "channel": sd3["channel"],
                     "note": sd3["note"], "value": value, "correlated_raw_note": data1,
                 })
                 sd3_target_step = TraceStep("SD3 declared target", f"The selected SD3 kit would receive {physical} pressure on its active hit")
@@ -509,6 +536,8 @@ class RigSimulator:
                         candidate = RigSimulator(self.project)
                         try:
                             candidate.set_state(scene=scene, values=values)
+                            if decoder.message_type == "poly_aftertouch" and decoder.match.get("active_note"):
+                                candidate.simulate_pad(decoder.source, data1, 100)
                             result = candidate.simulate_expression(decoder.source, decoder.message_type, data1, 64)
                             declared_sd3 = next((step for step in result.steps if step.stage == "SD3 renderer"), None)
                             if declared_sd3 is None or "unverified" in declared_sd3.detail or "unsupported" in declared_sd3.detail:

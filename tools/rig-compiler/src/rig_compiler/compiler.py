@@ -189,7 +189,15 @@ def _firmware_lowering_reason(document: dict[str, Any], record: dict[str, Any]) 
             and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
             and expression["targets"]["ddrum4"].get("event", {}).get("type") == "poly_aftertouch"
             and expression["targets"]["ddrum4"].get("event", {}).get("note_from") == "active_rendered_hit"):
-        return None
+        source, physical = record["source"]["id"], record["physical"]
+        exact_primary = any(
+            decoder["match"].get("source") == source and decoder["emit"].get("physical") == physical
+            and decoder["match"].get("type") == "note"
+            for decoder in document.get("source_decoders", ())
+        )
+        if exact_primary:
+            return None
+        return "firmware pressure requires an exact primary Note decoder for its correlated physical event"
     if (matcher == "cc" and expression is not None and expression.get("expression") == "openness"
             and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
             and expression["targets"]["ddrum4"].get("event", {}).get("type") == "quantized_note_p"):
