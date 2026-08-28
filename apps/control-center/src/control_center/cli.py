@@ -11,7 +11,7 @@ from .service import CommandResult, ControlCenter
 from .ddrum4_matrix import format_matrix, load_kit_matrix
 from .simulator import RigSimulator, SimulationError
 from .live_measurement import LiveMeasurementCampaign
-from .campaign import Sd3CaptureCampaign, capture_rows_from_megakit_plan
+from .campaign import Sd3CaptureCampaign, capture_rows_from_megakit_plan, fingerprint_sd3_preset
 
 
 def _print(result: CommandResult) -> int:
@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     campaign.add_argument("--output", required=True, type=Path)
     campaign.add_argument("--id", required=True)
     campaign.add_argument("--preset", required=True)
+    campaign.add_argument("--preset-file", required=True, type=Path)
     campaign.add_argument("--midi-output", required=True)
     campaign.add_argument("--audio-input", required=True)
     campaign.add_argument("--channels", default="left,right")
@@ -190,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.action == "create-sd3-campaign":
         try:
             channels = tuple(value.strip() for value in args.channels.split(",") if value.strip())
+            preset_file, preset_sha256 = fingerprint_sd3_preset(args.preset_file)
             capture_campaign = Sd3CaptureCampaign(
                 identifier=args.id,
                 sd3_preset=args.preset,
@@ -197,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
                 audio_input=args.audio_input,
                 channels=channels,
                 rows=capture_rows_from_megakit_plan(args.plan),
+                sd3_preset_file=preset_file,
+                sd3_preset_sha256=preset_sha256,
                 sample_rate=args.sample_rate,
                 tail_ms=args.tail_ms,
             )

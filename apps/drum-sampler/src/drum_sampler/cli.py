@@ -17,6 +17,7 @@ from .library import SampleLibrary
 from .session import CaptureRequest, CaptureSessionPlan
 from .quality import CaptureQualityPolicy, audit_library
 from .audio import load_quality_profile
+from .calibration import calibrate_session_file
 from .offline import (drumgizmo_note_overrides, expand_shared_variations, export_report, merge_library_files,
                       prepare_selected_takes, run_offline_recipe, verify_drumgizmo_kit)
 from .offline import resolved_drumgizmo_note_overrides
@@ -57,6 +58,16 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--source", required=True)
     capture.add_argument("--license", required=True)
     capture.add_argument("--confirm-capture", action="store_true", help="required: sends MIDI and records the named audio input")
+    calibrate = subparsers.add_parser("calibrate", help="capture one bounded representative hit per articulation before a full campaign")
+    calibrate.add_argument("--session", required=True, type=Path)
+    calibrate.add_argument("--preset-file", required=True, type=Path)
+    calibrate.add_argument("--expected-preset-sha256")
+    calibrate.add_argument("--output-directory", required=True, type=Path)
+    calibrate.add_argument("--report", required=True, type=Path)
+    calibrate.add_argument("--preferred-velocity", type=int, default=110)
+    calibrate.add_argument("--duration-seconds", type=float, default=1.5)
+    calibrate.add_argument("--confirm-capture", action="store_true", help="required: sends bounded MIDI notes and records the named audio input")
+    calibrate.add_argument("--confirm-preset-loaded", action="store_true", help="required: confirms the exact fingerprinted SD3 preset is loaded")
     drumgizmo = subparsers.add_parser("export-drumgizmo", help="export a captured neutral library as a DrumGizmo 2.0 kit")
     drumgizmo.add_argument("--library", required=True, type=Path)
     drumgizmo.add_argument("--audio-root", required=True, type=Path)
@@ -135,6 +146,26 @@ def main(argv: list[str] | None = None) -> int:
             args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(f"wrote quality report {args.output}: {report['summary']}")
             return 0
+        if args.command == "calibrate":
+            if not args.confirm_capture:
+                raise ValueError("calibration sends MIDI and records audio; pass --confirm-capture after checking the session")
+            if not args.confirm_preset_loaded:
+                raise ValueError("calibration requires confirmation that the exact SD3 preset is loaded")
+            report = calibrate_session_file(
+                args.session, args.preset_file, args.output_directory, args.report,
+                expected_preset_sha256=args.expected_preset_sha256,
+                preset_loaded_confirmed=True,
+                preferred_velocity=args.preferred_velocity,
+                duration_seconds=args.duration_seconds,
+                progress=lambda index, total, row: print(
+                    f"[{index}/{total}] {row['instrument']}.{row['articulation']} "
+                    f"note={row['note']} velocity={row['velocity']} "
+                    f"peak={row['peak_dbfs']} dBFS findings={row['findings']}",
+                    flush=True,
+                ),
+            )
+            print(f"wrote calibration report {args.report}: {report['summary']}")
+            return 0 if report["summary"]["status"] != "technical-fail" else 2
         if not args.confirm_capture:
             raise ValueError("capture sends MIDI and records audio; pass --confirm-capture after checking the session")
         session = CaptureSessionPlan.read(args.session)

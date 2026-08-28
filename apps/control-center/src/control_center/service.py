@@ -55,6 +55,46 @@ def _offline_run_options() -> dict[str, object]:
 Launcher = Callable[..., object]
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _resolve_sd3_preset(campaign: dict[str, object]) -> tuple[Path, str]:
+    """Resolve one unambiguous preset file and enforce its recorded fingerprint."""
+    candidates: list[Path] = []
+    declared_file = campaign.get("sd3_preset_file")
+    if isinstance(declared_file, str) and declared_file.strip():
+        candidates.append(Path(declared_file))
+    preset_name = campaign.get("sd3_preset")
+    if isinstance(preset_name, str) and preset_name.strip():
+        filename = preset_name if preset_name.lower().endswith(".sd3p") else f"{preset_name}.sd3p"
+        candidates.extend((
+            Path("captures") / "sd3" / filename,
+            Path.home() / "Documents" / "Toontrack" / "Superior Drummer 3" / filename,
+            Path.home() / "Documents" / "Toontrack" / "Superior Drummer 3" / filename.replace("_", " "),
+        ))
+    existing: list[tuple[Path, str]] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved not in seen and resolved.is_file():
+            seen.add(resolved)
+            existing.append((resolved, _sha256_file(resolved)))
+    if not existing:
+        raise ValueError("campaign SD3 preset file cannot be found; select the generated .sd3p")
+    hashes = {digest for _, digest in existing}
+    if len(hashes) != 1:
+        details = ", ".join(f"{path}={digest[:12]}" for path, digest in existing)
+        raise ValueError(f"multiple SD3 preset candidates have different fingerprints: {details}")
+    path, digest = existing[0]
+    declared_sha = campaign.get("sd3_preset_sha256")
+    if isinstance(declared_sha, str) and declared_sha.lower() != digest:
+        raise ValueError(
+            f"campaign SD3 preset fingerprint changed: expected {declared_sha.lower()}, got {digest}"
+        )
+    return path, digest
+
+
 class ControlCenter:
     """Build and explicitly run offline tool commands and desktop launchers."""
 
@@ -109,9 +149,12 @@ class ControlCenter:
         reports = run_directory / "reports"
         identifier = run_directory.name
         campaign_path = run_directory / "campaign.json"
+        campaign_document: dict[str, object] | None = None
         if campaign_path.is_file():
             try:
-                declared_id = json.loads(campaign_path.read_text(encoding="utf-8")).get("id")
+                loaded_campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+                campaign_document = loaded_campaign if isinstance(loaded_campaign, dict) else None
+                declared_id = campaign_document.get("id") if campaign_document is not None else None
                 if isinstance(declared_id, str) and declared_id:
                     identifier = declared_id
             except (OSError, json.JSONDecodeError):
@@ -120,9 +163,49 @@ class ControlCenter:
         if action == "capture":
             if not confirm_capture:
                 raise ValueError("capture requires explicit confirmation")
+            if campaign_document is not None:
+                preset_path, preset_sha256 = _resolve_sd3_preset(campaign_document)
+                calibration_path = reports / "calibration.json"
+                try:
+                    calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+                    calibration_summary = calibration.get("summary")
+                    calibration_status = (calibration_summary.get("status")
+                                          if isinstance(calibration_summary, dict) else None)
+                    calibration_preset = calibration.get("preset")
+                    calibrated_preset_sha = (calibration_preset.get("sha256")
+                                             if isinstance(calibration_preset, dict) else None)
+                    preset_loaded_confirmed = (calibration_preset.get("loaded_confirmed") is True
+                                               if isinstance(calibration_preset, dict) else False)
+                    calibrated_session_sha = calibration.get("session_sha256")
+                except (OSError, json.JSONDecodeError):
+                    calibration_status = None
+                    calibrated_preset_sha = None
+                    preset_loaded_confirmed = False
+                    calibrated_session_sha = None
+                current_session_sha = _sha256_file(session)
+                if (calibration_status != "technical-pass-user-mix-review-required"
+                        or calibrated_session_sha != current_session_sha
+                        or calibrated_preset_sha != preset_sha256
+                        or not preset_loaded_confirmed):
+                    raise ValueError(
+                        "full capture requires a passing calibration for the exact current session and loaded SD3 preset"
+                    )
             return (*command, "capture", "--session", str(session), "--raw-directory", str(raw),
                     "--library-output", str(library), "--id", identifier, "--source", "sd3",
                     "--license", "SD3 capture for personal kit development", "--confirm-capture")
+        if action == "calibrate":
+            if not confirm_capture:
+                raise ValueError("calibration requires explicit confirmation")
+            if campaign_document is None:
+                raise ValueError("calibration requires a valid campaign.json with an SD3 preset identity")
+            preset_path, preset_sha256 = _resolve_sd3_preset(campaign_document)
+            return (*command, "calibrate", "--session", str(session),
+                    "--preset-file", str(preset_path),
+                    "--expected-preset-sha256", preset_sha256,
+                    "--output-directory", str(run_directory / "calibration-wav"),
+                    "--report", str(reports / "calibration.json"),
+                    "--preferred-velocity", "110", "--duration-seconds", "1.5",
+                    "--confirm-capture", "--confirm-preset-loaded")
         if action == "audit-quality":
             return (*command, "audit-quality", "--library", str(library), "--audio-root", str(raw),
                     "--output", str(reports / "quality.json"))

@@ -1,6 +1,7 @@
 from .library import SampleLibrary, SampleTake, library_from_plan
 from .audio import analyze_wav
 from .recorder import capture_pending, library_from_captures
+from .calibration import calibrate_session, calibrate_session_file
 from .exporters import DrumGizmoExport, export_drumgizmo
 from .session import CaptureRequest, CaptureSessionPlan, PlannedTake
 from .quality import CaptureQualityPolicy, assess_wav, audit_library
@@ -11,6 +12,8 @@ from .offline import (drumgizmo_capture_note_overrides, drumgizmo_note_overrides
 __all__ = [
     "CaptureRequest",
     "capture_pending",
+    "calibrate_session",
+    "calibrate_session_file",
     "analyze_wav",
     "DrumGizmoExport",
     "CaptureSessionPlan",

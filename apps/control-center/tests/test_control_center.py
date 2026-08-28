@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from control_center.live_measurement import LiveMeasurementCampaign, discover_mi
 from control_center.simulator import RigSimulator
 from control_center.virtual_kit import build_virtual_kit
 from control_center.campaign import (CaptureRow, Sd3CaptureCampaign, capture_rows_from_megakit_plan,
+                                     fingerprint_sd3_preset,
                                      STARTER_ROWS, METALCORE_ELECTRONIC_V1_ADDITIONS)
 from midi_lab.traces import MidiTrace, TraceEvent
 
@@ -179,12 +181,24 @@ class ControlCenterTests(unittest.TestCase):
             self.assertEqual(session["requests"][0]["velocities"], [40, 80])
             self.assertEqual(session["requests"][0]["controllers"], [])
             self.assertEqual(campaign.progress(run).captured_takes, 0)
+            self.assertFalse(campaign.progress(run).calibration_report_exists)
             raw = run / "raw-wav"; raw.mkdir()
             (raw / "snare_main__rimshot__v040__rr01_raw.wav").write_bytes(b"raw")
             progress = Sd3CaptureCampaign.read(run).progress(run)
             self.assertEqual((progress.captured_takes, progress.total_takes, progress.missing_takes), (1, 4, 3))
             with self.assertRaisesRegex(FileExistsError, "campaign directory"):
                 campaign.write_new(run)
+
+            reports = run / "reports"; reports.mkdir()
+            (reports / "calibration.json").write_text(
+                json.dumps({
+                    "session_sha256": hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
+                    "summary": {"status": "technical-fail"},
+                }), encoding="utf-8",
+            )
+            failed = campaign.progress(run)
+            self.assertEqual(failed.calibration_status, "technical-fail")
+            self.assertIn("failed", failed.stage)
 
     def test_campaign_commands_are_ordered_and_capture_is_explicit(self) -> None:
         run = Path("D:/Studio/drum-runs/sd3_test_kit")
@@ -194,12 +208,51 @@ class ControlCenterTests(unittest.TestCase):
         capture = center.sampler_command("capture", run, confirm_capture=True)
         self.assertIn("--confirm-capture", capture)
         self.assertEqual(capture[1:4], ("-m", "drum_sampler.cli", "capture"))
+        with self.assertRaisesRegex(ValueError, "explicit confirmation"):
+            center.sampler_command("calibrate", run)
+        with self.assertRaisesRegex(ValueError, "valid campaign"):
+            center.sampler_command("calibrate", run, confirm_capture=True)
         quality = center.sampler_command("audit-quality", run)
         self.assertEqual(quality[1:4], ("-m", "drum_sampler.cli", "audit-quality"))
         with self.assertRaisesRegex(ValueError, "note map"):
             center.sampler_command("export-drumgizmo", run)
         with self.assertRaisesRegex(ValueError, "MegaKit plan"):
             center.sampler_command("export-drumgizmo", run, note_map=Path("drumgizmo-midimap.json"))
+
+    def test_full_campaign_is_gated_by_passing_signal_calibration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            preset = root / "MegaKit.sd3p"; preset.write_bytes(b"fingerprinted-preset")
+            preset_file, preset_sha = fingerprint_sd3_preset(preset)
+            campaign = Sd3CaptureCampaign(
+                identifier="sd3_gate", sd3_preset="MegaKit", midi_output="virtual",
+                audio_input="loopback:output", channels=("left", "right"),
+                rows=(CaptureRow("kick", "acoustic", 24, (120,), 1),),
+                sd3_preset_file=preset_file, sd3_preset_sha256=preset_sha,
+            )
+            run = root / "sd3_gate"
+            campaign.write_new(run)
+            with self.assertRaisesRegex(ValueError, "exact current session"):
+                ControlCenter.sampler_command("capture", run, confirm_capture=True)
+            report = run / "reports" / "calibration.json"
+            report.parent.mkdir()
+            report.write_text(json.dumps({
+                "format": "sd3-calibration-report/v1",
+                "session_sha256": hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
+                "preset": {"sha256": preset_sha, "loaded_confirmed": True},
+                "summary": {"status": "technical-pass-user-mix-review-required"},
+            }), encoding="utf-8")
+            command = ControlCenter.sampler_command("capture", run, confirm_capture=True)
+            self.assertEqual(command[3], "capture")
+            calibration = ControlCenter.sampler_command("calibrate", run, confirm_capture=True)
+            self.assertIn("--confirm-preset-loaded", calibration)
+            self.assertIn(preset_sha, calibration)
+
+            document = json.loads(report.read_text(encoding="utf-8"))
+            document["session_sha256"] = "0" * 64
+            report.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exact current session"):
+                ControlCenter.sampler_command("capture", run, confirm_capture=True)
 
     def test_v1_electronic_additions_have_unique_raw_capture_cells(self) -> None:
         filenames = [filename for row in METALCORE_ELECTRONIC_V1_ADDITIONS for filename in row.raw_filenames()]
@@ -227,18 +280,21 @@ class ControlCenterTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[3]
         plan = repository / "profiles" / "sd3" / "metalcore-r15-megakit-plan.yaml"
         with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "campaign"
+            root = Path(temporary)
+            output = root / "campaign"
+            preset = root / "MegaKit.sd3p"; preset.write_bytes(b"preset")
             command = [
                 sys.executable, "-m", "control_center.cli", "create-sd3-campaign", str(plan),
                 "--output", str(output), "--id", "greg_hybrid_r15_full",
                 "--preset", "Greg_Hybrid_r15_MegaKit_v2", "--midi-output", "SD3_MEGA_INPUT",
-                "--audio-input", "SD3_PRINT_LOOPBACK",
+                "--preset-file", str(preset), "--audio-input", "SD3_PRINT_LOOPBACK",
             ]
             completed = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             campaign = Sd3CaptureCampaign.read(output)
             self.assertEqual(len(campaign.rows), len(capture_rows_from_megakit_plan(plan)))
             self.assertGreater(campaign.total_takes, 500)
+            self.assertEqual(campaign.sd3_preset_sha256, hashlib.sha256(b"preset").hexdigest())
 
     def test_complete_chain_simulator_traces_ddrum4_return_and_both_software_renderers(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"

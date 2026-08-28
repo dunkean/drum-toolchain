@@ -7,6 +7,7 @@ audio devices itself.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -79,6 +80,8 @@ class CampaignProgress:
 
     total_takes: int
     captured_takes: int
+    calibration_status: str | None
+    calibration_outliers: tuple[str, ...]
     library_exists: bool
     quality_report_exists: bool
     drumgizmo_export_exists: bool
@@ -88,7 +91,15 @@ class CampaignProgress:
         return self.total_takes - self.captured_takes
 
     @property
+    def calibration_report_exists(self) -> bool:
+        return self.calibration_status is not None
+
+    @property
     def stage(self) -> str:
+        if self.calibration_status is None:
+            return "Ready for SD3 signal calibration"
+        if self.calibration_status != "technical-pass-user-mix-review-required":
+            return "SD3 calibration failed or is invalid — review before capture"
         if self.captured_takes < self.total_takes:
             return "Ready to capture" if self.captured_takes == 0 else "Capture can be resumed"
         if not self.quality_report_exists:
@@ -108,6 +119,8 @@ class Sd3CaptureCampaign:
     audio_input: str
     channels: tuple[str, ...]
     rows: tuple[CaptureRow, ...]
+    sd3_preset_file: str | None = None
+    sd3_preset_sha256: str | None = None
     sample_rate: int = 44100
     tail_ms: int = 5000
     license_statement: str = "SD3 capture for personal kit development"
@@ -123,6 +136,10 @@ class Sd3CaptureCampaign:
             raise ValueError("capture channels must be unique")
         if not self.rows:
             raise ValueError("add at least one SD3 articulation before creating a campaign")
+        if (self.sd3_preset_file is None) != (self.sd3_preset_sha256 is None):
+            raise ValueError("SD3 preset file and SHA-256 must be recorded together")
+        if self.sd3_preset_sha256 is not None and not re.fullmatch(r"[0-9a-f]{64}", self.sd3_preset_sha256):
+            raise ValueError("SD3 preset SHA-256 must be 64 lowercase hexadecimal characters")
         if self.sample_rate < 8000 or self.tail_ms < 0:
             raise ValueError("sample rate or tail is invalid")
 
@@ -131,7 +148,7 @@ class Sd3CaptureCampaign:
         return sum(len(row.raw_filenames()) for row in self.rows)
 
     def campaign_document(self) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "schema_version": 1,
             "kind": "sd3-capture-campaign",
             "id": self.identifier,
@@ -147,12 +164,18 @@ class Sd3CaptureCampaign:
             "outputs": {
                 "session": "capture-session.json",
                 "raw_directory": "raw-wav",
+                "calibration_directory": "calibration-wav",
+                "calibration_report": "reports/calibration.json",
                 "library": "library.json",
                 "quality_report": "reports/quality.json",
                 "drumgizmo_directory": "drumgizmo-kit",
                 "drumgizmo_report": "reports/drumgizmo-export.json",
             },
         }
+        if self.sd3_preset_file is not None:
+            document["sd3_preset_file"] = self.sd3_preset_file
+            document["sd3_preset_sha256"] = self.sd3_preset_sha256
+        return document
 
     def session_document(self) -> dict[str, object]:
         return {
@@ -202,6 +225,8 @@ class Sd3CaptureCampaign:
                 midi_output=document["midi_output"], audio_input=document["audio_input"],
                 channels=tuple(document["channels"]), sample_rate=document.get("sample_rate", 44100),
                 tail_ms=document.get("tail_ms", 5000),
+                sd3_preset_file=document.get("sd3_preset_file"),
+                sd3_preset_sha256=document.get("sd3_preset_sha256"),
                 license_statement=document.get("license_statement", "unassigned"),
                 rows=tuple(CaptureRow(
                     instrument=row["instrument"], articulation=row["articulation"], note=row["note"],
@@ -218,13 +243,49 @@ class Sd3CaptureCampaign:
         raw_directory = run_directory / "raw-wav"
         captured = sum((raw_directory / filename).is_file()
                        for row in self.rows for filename in row.raw_filenames())
+        calibration_report = run_directory / "reports" / "calibration.json"
+        calibration_status: str | None = None
+        calibration_outliers: tuple[str, ...] = ()
+        if calibration_report.is_file():
+            try:
+                calibration_document = json.loads(calibration_report.read_text(encoding="utf-8"))
+                summary = calibration_document.get("summary")
+                status = summary.get("status") if isinstance(summary, dict) else None
+                calibration_status = status if isinstance(status, str) else "invalid"
+                outliers = summary.get("relative_level_outliers") if isinstance(summary, dict) else None
+                if isinstance(outliers, list) and all(isinstance(item, str) for item in outliers):
+                    calibration_outliers = tuple(outliers)
+                session_path = run_directory / "capture-session.json"
+                if (not session_path.is_file()
+                        or calibration_document.get("session_sha256")
+                        != hashlib.sha256(session_path.read_bytes()).hexdigest()):
+                    calibration_status = "stale-session"
+                preset = calibration_document.get("preset")
+                if self.sd3_preset_sha256 is not None and (
+                    not isinstance(preset, dict)
+                    or preset.get("sha256") != self.sd3_preset_sha256
+                    or preset.get("loaded_confirmed") is not True
+                ):
+                    calibration_status = "stale-preset"
+            except (OSError, json.JSONDecodeError):
+                calibration_status = "invalid"
         return CampaignProgress(
             total_takes=self.total_takes,
             captured_takes=captured,
+            calibration_status=calibration_status,
+            calibration_outliers=calibration_outliers,
             library_exists=(run_directory / "library.json").is_file(),
             quality_report_exists=(run_directory / "reports" / "quality.json").is_file(),
             drumgizmo_export_exists=(run_directory / "drumgizmo-kit").is_dir(),
         )
+
+
+def fingerprint_sd3_preset(path: Path) -> tuple[str, str]:
+    """Return the resolved local preset path and its immutable campaign fingerprint."""
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file() or resolved.suffix.lower() != ".sd3p":
+        raise ValueError(f"SD3 preset file does not exist or is not .sd3p: {resolved}")
+    return str(resolved), hashlib.sha256(resolved.read_bytes()).hexdigest()
 
 
 def capture_rows_from_megakit_plan(path: Path) -> tuple[CaptureRow, ...]:

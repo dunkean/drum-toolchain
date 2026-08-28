@@ -17,7 +17,7 @@ from .service import ControlCenter
 from .simulator import RigSimulator, SimulationError
 from .virtual_kit import build_virtual_kit
 from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS, capture_rows_from_megakit_plan,
-                       METALCORE_ELECTRONIC_V1_ADDITIONS)
+                       fingerprint_sd3_preset, METALCORE_ELECTRONIC_V1_ADDITIONS)
 from .live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
 
 
@@ -1352,6 +1352,8 @@ def launch() -> int:
             setup_layout.addLayout(row)
             self.campaign_id = QLineEdit(); self.campaign_id.setPlaceholderText("for example: sd3_metal_2026_08")
             self.sd3_preset = QLineEdit(); self.sd3_preset.setPlaceholderText("Exact SD3 MegaKit / preset name")
+            self.sd3_preset_file = QLineEdit(); self.sd3_preset_file.setPlaceholderText("Exact generated .sd3p used by this campaign")
+            choose_preset = QPushButton("Select .sd3p…"); choose_preset.clicked.connect(self.select_sd3_preset_file)
             self.capture_midi_output = QLineEdit(); self.capture_midi_output.setPlaceholderText("SD3 MIDI input / virtual port name")
             self.capture_audio_input = QLineEdit(); self.capture_audio_input.setPlaceholderText("for example: loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)")
             self.capture_channels = QLineEdit("left,right")
@@ -1359,6 +1361,8 @@ def launch() -> int:
                                  ("MIDI output:", self.capture_midi_output), ("Audio input:", self.capture_audio_input),
                                  ("Capture channels:", self.capture_channels)):
                 row = QHBoxLayout(); row.addWidget(QLabel(label)); row.addWidget(field); setup_layout.addLayout(row)
+            row = QHBoxLayout(); row.addWidget(QLabel("Fingerprint preset file:")); row.addWidget(self.sd3_preset_file); row.addWidget(choose_preset)
+            setup_layout.addLayout(row)
             setup.setLayout(setup_layout); layout.addWidget(setup)
 
             grid = QGroupBox("2. Complete articulation inventory")
@@ -1396,6 +1400,9 @@ def launch() -> int:
             create.clicked.connect(self.create_campaign); actions_layout.addWidget(create)
             open_campaign = QPushButton("Open existing campaign…"); open_campaign.clicked.connect(self.open_campaign); actions_layout.addWidget(open_campaign)
             self.campaign_status = QLabel("No campaign is open."); actions_layout.addWidget(self.campaign_status)
+            calibrate = QPushButton("Run SD3 signal calibration…")
+            calibrate.setToolTip("Captures one short representative hit per articulation and reports silence, clipping, headroom and level spread before the full campaign.")
+            calibrate.clicked.connect(lambda: self.run_campaign_action("calibrate")); actions_layout.addWidget(calibrate)
             capture = QPushButton("Capture pending takes…"); capture.clicked.connect(lambda: self.run_campaign_action("capture")); actions_layout.addWidget(capture)
             quality = QPushButton("Run quality review"); quality.clicked.connect(lambda: self.run_campaign_action("audit-quality")); actions_layout.addWidget(quality)
             self.note_map = QLineEdit(); self.note_map.setPlaceholderText("Compiled drumgizmo-midimap.json for export")
@@ -1416,6 +1423,13 @@ def launch() -> int:
             directory = QFileDialog.getExistingDirectory(self, "Select parent directory for SD3 campaigns")
             if directory:
                 self.campaign_root.setText(directory)
+
+        def select_sd3_preset_file(self) -> None:
+            filename, _ = QFileDialog.getOpenFileName(
+                self, "Select the generated SD3 MegaKit", "", "SD3 presets (*.sd3p)",
+            )
+            if filename:
+                self.sd3_preset_file.setText(filename)
 
         def select_note_map(self) -> None:
             filename, _ = QFileDialog.getOpenFileName(self, "Select compiled DrumGizmo note map", "", "JSON files (*.json)")
@@ -1518,10 +1532,12 @@ def launch() -> int:
 
         def _campaign_from_form(self) -> Sd3CaptureCampaign:
             channels = tuple(value.strip() for value in self.capture_channels.text().split(",") if value.strip())
+            preset_file, preset_sha256 = fingerprint_sd3_preset(Path(self.sd3_preset_file.text().strip()))
             return Sd3CaptureCampaign(
                 identifier=self.campaign_id.text().strip(), sd3_preset=self.sd3_preset.text().strip(),
                 midi_output=self.capture_midi_output.text().strip(), audio_input=self.capture_audio_input.text().strip(),
-                channels=channels, rows=self._rows_from_table(),
+                channels=channels, rows=self._rows_from_table(), sd3_preset_file=preset_file,
+                sd3_preset_sha256=preset_sha256,
             )
 
         def _campaign_path_from_form(self) -> Path:
@@ -1556,6 +1572,7 @@ def launch() -> int:
             self.campaign_directory = path
             self.campaign_root.setText(str(path.parent)); self.campaign_id.setText(campaign.identifier)
             self.sd3_preset.setText(campaign.sd3_preset); self.capture_midi_output.setText(campaign.midi_output)
+            self.sd3_preset_file.setText(campaign.sd3_preset_file or "")
             self.capture_audio_input.setText(campaign.audio_input); self.capture_channels.setText(",".join(campaign.channels))
             self.capture_rows.setRowCount(0)
             for row in campaign.rows:
@@ -1572,6 +1589,8 @@ def launch() -> int:
                 self.campaign_status.setText(f"Campaign status unavailable: {error}"); return
             self.campaign_status.setText(
                 f"{progress.stage}. Raw takes: {progress.captured_takes}/{progress.total_takes}; "
+                f"calibration: {progress.calibration_status or 'not run'}; "
+                f"level outliers: {', '.join(progress.calibration_outliers) if progress.calibration_outliers else 'none'}; "
                 f"library: {'yes' if progress.library_exists else 'no'}; "
                 f"quality: {'yes' if progress.quality_report_exists else 'no'}; "
                 f"DrumGizmo: {'yes' if progress.drumgizmo_export_exists else 'no'}."
@@ -1582,10 +1601,12 @@ def launch() -> int:
                 QMessageBox.warning(self, "Campaign action already running", "Wait for the current campaign command to finish."); return
             if self.campaign_directory is None:
                 QMessageBox.warning(self, "No campaign", "Create or open an SD3 capture campaign first."); return
-            if action == "capture":
+            if action in {"capture", "calibrate"}:
                 answer = QMessageBox.warning(
-                    self, "Confirm SD3 capture",
-                    "This will send all pending notes in the saved session to the declared SD3 MIDI input and record the declared audio input. Continue?",
+                    self, "Confirm SD3 capture" if action == "capture" else "Confirm SD3 calibration",
+                    ("This will send all pending notes in the saved session to the declared SD3 MIDI input and record the declared audio input. Continue?"
+                     if action == "capture" else
+                     "This will send one bounded representative hit per articulation to SD3 and record short level probes. Continue?"),
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
                 if answer != QMessageBox.StandardButton.Yes:
@@ -1595,7 +1616,7 @@ def launch() -> int:
                 megakit_plan = Path(self.export_megakit_plan.text()) if self.export_megakit_plan.text().strip() else None
                 command = self.center.sampler_command(action, self.campaign_directory, note_map=note_map,
                                                       megakit_plan=megakit_plan,
-                                                      confirm_capture=action == "capture")
+                                                      confirm_capture=action in {"capture", "calibrate"})
             except ValueError as error:
                 QMessageBox.warning(self, "Cannot start campaign action", str(error)); return
             self.campaign_process = QProcess(self)
