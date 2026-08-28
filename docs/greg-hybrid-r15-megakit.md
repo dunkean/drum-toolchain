@@ -1,7 +1,7 @@
 # Greg Hybrid r15 — SD3 MegaKit
 
 - Preset: `Greg_Hybrid_r15_MegaKit_v2.sd3p`
-- Preset SHA-256: `ad1612b3f093335d188a6857b4efa5e1eeaf2d2551bf203c5505094a4cd7341a`
+- Preset SHA-256: `742b94f1be736a36c6faedebc6bac14d182ae69351af70f2336ab8dded76f443`
 - Instruments SD3: **42**
 Convention de nommage: MIDI 0 = C-1.
 

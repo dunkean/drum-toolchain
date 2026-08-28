@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import time
 import threading
+import warnings
 from math import gcd
 from hashlib import sha256
 
@@ -13,6 +14,13 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, resample_poly, sosfiltfilt
 import yaml
+
+
+# The UMC404HD WASAPI loopback reports intermittent packet discontinuities
+# with SoundCard's endpoint-minimum buffer and still did so during full-length
+# captures at 2048/4096 frames.  This buffer affects recording only, never the
+# renderer/MIDI latency; 32768 frames proved stable on the reference rig.
+WASAPI_LOOPBACK_BLOCKSIZE = 32768
 
 
 @dataclass(frozen=True)
@@ -139,9 +147,14 @@ def _capture_loopback(
     if len(matches) != 1:
         raise ValueError(f"expected one loopback device containing {query!r}, found {[item.name for item in matches]}")
     trigger_error: list[BaseException] = []
+    recorder_ready = threading.Event()
+    recorder_cancelled = threading.Event()
 
     def trigger() -> None:
         try:
+            recorder_ready.wait()
+            if recorder_cancelled.is_set():
+                return
             time.sleep(preroll)
             _emit_note(midi_port, note, velocity, channel, controllers, gate, duration)
         except BaseException as error:  # propagate a worker failure on the caller thread
@@ -149,11 +162,36 @@ def _capture_loopback(
 
     worker = threading.Thread(target=trigger, name="drum-sampler-midi-trigger")
     worker.start()
-    with matches[0].recorder(samplerate=sample_rate, channels=list(range(channels))) as recorder:
-        recording = recorder.record(numframes=frames)
-    worker.join()
+    try:
+        with warnings.catch_warnings(record=True) as capture_warnings:
+            warnings.simplefilter("always", sc.SoundcardRuntimeWarning)
+            with matches[0].recorder(
+                samplerate=sample_rate,
+                channels=list(range(channels)),
+                blocksize=WASAPI_LOOPBACK_BLOCKSIZE,
+            ) as recorder:
+                # Entering the recorder starts the WASAPI client.  Only now may
+                # the preroll clock and MIDI trigger begin.
+                recorder_ready.set()
+                recording = recorder.record(numframes=frames)
+    except BaseException:
+        recorder_cancelled.set()
+        recorder_ready.set()
+        raise
+    finally:
+        worker.join()
     if trigger_error:
         raise RuntimeError("MIDI trigger failed during loopback capture") from trigger_error[0]
+    discontinuities = [
+        item for item in capture_warnings
+        if issubclass(item.category, sc.SoundcardRuntimeWarning)
+    ]
+    if discontinuities:
+        details = "; ".join(str(item.message) for item in discontinuities)
+        raise RuntimeError(
+            f"WASAPI loopback reported {len(discontinuities)} audio discontinuity warning(s); "
+            f"the raw take was rejected instead of writing a potentially cracked WAV ({details})"
+        )
     _write_raw_master(output, sample_rate, recording)
     return output
 

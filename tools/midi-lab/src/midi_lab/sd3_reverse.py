@@ -10,12 +10,15 @@ from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import json
-from math import log2
+from math import isfinite, log2
 from pathlib import Path
 import re
 from typing import Any
 
 import yaml
+
+
+MAX_PAD_VOLUME = 4.0
 
 
 @dataclass(frozen=True)
@@ -555,6 +558,58 @@ def _rewrite_aliases(block: list[str], aliases: dict[str, list[Any]], drop_unspe
     return rewritten
 
 
+def _rewrite_pad_overrides(block: list[str], overrides: dict[str, dict[str, Any]]) -> list[str]:
+    """Apply reviewed per-instrument gain without changing shared mixer channels."""
+    supported = {"pvolume"}
+    unknown_properties = {
+        property_name
+        for values in overrides.values()
+        for property_name in values
+        if property_name not in supported
+    }
+    if unknown_properties:
+        raise ValueError(f"unsupported pad override properties: {sorted(unknown_properties)}")
+    rewritten = list(block)
+    seen: set[str] = set()
+    # Work backwards because inserting a missing property changes later spans.
+    pad_spans: list[tuple[str, int, int]] = []
+    for index, line in enumerate(rewritten):
+        match = re.match(r"^pad\s+(\S+)\s+\{$", line.strip())
+        if match:
+            pad_spans.append((match.group(1), index, _block_end(rewritten, index)))
+    for pad, start, end in reversed(pad_spans):
+        if pad not in overrides:
+            continue
+        seen.add(pad)
+        for property_name, raw_value in overrides[pad].items():
+            value = float(raw_value)
+            if not isfinite(value) or not 0 < value <= MAX_PAD_VOLUME:
+                raise ValueError(
+                    f"pad override {pad}.{property_name} must be finite and in (0, {MAX_PAD_VOLUME}]"
+                )
+            value_text = f"{value:.6f}".rstrip("0").rstrip(".")
+            newline = "\r\n" if rewritten[start].endswith("\r\n") else "\n"
+            property_index = next(
+                (index for index in range(start + 1, end - 1)
+                 if rewritten[index].strip().startswith(f"{property_name} ")),
+                None,
+            )
+            replacement = f"{property_name} {value_text}{newline}"
+            if property_index is not None:
+                rewritten[property_index] = replacement
+            else:
+                insert_at = next(
+                    (index for index in range(start + 1, end - 1)
+                     if rewritten[index].strip().startswith("maxpoly ")),
+                    end - 1,
+                )
+                rewritten.insert(insert_at, replacement)
+    missing = set(overrides) - seen
+    if missing:
+        raise ValueError(f"pad overrides do not exist in source block: {sorted(missing)}")
+    return rewritten
+
+
 def _master_entries(mastermics: list[str]) -> dict[str, int]:
     entries: dict[str, int] = {}
     for line in mastermics:
@@ -641,7 +696,8 @@ def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_coun
 def _clone_block(source: Path, source_instbox: int, target_instbox: int,
                  aliases: dict[str, list[Any]], base_mastermics: list[str], base_mic_count: int,
                  micmap_overrides: dict[str, Any], micmap_exact_match: bool,
-                 micmap_require_explicit: bool) -> list[str]:
+                 micmap_require_explicit: bool,
+                 pad_overrides: dict[str, dict[str, Any]]) -> list[str]:
     lines, _ = _preset_lines(source)
     spans = _instrument_spans(lines)
     if source_instbox not in spans:
@@ -660,6 +716,7 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
         micmap_exact_match,
         micmap_require_explicit,
     )
+    block = _rewrite_pad_overrides(block, pad_overrides)
     return _rewrite_aliases(block, aliases, drop_unspecified=True)
 
 
@@ -728,6 +785,7 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
             clone.get("micmap_overrides", {}),
             bool(clone.get("micmap_exact_match", True)),
             bool(clone.get("micmap_require_explicit", False)),
+            clone.get("pad_overrides", {}),
         ))
 
     mixer_index = next((index for index, line in enumerate(lines) if line.strip() == "mixer {"), None)

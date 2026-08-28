@@ -159,6 +159,68 @@ class Sd3ReverseTests(unittest.TestCase):
             self.assertEqual(inventory["notes"]["37"][0]["drum_id"], "SD30")
             self.assertEqual(len(inventory["notes"]["32"]), 1)
 
+    def test_megakit_build_applies_reviewed_clone_pad_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.sd3p"
+            source = root / "source.sd3p"
+            output = root / "out.sd3p"
+            recipe = root / "recipe.yaml"
+            base.write_bytes(self._preset([self._instbox(0, "BASE", "SD01", "snareR", "32")]))
+            source.write_bytes(self._preset([self._instbox(2, "ALT", "SD30", "snareR", "5")]))
+            recipe.write_text(
+                "\n".join([
+                    "schema_version: 1",
+                    "kind: sd3-preset-build",
+                    f"base_sha256: {scan_binary(base)['sha256']}",
+                    "clones:",
+                    "  - source: source.sd3p",
+                    f"    source_sha256: {scan_binary(source)['sha256']}",
+                    "    source_instbox: 2",
+                    "    target_instbox: 1",
+                    "    aliases: {snareR: [37]}",
+                    "    pad_overrides: {snareR: {pvolume: 0.562341}}",
+                    "expected_unique_notes: [32, 37]",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            build_megakit_preset(base, recipe, root, output)
+            payload = output.read_text(encoding="latin-1")
+            pad_start = payload.rindex("pad snareR {")
+            pad_end = payload.index("\n}", pad_start)
+            pad_block = payload[pad_start:pad_end]
+            self.assertEqual(pad_block.count("pvolume 0.562341"), 1)
+
+    def test_megakit_build_rejects_nonfinite_or_extreme_pad_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.sd3p"
+            source = root / "source.sd3p"
+            base.write_bytes(self._preset([self._instbox(0, "BASE", "SD01", "snareR", "32")]))
+            source.write_bytes(self._preset([self._instbox(2, "ALT", "SD30", "snareR", "5")]))
+            for index, value in enumerate((".nan", ".inf", "0", "4.1")):
+                recipe = root / f"recipe-{index}.yaml"
+                output = root / f"out-{index}.sd3p"
+                recipe.write_text(
+                    "\n".join([
+                        "schema_version: 1",
+                        "kind: sd3-preset-build",
+                        f"base_sha256: {scan_binary(base)['sha256']}",
+                        "clones:",
+                        "  - source: source.sd3p",
+                        f"    source_sha256: {scan_binary(source)['sha256']}",
+                        "    source_instbox: 2",
+                        "    target_instbox: 1",
+                        "    aliases: {snareR: [37]}",
+                        f"    pad_overrides: {{snareR: {{pvolume: {value}}}}}",
+                        "expected_unique_notes: [32, 37]",
+                    ]) + "\n",
+                    encoding="utf-8",
+                )
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, "finite and in"):
+                    build_megakit_preset(base, recipe, root, output)
+                self.assertFalse(output.exists())
+
     def test_megakit_build_remaps_cloned_mics_to_base_master_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

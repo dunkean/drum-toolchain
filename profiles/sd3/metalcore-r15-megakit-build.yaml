@@ -35,8 +35,8 @@ mixer_overrides:
   X-PercR: {volume: 0.68, route: "buss 11"}
   X-FX-11: {volume: 0.46, route: "buss 12"}
   X-FX-1R1: {volume: 0.46, route: "buss 12"}
-  X-FX-12: {volume: 0.46, route: "buss 12"}
-  X-FX-1R2: {volume: 0.46, route: "buss 12"}
+  X-FX-12: {volume: 1.0, route: "buss 12"}
+  X-FX-1R2: {volume: 1.0, route: "buss 12"}
   X-Perc3: {volume: 0.46, route: "buss 12"}
   X-PercR3: {volume: 0.46, route: "buss 12"}
   X-ClosedHats-1: {volume: 1.0, route: "buss 13"}
@@ -93,6 +93,8 @@ clones:
       snareMC: [39]
       snareFX: [40]
       snareSL: [41]
+    pad_overrides:
+      snareR: {pvolume: 0.562341}
     micmap_overrides:
       Snare: SnareTop-C
       OH: Oh
@@ -105,6 +107,8 @@ clones:
       snareR: [42]
       snareFO: [43]
       snareRO: [44]
+    pad_overrides:
+      snareR: {pvolume: 1.74}
     micmap_overrides:
       Oh-414: Oh
       AmbNear-NarrowM49: AmbNear
@@ -120,6 +124,8 @@ clones:
     purpose: Sleep Token kick from Death & Darkness
     aliases:
       kickR: [25]
+    pad_overrides:
+      kickR: {pvolume: 0.75}
     micmap_overrides:
       KickSub: KickAlt
       OH: Oh
@@ -130,6 +136,8 @@ clones:
     purpose: Sleep Token high tom from Death & Darkness
     aliases:
       tom1R: [60]
+    pad_overrides:
+      tom1R: {pvolume: 0.316228}
     micmap_overrides:
       TomU1: Tom1
   - source: Kit_SleepToken.sd3p
@@ -139,6 +147,8 @@ clones:
     purpose: Sleep Token mid tom from Death & Darkness
     aliases:
       tom2R: [61]
+    pad_overrides:
+      tom2R: {pvolume: 0.316228}
     micmap_overrides:
       TomU2: Tom2
   - source: Kit_SleepToken.sd3p
@@ -148,6 +158,8 @@ clones:
     purpose: Sleep Token low tom from Death & Darkness
     aliases:
       tom3R: [62]
+    pad_overrides:
+      tom3R: {pvolume: 0.316228}
     micmap_overrides:
       Tom3: Tom4
       TomU3: Tom5
@@ -185,6 +197,8 @@ clones:
     purpose: Electronic Edge mid tom for DnB, industrial and electro scenes
     aliases:
       tom2: [53]
+    pad_overrides:
+      tom2: {pvolume: 3.0}
     micmap_overrides:
       Tom2: X-FX-12
   - source: 2_Complete_metal_foundry.sd3p
@@ -224,6 +238,8 @@ clones:
     purpose: Sleep Token fourth tom for the flexible snare/tom surface
     aliases:
       tom4R: [63]
+    pad_overrides:
+      tom4R: {pvolume: 0.316228}
     micmap_overrides:
       TomU4: Tom5
 expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]

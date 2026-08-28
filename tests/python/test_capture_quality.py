@@ -2,16 +2,93 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 from scipy.io import wavfile
 
 from drum_sampler import CaptureQualityPolicy, CaptureRequest, CaptureSessionPlan, assess_wav, audit_library, library_from_plan
-from drum_sampler.audio import QualityProfile, process_wav
+from drum_sampler.audio import QualityProfile, WASAPI_LOOPBACK_BLOCKSIZE, _capture_loopback, process_wav
+
+
+class _FakeRecorder:
+    def __init__(self, microphone: "_FakeMicrophone", warning_type: type[Warning] | None = None) -> None:
+        self.microphone = microphone
+        self.warning_type = warning_type
+
+    def __enter__(self) -> "_FakeRecorder":
+        self.microphone.entered = True
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def record(self, *, numframes: int) -> np.ndarray:
+        if self.warning_type is not None:
+            warnings.warn("data discontinuity in recording", self.warning_type)
+        return np.zeros((numframes, 2), dtype=np.float32)
+
+
+class _FakeMicrophone:
+    name = "OUT 3-4"
+    isloopback = True
+
+    def __init__(self, warning_type: type[Warning] | None = None) -> None:
+        self.warning_type = warning_type
+        self.blocksize: int | None = None
+        self.entered = False
+
+    def recorder(self, *, samplerate: int, channels: list[int], blocksize: int) -> _FakeRecorder:
+        self.blocksize = blocksize
+        return _FakeRecorder(self, self.warning_type)
 
 
 class CaptureQualityTests(unittest.TestCase):
+    def test_loopback_uses_safe_buffer_and_writes_clean_take(self) -> None:
+        class FakeSoundcardWarning(Warning):
+            pass
+
+        microphone = _FakeMicrophone()
+        soundcard = SimpleNamespace(
+            SoundcardRuntimeWarning=FakeSoundcardWarning,
+            all_microphones=lambda **_kwargs: [microphone],
+        )
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.dict("sys.modules", {"soundcard": soundcard}), \
+             patch("drum_sampler.audio._emit_note", side_effect=lambda *_args: self.assertTrue(microphone.entered)):
+            output = Path(temporary) / "capture.wav"
+            _capture_loopback(
+                midi_port="virtual", query="OUT 3-4", note=36, velocity=100,
+                output=output, channel=10, controllers=(), frames=64,
+                duration=0.01, gate=0, preroll=0, sample_rate=48000, channels=2,
+            )
+            self.assertEqual(microphone.blocksize, WASAPI_LOOPBACK_BLOCKSIZE)
+            self.assertTrue(output.is_file())
+
+    def test_loopback_rejects_discontinuous_take_before_writing(self) -> None:
+        class FakeSoundcardWarning(Warning):
+            pass
+
+        microphone = _FakeMicrophone(FakeSoundcardWarning)
+        soundcard = SimpleNamespace(
+            SoundcardRuntimeWarning=FakeSoundcardWarning,
+            all_microphones=lambda **_kwargs: [microphone],
+        )
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.dict("sys.modules", {"soundcard": soundcard}), \
+             patch("drum_sampler.audio._emit_note"):
+            output = Path(temporary) / "capture.wav"
+            with self.assertRaisesRegex(RuntimeError, "potentially cracked WAV"):
+                _capture_loopback(
+                    midi_port="virtual", query="OUT 3-4", note=36, velocity=100,
+                    output=output, channel=10, controllers=(), frames=64,
+                    duration=0.01, gate=0, preroll=0, sample_rate=48000, channels=2,
+                )
+            self.assertFalse(output.exists())
+
     def test_assess_rejects_silence_and_clipping_without_touching_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
