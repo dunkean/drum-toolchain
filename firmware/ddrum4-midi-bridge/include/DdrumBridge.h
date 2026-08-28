@@ -84,6 +84,10 @@ struct HihatQuantizedConfig {
 struct HihatHitRoute {
   uint8_t inputChannel;
   uint8_t inputNote;
+  // Quantization is applied only when the selected Scene/VP renderer already
+  // resolved this closed Note-P base. Other scene targets (for example an
+  // electronic hat) retain their own normal renderer note.
+  uint8_t baseOutputNote;
   uint8_t zoneCount;
   // Upper normalized (0..127) boundary for every zone except the final one.
   // Only the first zoneCount - 1 values are read and must be strictly rising.
@@ -249,7 +253,8 @@ class DdrumBridge {
   const NoteRoute* findNoteRoute(uint8_t inputChannel, uint8_t inputNote) const;
   StateRoute readStateRoute(size_t index) const;
   HihatHitRoute readHihatHitRoute(size_t index) const;
-  const NoteRoute* findHihatRoute(uint8_t inputChannel, uint8_t inputNote) const;
+  const NoteRoute* findHihatRoute(uint8_t inputChannel, uint8_t inputNote,
+                                  const NoteRoute& resolvedRoute) const;
   uint8_t hihatZone(const HihatHitRoute& route) const;
   NativeControlRoute readNativeControl(size_t index) const;
   DdrumStateAction readStateAction(size_t index) const;

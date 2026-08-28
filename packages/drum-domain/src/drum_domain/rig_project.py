@@ -327,6 +327,7 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                     _fail(f"expression decoder {key!r} is ambiguous")
                 expression_decoders[key] = decoder
     expression_keys: set[tuple[str, str, str]] = set()
+    reviewed_ddrum4_hihat_quantizations = 0
     for index, route in enumerate(expression_routes):
         key = (route["source"], route["physical"], route["expression"])
         if key in expression_keys:
@@ -353,6 +354,7 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                 if event_type != "quantized_note_p":
                     _fail(f"expression_routing[{index}].targets.ddrum4: only planned quantized_note_p is currently representable")
                 if status in {"measured", "user-confirmed"}:
+                    reviewed_ddrum4_hihat_quantizations += 1
                     closed, opened = event.get("input_closed"), event.get("input_open")
                     articulations = event.get("articulations")
                     if not isinstance(closed, int) or not isinstance(opened, int) or not 0 <= closed <= 127 or not 0 <= opened <= 127 or closed == opened:
@@ -371,6 +373,7 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                                 not all(isinstance(note, int) and 0 <= note <= 127 for note in notes) or
                                 not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1 or
                                 not all(isinstance(boundary, int) and 0 <= boundary <= 127 for boundary in boundaries) or
+                                any(boundary >= 127 for boundary in boundaries) or
                                 any(right <= left for left, right in zip(boundaries, boundaries[1:]))):
                             _fail(f"expression_routing[{index}].targets.ddrum4: hihat zone notes/boundaries are invalid")
                 elif status != "planned":
@@ -387,6 +390,8 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                     renderer = document["renderers"]["sd3"][variant.logical_target]
                     if renderer.get("channel", 10) != event["channel"] or renderer.get("cc") != event["cc"]:
                         _fail(f"expression_routing[{index}].targets.sd3: renderer {variant.logical_target!r} must declare the same channel and cc")
+    if reviewed_ddrum4_hihat_quantizations > 1:
+        _fail("only one reviewed DDrum4 hi-hat quantization is supported by the Uno profile")
 
     # A DrumGizmo midimap is one MIDI-note address per logical sound. The
     # all-zero M1 fixture is explicitly unresolved and therefore exempt until

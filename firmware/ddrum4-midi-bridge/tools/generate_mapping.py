@@ -32,6 +32,8 @@ def project_mapping_header(document, output_channel):
     if document.get("status") != "ready" or document.get("deployment") != "live" or document.get("hardware_flash") != "ready":
         raise ValueError("firmware project mapping is not a verified live flash plan")
     output_channel = integer(output_channel, "output channel", 1, 16)
+    if output_channel != integer(document.get("ddrum4_output_channel"), "project DDrum4 output channel", 1, 16):
+        raise ValueError("--output-channel differs from the reviewed project DDrum4 output channel")
     state = document.get("state")
     controls = document.get("logical_control_protocol")
     records = document.get("records")
@@ -229,7 +231,7 @@ def project_mapping_header(document, output_channel):
         for physical, notes, boundaries in hihat_routes:
             padded_notes = notes + [0] * (8 - len(notes))
             padded_boundaries = boundaries + [0] * (7 - len(boundaries))
-            lines.append("  {" + f"{hihat_source_channel}, " + "0, " +
+            lines.append("  {" + f"{hihat_source_channel}, " + "0, " + str(notes[0]) + ", " +
                          f"{len(notes)}, {{" + ", ".join(str(value) for value in padded_boundaries) + "}, {" +
                          ", ".join(str(value) for value in padded_notes) + f"}}}}, // {physical} input note is resolved below")
         # The physical role is resolved from the source decoder, not guessed from a pad socket.
@@ -240,7 +242,7 @@ def project_mapping_header(document, output_channel):
         for offset, (physical, _notes, _boundaries) in enumerate(hihat_routes):
             if physical not in decoder_notes:
                 raise ValueError(f"hihat articulation {physical!r} has no exact Note source decoder")
-            lines[start + offset] = lines[start + offset].replace("0, " + str(len(_notes)) + ",", str(decoder_notes[physical]) + ", " + str(len(_notes)) + ",", 1)
+            lines[start + offset] = lines[start + offset].replace("0, " + str(_notes[0]) + ",", str(decoder_notes[physical]) + ", " + str(_notes[0]) + ",", 1)
         lines.extend([
             "};",
             "constexpr size_t HIHAT_HIT_ROUTE_COUNT = sizeof(HIHAT_HIT_ROUTES) / sizeof(HIHAT_HIT_ROUTES[0]);",

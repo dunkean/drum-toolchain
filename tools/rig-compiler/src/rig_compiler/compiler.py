@@ -216,8 +216,19 @@ def _firmware_action_lowering_blockers(document: dict[str, Any]) -> list[dict[st
     return blockers
 
 
-def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str, Any]],
+                                 bank_facts: Any = None) -> dict[str, Any] | None:
     """Lower one reviewed openness CC route into the bounded Uno contract."""
+    bank_blocks: list[range] = []
+    if bank_facts is not None:
+        try:
+            bank_document = yaml.safe_load(bank_facts.manifest.read_text(encoding="utf-8"))
+            bank_blocks = [range(sound["note_base"], sound["note_base"] + sound["note_p"])
+                           for sound in bank_document["sounds"]
+                           if isinstance(sound, dict) and isinstance(sound.get("note_base"), int)
+                           and isinstance(sound.get("note_p"), int)]
+        except (OSError, KeyError, TypeError, yaml.YAMLError) as error:
+            raise RigCompilerError("linked DDrum4 bank cannot validate hi-hat Note-P positions") from error
     for record in routes:
         if record["match"].get("type") != "cc":
             continue
@@ -233,6 +244,21 @@ def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str
         articulations = event.get("articulations")
         if not isinstance(articulations, list):
             continue
+        for articulation in articulations:
+            physical, notes = articulation.get("physical"), articulation.get("notes")
+            if not isinstance(physical, str) or not isinstance(notes, list) or not notes:
+                raise RigCompilerError("reviewed DDrum4 hi-hat quantization has an invalid articulation")
+            matching = [item for item in routes if item["match"].get("type") == "note" and
+                        item["source"]["id"] == record["source"]["id"] and item["physical"] == physical]
+            if not matching:
+                raise RigCompilerError(f"reviewed DDrum4 hi-hat quantization has no raw Note decoder for {physical!r}")
+            if not any(item["renderers"]["ddrum4"]["note"] == notes[0] for item in matching):
+                raise RigCompilerError(
+                    f"reviewed DDrum4 hi-hat quantization for {physical!r} does not begin at its active renderer note {notes[0]}")
+            if bank_facts is not None and any(note not in bank_facts.playable_notes for note in notes):
+                raise RigCompilerError(f"reviewed DDrum4 hi-hat quantization for {physical!r} references a note outside the linked bank")
+            if bank_facts is not None and not any(all(note in block for note in notes) for block in bank_blocks):
+                raise RigCompilerError(f"reviewed DDrum4 hi-hat quantization for {physical!r} spans multiple DDrum4 Sound/Note-P blocks")
         return {
             "source": record["source"]["id"],
             "source_channel": record["source"]["channel"],
@@ -426,6 +452,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "format": "ddrum4-firmware-project-mapping-plan/v1",
         "status": report_status["firmware-project-mapping"], "deployment": deployment,
         "state": document["state"],
+        "ddrum4_output_channel": document["ddrum4_output_channel"],
         "logical_control_protocol": document["logical_control_protocol"],
         "native_control_map": document["native_control_map"],
         "ddrum_state_actions": document.get("ddrum_state_actions", {}),
@@ -433,7 +460,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "lowering_blockers": firmware_lowering_blockers,
         "hardware_flash": "ready" if live_ready else "disabled",
     }
-    hihat_quantization = _firmware_hihat_quantization(document, routes)
+    hihat_quantization = _firmware_hihat_quantization(document, routes, bank_facts)
     if hihat_quantization is not None:
         firmware["hihat_quantization"] = hihat_quantization
     def note_map(target: str, renderer: str) -> dict[str, Any]:

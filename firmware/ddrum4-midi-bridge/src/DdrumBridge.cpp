@@ -93,11 +93,13 @@ uint8_t DdrumBridge::hihatZone(const HihatHitRoute& route) const {
   return route.zoneCount - 1;
 }
 
-const NoteRoute* DdrumBridge::findHihatRoute(uint8_t inputChannel, uint8_t inputNote) const {
+const NoteRoute* DdrumBridge::findHihatRoute(uint8_t inputChannel, uint8_t inputNote,
+                                             const NoteRoute& resolvedRoute) const {
   if (!config_.hihatQuantized.enabled) return nullptr;
   for (size_t index = 0; index < config_.hihatHitRouteCount; ++index) {
     HihatHitRoute route = readHihatHitRoute(index);
-    if (route.inputChannel != inputChannel || route.inputNote != inputNote) continue;
+    if (route.inputChannel != inputChannel || route.inputNote != inputNote ||
+        route.baseOutputNote != resolvedRoute.outputNote) continue;
     hihatRouteBuffer_ = {route.inputChannel, route.inputNote, route.outputNotes[hihatZone(route)], 1, 127, 1, 127};
     return &hihatRouteBuffer_;
   }
@@ -178,10 +180,11 @@ bool DdrumBridge::validConfig() const {
       q.inputClosed == q.inputOpen)) return false;
   for (size_t i = 0; i < config_.hihatHitRouteCount; ++i) {
     HihatHitRoute route = readHihatHitRoute(i);
-    if (!q.enabled || route.inputChannel != q.sourceChannel || route.inputNote > 127 ||
+    if (!q.enabled || route.inputChannel != q.sourceChannel || route.inputNote > 127 || route.baseOutputNote > 127 ||
         route.zoneCount < 1 || route.zoneCount > 8) return false;
     for (uint8_t zone = 0; zone < route.zoneCount; ++zone) {
       if (route.outputNotes[zone] > 127) return false;
+      if (zone >= 1 && route.upperBoundaries[zone - 1] >= 127) return false;
       if (zone >= 2 && route.upperBoundaries[zone - 1] <= route.upperBoundaries[zone - 2]) return false;
     }
     for (size_t otherIndex = i + 1; otherIndex < config_.hihatHitRouteCount; ++otherIndex) {
@@ -477,8 +480,11 @@ size_t DdrumBridge::process(const MidiEvent& input, MidiEvent* output, size_t ca
   if (input.type == MidiEventType::PolyAftertouch) {
     route = findLedgerRoute(input.channel, input.data1, nowMs);
   } else {
-    route = findHihatRoute(input.channel, input.data1);
-    if (!route) route = findNoteRoute(input.channel, input.data1);
+    route = findNoteRoute(input.channel, input.data1);
+    if (route) {
+      const NoteRoute* quantized = findHihatRoute(input.channel, input.data1, *route);
+      if (quantized) route = quantized;
+    }
   }
   if (!route) {
     ++ignoredMessages_;

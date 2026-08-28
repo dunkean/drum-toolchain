@@ -261,14 +261,18 @@ void test_guard_is_not_generic_and_overflow_keeps_primary_hit() {
 void test_quantized_hihat_selects_note_p_from_last_cc4() {
   const HihatHitRoute hihatRoutes[] = {
       // Bow closed / loose / quarter / half / open: r15 HHAT_981 positions 1..5.
-      {3, 3, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}},
+      {3, 3, 72, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}},
       // Edge closed / quarter / half / open: r15 CYMB_981 positions 1..4.
-      {3, 4, 4, {31, 63, 95, 0, 0, 0, 0}, {40, 41, 42, 43, 0, 0, 0, 0}},
+      {3, 4, 40, 4, {31, 63, 95, 0, 0, 0, 0}, {40, 41, 42, 43, 0, 0, 0, 0}},
+  };
+  const StateRoute acousticScene[] = {
+      {3, 3, 0, 0xff, 0xff, 0xff, 0xff, 72, 1, 127, 1, 127},
+      {3, 4, 0, 0xff, 0xff, 0xff, 0xff, 40, 1, 127, 1, 127},
   };
   const BridgeConfig quantized = {
       12, programChannels, 3, {0, 0, 0, 0, 0, 0, 0, false, false},
       routes, 4, false, nullptr, {EchoGuardMode::Disabled, 0, 0}, {0, 0, 0, 0, 0},
-      nullptr, 0, {0, 1, 2, 3, 1}, nullptr, 0, nullptr, 0,
+      acousticScene, 2, {0, 1, 2, 3, 2}, nullptr, 0, nullptr, 0,
       {3, 4, 0, 127, true}, hihatRoutes, 2,
   };
   DdrumBridge bridge(quantized);
@@ -283,6 +287,22 @@ void test_quantized_hihat_selects_note_p_from_last_cc4() {
           "open bow did not select final Note-P slot");
   require(bridge.process({MidiEventType::NoteOn, 3, 4, 113}, &output, 1) == 1 && output.data1 == 43,
           "open edge did not select its final Note-P slot");
+
+  // Scene/VP owns logical target resolution. A scene which maps the same raw
+  // bow to electronic note 50 must not be overwritten by acoustic CC4 slots.
+  const StateRoute electronicScene[] = {
+      {3, 3, 1, 0xff, 0xff, 0xff, 0xff, 50, 1, 127, 1, 127},
+  };
+  BridgeConfig sceneQuantized = quantized;
+  sceneQuantized.stateRoutes = electronicScene;
+  sceneQuantized.stateRouteCount = 1;
+  DdrumBridge sceneBridge(sceneQuantized);
+  require(sceneBridge.process({MidiEventType::ProgramChange, 14, 1, 0}, &output, 1) == 0,
+          "scene change should not emit a renderer hit");
+  require(sceneBridge.process({MidiEventType::ControlChange, 3, 4, 0}, &output, 1) == 0,
+          "scene CC4 must remain state only");
+  require(sceneBridge.process({MidiEventType::NoteOn, 3, 3, 114}, &output, 1) == 1 && output.data1 == 50,
+          "quantized hihat bypassed the selected Scene renderer");
 }
 
 }  // namespace

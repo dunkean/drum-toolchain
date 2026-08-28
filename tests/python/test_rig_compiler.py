@@ -413,7 +413,13 @@ class RigCompilerTests(unittest.TestCase):
             self.assertIn("constexpr LogicalControlConfig LOGICAL_CONTROLS = {20, 255, 255, 255, 1};", generated)
             self.assertIn("constexpr LogicalState INITIAL_LOGICAL_STATE = {0, 0, 0, 0, 0};", generated)
             self.assertIn("constexpr HihatQuantizedConfig HIHAT_QUANTIZED = {10, 4, 127, 0, true};", generated)
-            self.assertIn("{10, 42, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}}", generated)
+            self.assertIn("{10, 42, 72, 5, {25, 50, 75, 100, 0, 0, 0}, {72, 73, 74, 75, 76, 0, 0, 0}}", generated)
+            wrong_channel = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping",
+                 str(output / "firmware-project-mapping.json"), "--output-channel", "11",
+                 "--output", str(root / "wrong-channel.h")], capture_output=True, text=True, check=False)
+            self.assertEqual(wrong_channel.returncode, 2)
+            self.assertIn("differs from the reviewed project", wrong_channel.stderr)
             runtime = yaml.safe_load((output / "runtime-profile.yaml").read_text(encoding="utf-8"))
             self.assertEqual(runtime["hardware_io"], "logical-control-only")
 
