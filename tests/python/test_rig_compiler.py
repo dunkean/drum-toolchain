@@ -29,8 +29,18 @@ from drum_sampler.offline import drumgizmo_note_overrides
 class RigCompilerTests(unittest.TestCase):
     def _project(self, root: Path, *, duplicate: bool = False) -> Path:
         project = root / "kit.yaml"
+        (root / "physical.yaml").write_text(yaml.safe_dump({
+            "kit": "compiler-fixture",
+            "instruments": [
+                {"id": "kick_pad", "kind": "kick", "zones": ["head"]},
+                {"id": "snare_pad", "kind": "snare", "zones": ["head"]},
+            ],
+        }, sort_keys=False), encoding="utf-8")
         document = {
-            "schema_version": 1, "kind": "rig-project", "project": "test-kit", "rig": "fixture", "deployment": "simulation", "ddrum4_output_channel": 10,
+            "schema_version": 1, "kind": "rig-project", "project": "test-kit", "rig": "physical.yaml",
+            "physical_bindings": {"kick.head": {"instrument": "kick_pad", "zone": "head"},
+                                  "snare.head": {"instrument": "snare_pad", "zone": "head"}},
+            "deployment": "simulation", "ddrum4_output_channel": 10,
             "control_bus": {"endpoint": "SIM_control", "channel": 15, "status": "planned"},
             "sources": {"brain": {"endpoint": "fixture", "channel": 10, "primary": "usb", "connection_profile": "LIVE"}},
             "connection_profiles": {"LIVE": {"usb_sources": True}},
@@ -69,6 +79,7 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(runtime["records"][0]["match"]["type"], "note")
             self.assertIn("source", runtime["records"][0])
             self.assertEqual(runtime["source_decoders"], validated.document["source_decoders"])
+            self.assertEqual(runtime["physical_bindings"], validated.document["physical_bindings"])
             self.assertEqual(runtime["sources"], validated.document["sources"])
             self.assertEqual(runtime["state"], validated.document["state"])
             self.assertEqual(runtime["control_bus"], validated.document["control_bus"])
@@ -94,6 +105,7 @@ class RigCompilerTests(unittest.TestCase):
             self.assertEqual(virtual_kit["format"], "virtual-kit-map/v1")
             self.assertEqual(virtual_kit["status"], "ready")
             self.assertEqual(virtual_kit["rows"][0]["ddrum4"], {"channel": 10, "note": 36})
+            self.assertEqual(virtual_kit["rows"][0]["physical_binding"], {"instrument": "kick_pad", "zone": "head"})
             self.assertEqual(virtual_kit["rows"][1]["drumgizmo"]["articulation"], "head")
             expressions = json.loads((output / "expression-capability-report.json").read_text(encoding="utf-8"))
             self.assertEqual(expressions["summary"], {
@@ -386,6 +398,7 @@ class RigCompilerTests(unittest.TestCase):
                 {"logical_target": "snare.head"},
             ]
             document["physical_events"].append("hh.bow")
+            document["physical_bindings"]["hh.bow"] = {"instrument": "kick_pad", "zone": "head"}
             document["source_decoders"].extend([
                 {"match": {"source": "brain", "type": "note", "note": 42},
                  "emit": {"physical": "hh.bow", "expressions": ["velocity"]}},
@@ -441,6 +454,7 @@ class RigCompilerTests(unittest.TestCase):
                 {"logical_target": "snare.head"},
             ]
             document["physical_events"].append("hh.bow")
+            document["physical_bindings"]["hh.bow"] = {"instrument": "kick_pad", "zone": "head"}
             document["source_decoders"].extend([
                 {"match": {"source": "brain", "type": "note", "note": 42},
                  "emit": {"physical": "hh.bow", "expressions": ["velocity"]}},

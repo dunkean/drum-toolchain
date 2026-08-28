@@ -101,6 +101,7 @@ class RigProject:
     raw: Mapping[str, Any]
     project: str
     rig: str
+    physical_bindings: Mapping[str, Mapping[str, str]]
     deployment: str
     ddrum4_output_channel: int
     control_bus: Mapping[str, Any] | None
@@ -123,6 +124,52 @@ class RigProject:
 
 def _fail(message: str) -> None:
     raise RigProjectError(message)
+
+
+def _resolve_project_reference(project_path: Path, reference: str) -> Path:
+    """Resolve a project-relative or repository-relative declarative reference."""
+    raw = Path(reference)
+    candidates = [raw] if raw.is_absolute() else [project_path.parent / raw, Path.cwd() / raw]
+    if not raw.is_absolute():
+        candidates.extend(parent / raw for parent in project_path.resolve().parents)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    _fail(f"rig profile cannot be read: {reference}")
+
+
+def _validate_physical_bindings(project_path: Path, document: Mapping[str, Any]) -> None:
+    bindings = document.get("physical_bindings")
+    if bindings is None:
+        return
+    rig_path = _resolve_project_reference(project_path, document["rig"])
+    try:
+        rig_document = yaml.safe_load(rig_path.read_text(encoding="utf-8"))
+        validate_document(rig_document, _schema_path().with_name("physical-kit.schema.json"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as error:
+        _fail(f"invalid physical rig profile {rig_path}: {error}")
+    instruments = {
+        item["id"]: item
+        for item in rig_document["instruments"]
+    }
+    events = set(document["physical_events"])
+    if set(bindings) != events:
+        missing, extra = sorted(events - set(bindings)), sorted(set(bindings) - events)
+        _fail(f"physical_bindings must cover physical_events exactly; missing={missing}, extra={extra}")
+    for event, binding in bindings.items():
+        instrument = instruments.get(binding["instrument"])
+        if instrument is None:
+            _fail(f"physical binding {event!r} names unknown instrument {binding['instrument']!r}")
+        if binding["zone"] not in instrument["zones"]:
+            _fail(f"physical binding {event!r} names unknown zone {binding['zone']!r}")
+        owners = {
+            decoder["match"]["source"]
+            for decoder in document["source_decoders"]
+            if decoder["emit"]["physical"] == event
+        }
+        owner = instrument.get("source_owner")
+        if owner is not None and owners != {owner}:
+            _fail(f"physical binding {event!r} owner {owner!r} does not match decoder source(s) {sorted(owners)}")
 
 
 def _bank_facts(project_path: Path, reference: Mapping[str, Any] | None,
@@ -542,6 +589,7 @@ def load_rig_project(path: Path) -> RigProject:
     if not isinstance(document, dict):  # Kept explicit for static typing and future schema changes.
         _fail("rig project root must be a mapping")
     _validate_semantics(document)
+    _validate_physical_bindings(path, document)
     bank_facts = _bank_facts(path, document.get("ddrum4_bank"), document["ddrum4_output_channel"])
     if bank_facts is not None:
         invalid_notes = sorted({renderer["note"] for renderer in document["renderers"]["ddrum4"].values()
@@ -557,4 +605,4 @@ def load_rig_project(path: Path) -> RigProject:
             action_type=row["type"], status=row["status"], channel=row.get("channel"),
             program=row.get("program"), data=tuple(row.get("data", ())), when=dict(row.get("when", {})), description=row.get("description"),
         ) for row in rows)
-    return RigProject(path, document, document["project"], document["rig"], document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), document.get("ddrum4_bank"), bank_facts, source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])
+    return RigProject(path, document, document["project"], document["rig"], document.get("physical_bindings", {}), document["deployment"], document["ddrum4_output_channel"], document.get("control_bus"), document.get("ddrum4_bank"), bank_facts, source_objects, document["connection_profiles"], decoders, tuple(document["physical_events"]), tuple(state["scenes"]), tuple(state["variables"]), state["defaults"], document["logical_control_protocol"], document["logical_routes"], document["renderers"], document["native_control_map"], actions, document["policies"])

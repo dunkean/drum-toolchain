@@ -1,16 +1,20 @@
-profile: snare-via-edrumin-template
-status: template
+profile: greg-hybrid-snare-via-edrumin
+status: assigned-awaiting-pad-calibration
 sources:
-  edrumin: {channel: 11}
+  edrumin: {channel: 3}
 bindings:
   - physical: snare_main.head
     source: edrumin
     input: 1
-    event: {channel: 11, note: 38}
-    controllers: {position_cc: 16}
+    event: {channel: 3, note: 0}
   - physical: snare_main.rim
     source: edrumin
     input: 1
-    event: {channel: 11, note: 40}
+    event: {channel: 3, note: 1}
+  - physical: snare_main.rim
+    source: edrumin
+    input: 1
+    event: {channel: 3, note: 2}
 notes:
-  - Replace all template MIDI values with midi-lab captures before using this profile in firmware.
+  - Notes 0/1/2 are the stable assigned head/rimshot/cross-stick contract shared with the canonical rig project.
+  - Position sensing and electrical trigger settings remain measurement-required until the snare pad is connected.

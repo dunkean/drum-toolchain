@@ -1,6 +1,8 @@
 from pathlib import Path
 import unittest
 
+import yaml
+
 from drum_domain import LogicalEvent, PhysicalKit, load_setup, validate_document, validate_yaml
 
 
@@ -33,6 +35,19 @@ class DomainTests(unittest.TestCase):
         validate_yaml(ROOT / "profiles/wiring/snare-via-edrumin.yaml", schemas / "wiring-profile.schema.json")
         validate_yaml(ROOT / "profiles/targets/ddrum4-standalone.yaml", schemas / "target-profile.schema.json")
         validate_yaml(ROOT / "profiles/banks/metalcore-main.yaml", schemas / "ddrum4-bank.schema.json")
+
+    def test_composable_edrumin_wiring_matches_the_canonical_manual_profile(self) -> None:
+        wiring = yaml.safe_load((ROOT / "profiles/wiring/snare-via-edrumin.yaml").read_text(encoding="utf-8"))
+        manual = yaml.safe_load((ROOT / "profiles/physical/greg-hybrid-edrumin.yaml").read_text(encoding="utf-8"))
+        project = yaml.safe_load((ROOT / "profiles/projects/metalcore-r15-chain-simulator.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(wiring["sources"]["edrumin"]["channel"], manual["channel"])
+        self.assertEqual({row["event"]["note"] for row in wiring["bindings"]}, {0, 1, 2})
+        project_snare_notes = {
+            row["match"]["note"]
+            for row in project["source_decoders"]
+            if row["match"]["source"] == "edrumin" and row["emit"]["physical"].startswith("snare1.")
+        }
+        self.assertEqual(project_snare_notes, {0, 1, 2})
 
     def test_schema_validation_rejects_invalid_midi_channel(self) -> None:
         document = {"profile": "invalid", "status": "template", "midi": {"output_channel": 17}, "module": {"memory_blocks": 1}, "notes": []}

@@ -10,6 +10,7 @@
     "kind": {"const": "rig-project"},
     "project": {"$ref": "#/$defs/id"},
     "rig": {"type": "string", "minLength": 1},
+    "physical_bindings": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/physicalBinding"}},
     "deployment": {"enum": ["simulation", "live"]},
     "ddrum4_output_channel": {"$ref": "#/$defs/channel"},
     "control_bus": {"$ref": "#/$defs/controlBus"},
@@ -29,6 +30,7 @@
   },
   "$defs": {
     "id": {"type": "string", "minLength": 1, "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"},
+    "physicalBinding": {"type": "object", "required": ["instrument", "zone"], "additionalProperties": false, "properties": {"instrument": {"$ref": "#/$defs/id"}, "zone": {"$ref": "#/$defs/id"}}},
     "channel": {"type": "integer", "minimum": 1, "maximum": 16},
     "byte": {"type": "integer", "minimum": 0, "maximum": 127},
     "source": {"type": "object", "required": ["endpoint", "channel", "primary"], "additionalProperties": false, "properties": {"endpoint": {"type": "string", "minLength": 1}, "channel": {"$ref": "#/$defs/channel"}, "primary": {"type": "string", "enum": ["usb", "din_bus", "din"]}, "connection_profile": {"$ref": "#/$defs/id"}}},

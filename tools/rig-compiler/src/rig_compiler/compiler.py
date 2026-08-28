@@ -469,6 +469,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     runtime = {**provenance, "format": "rig-runtime-profile/v1", "status": report_status["runtime-profile"],
                "project": document.get("project", "unnamed-rig"), "deployment": deployment,
                "target_status": runtime_target_status,
+               "rig": document["rig"], "physical_bindings": document.get("physical_bindings", {}),
                "state": document["state"], "logical_control_protocol": document["logical_control_protocol"],
                "policies": document["policies"], "connection_profiles": document["connection_profiles"],
                "sources": document["sources"], "source_decoders": document["source_decoders"],
@@ -551,6 +552,8 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "status": report_status["source-note-contract"],
         "hardware_io": "disabled",
         "rule": "Modules emit stable raw addresses; Scene/VP changes only renderer output maps.",
+        "rig": document["rig"],
+        "physical_bindings": document.get("physical_bindings", {}),
         "sources": {
             identifier: {
                 "channel": source["channel"],
@@ -692,6 +695,9 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
                            "instrument": gizmo["instrument"], "articulation": gizmo["articulation"]},
             "coverage": coverage,
         }
+        physical_binding = document.get("physical_bindings", {}).get(route["physical"])
+        if physical_binding is not None:
+            row["physical_binding"] = physical_binding
         if firmware_reason is not None:
             row["ddrum4_capability"] = {"status": "unsupported", "reason": firmware_reason}
         if runtime_reason is not None:

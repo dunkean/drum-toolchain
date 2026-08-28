@@ -4,6 +4,36 @@ schema_version: 1
 kind: rig-project
 project: metalcore-r15-topology-simulator
 rig: profiles/physical/greg-hybrid-kit.yaml
+physical_bindings:
+  kick.hit: {instrument: kick_main, zone: head}
+  snare1.head: {instrument: snare_main, zone: head}
+  snare1.rimshot: {instrument: snare_main, zone: rim}
+  snare1.cross: {instrument: snare_main, zone: rim}
+  snare2.head: {instrument: snare_secondary, zone: head}
+  snare2.rimshot: {instrument: snare_secondary, zone: rim}
+  snare2.cross: {instrument: snare_secondary, zone: rim}
+  tom1.hit: {instrument: tom_1, zone: head}
+  tom2.hit: {instrument: tom_2, zone: head}
+  tom3.hit: {instrument: tom_3, zone: head}
+  hh.bow: {instrument: hihat_main, zone: bow}
+  hh.edge: {instrument: hihat_main, zone: edge}
+  hh.pedal_close: {instrument: hihat_main, zone: chick}
+  hh.pedal_splash: {instrument: hihat_main, zone: splash}
+  ride.bow: {instrument: ride_main, zone: bow}
+  ride.bell: {instrument: ride_main, zone: bell}
+  crash1.bow: {instrument: crash_1, zone: bow}
+  crash1.edge: {instrument: crash_1, zone: edge}
+  crash2.bow: {instrument: crash_2, zone: bow}
+  crash2.edge: {instrument: crash_2, zone: edge}
+  crash3.edge: {instrument: crash_3, zone: edge}
+  splash1.hit: {instrument: splash_1, zone: bow}
+  splash2.hit: {instrument: splash_2, zone: bow}
+  stack.hit: {instrument: stack, zone: bow}
+  china1.edge: {instrument: china_1, zone: edge}
+  china1.bell: {instrument: china_1, zone: bell}
+  china2.edge: {instrument: china_2, zone: edge}
+  china2.bell: {instrument: china_2, zone: bell}
+  perc.hit: {instrument: hihat_aux, zone: head}
 deployment: simulation
 ddrum4_output_channel: 12
 control_bus: {endpoint: SIM_UMC_MIDI_OUT, channel: 15, status: planned}

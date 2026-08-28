@@ -73,6 +73,24 @@ class RigProjectTests(unittest.TestCase):
         self.assertEqual(project.sources["edrumin"].channel, 3)
         self.assertEqual({decoder.message_type for decoder in project.source_decoders}, {"note", "note_range", "cc", "poly_aftertouch"})
 
+    def test_physical_binding_rejects_a_zone_or_owner_that_disagrees_with_the_rig(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        document = valid_project()
+        fill_renderers(document)
+        document["rig"] = str(repository / "profiles/physical/greg-hybrid-kit.yaml")
+        document["physical_bindings"] = {
+            "snare1.head": {"instrument": "snare_main", "zone": "head"},
+            "tom1.head": {"instrument": "tom_1", "zone": "head"},
+            "hh.opening": {"instrument": "hihat_main", "zone": "bow"},
+            "cymbal.choke": {"instrument": "crash_1", "zone": "edge"},
+        }
+        with self.assertRaisesRegex(RigProjectError, "owner .* does not match"):
+            self.load(document)
+        document["physical_bindings"]["hh.opening"] = {"instrument": "crash_1", "zone": "edge"}
+        document["physical_bindings"]["tom1.head"] = {"instrument": "tom_1", "zone": "missing"}
+        with self.assertRaisesRegex(RigProjectError, "unknown zone"):
+            self.load(document)
+
     def test_rejects_incomplete_state_route_or_renderer_coverage(self) -> None:
         document = valid_project()
         fill_renderers(document)

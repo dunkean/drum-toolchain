@@ -33,6 +33,9 @@ class ProjectProfileFixtureTests(unittest.TestCase):
         sleep_flex = project.logical_routes["sleep_token"]["snare2.head"]
         self.assertEqual(sleep_flex[0], {"logical_target": "tom4.sleep", "when": {"vp2_flex": 6}})
         self.assertEqual(sleep_flex[1], {"logical_target": "snare2.sleep"})
+        self.assertEqual(set(project.physical_bindings), set(project.physical_events))
+        self.assertEqual(project.physical_bindings["hh.pedal_close"], {"instrument": "hihat_main", "zone": "chick"})
+        self.assertEqual(project.physical_bindings["perc.hit"], {"instrument": "hihat_aux", "zone": "head"})
 
 
 if __name__ == "__main__":
