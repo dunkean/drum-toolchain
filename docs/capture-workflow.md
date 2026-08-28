@@ -43,6 +43,16 @@ as the later full calibration, so the complete pass reuses them instead of
 recording them twice. Explicit capture and preset-loaded confirmations remain
 mandatory.
 
+For the current local MegaKit revision, the guarded wrapper is:
+
+```powershell
+.\scripts\calibrate-greg-hybrid-v3.ps1 -Mode Targeted -ConfirmCapture -ConfirmPresetLoaded
+.\scripts\calibrate-greg-hybrid-v3.ps1 -Mode Full -ConfirmCapture -ConfirmPresetLoaded
+```
+
+The targeted command writes `calibration-targeted-v3.json`; only the full
+command writes the canonical `calibration.json` consumed by the campaign gate.
+
 Run a ten-minute stereo proof session with one articulation and at least three
 velocities. Confirm that:
 
