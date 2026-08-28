@@ -21,6 +21,7 @@ from control_center.campaign import (CaptureRow, Sd3CaptureCampaign, capture_row
                                      fingerprint_sd3_preset,
                                      STARTER_ROWS, METALCORE_ELECTRONIC_V1_ADDITIONS)
 from midi_lab.traces import MidiTrace, TraceEvent
+from rig_compiler.compiler import compile_project
 
 
 class ControlCenterTests(unittest.TestCase):
@@ -533,6 +534,23 @@ class ControlCenterTests(unittest.TestCase):
                          [(1, 84, 1), (2, 124, 2)])
         self.assertIn("Candidates (declared, not selected)", rows[0].ddrum4_content_summary)
         self.assertIn("variation 1/2", rows[0].ddrum4_content_summary)
+
+    def test_installed_r15_keeps_unmeasured_hihat_targets_out_of_firmware(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "compiled"
+            result = compile_project(project, output)
+
+            expression = result.artifacts["expression-capability-report.json"]
+            self.assertEqual(expression["summary"]["declared_expressions"], 6)
+            self.assertEqual(expression["summary"]["firmware_unlowerable_routes"], 6)
+            self.assertTrue(all(
+                row["targets"]["arduino_ddrum4"]["declared"]["status"] == "planned"
+                for row in expression["expressions"]
+            ))
+            firmware = result.artifacts["firmware-project-mapping.json"]
+            self.assertEqual((firmware["deployment"], firmware["status"], firmware["hardware_flash"]),
+                             ("simulation", "planned", "disabled"))
 
     def test_installed_r15_matrix_exposes_shared_crash_variations_without_extra_samples(self) -> None:
         manifest = Path(__file__).resolve().parents[3] / "profiles" / "banks" / "metalcore-r15-installed.yaml"

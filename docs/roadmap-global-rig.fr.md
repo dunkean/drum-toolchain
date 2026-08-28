@@ -83,10 +83,14 @@ change aucun réglage de module.
 - [ ] Mesurer dynamique, positions hi-hat, aftertouch/choke et latence.
 - [x] Générer le MegaKit SD3 déterministe à partir du preset Metalcore et des
   presets utilisateur validés par SHA-256 ; les notes, sources, scènes et VP
-  sont publiées dans `docs/greg-hybrid-r15-megakit.md` et son PDF.
+  sont publiées dans `docs/greg-hybrid-r15-megakit.md` et son PDF. Ce statut
+  prouve la génération structurelle, pas la validation audio : la révision
+  courante doit encore passer la calibration réelle avant toute capture.
 - [x] Générer la campagne complète v2 de 746 prises sur 59 articulations, dont cinq ouvertures HH bow
   et trois toms Electronic Edge dédiés
   et quatre edge pilotées par CC4, ainsi que l'export DrumGizmo reprenable.
+  La campagne est préparée et reprenable, mais ses WAV ne sont pas encore
+  capturés : le point suivant reste donc le gate audio autoritaire.
 - [ ] Exécuter les 746 captures lorsque le port MIDI SD3 et le retour audio
   UMC seront visibles, puis valider les WAV et le kit DrumGizmo réel.
 - [ ] Autoriser explicitement le mode MIDI live du convertisseur seulement
@@ -116,8 +120,9 @@ change aucun réglage de module.
 
 Ne passer le shield Arduino en programmation qu'après un artefact
 `firmware-project-mapping.json` avec `deployment: live`, `status: ready` et
-`hardware_flash: ready`. Le header actuellement versionné est volontairement
-inerte et ne route aucun son.
+`hardware_flash: ready`. Le header de sécurité versionné par défaut est
+volontairement inerte et ne route aucun son ; le générateur sait produire le
+vrai header, mais uniquement depuis un profil live mesuré qui franchit ce gate.
 
 ## Lancement Windows final
 
@@ -127,4 +132,7 @@ compile le projet, vérifie séparément `runtime.sd3=ready` et
 `Launch-Greg-Hybrid-Live.cmd` lance SD3 et le Converter, ouvre les ports exacts,
 publie Scene/VP sur CH15 et applique le plan d'alimentation enregistré. Le
 raccourci `Stop-Greg-Hybrid-Live.cmd` arrête uniquement les processus possédés
-par la session et restaure le plan précédent.
+par la session et restaure le plan précédent. Ce raccourci sélectionne le
+renderer SD3 sous Windows ; DrumGizmo utilise sa session hôte Linux séparée,
+avec le même projet compilé mais jamais un second renderer logiciel ouvert en
+parallèle par ce lanceur.
