@@ -164,7 +164,17 @@ def launch() -> int:
             self.visual_sources.setHorizontalHeaderLabels(("Module", "Endpoint", "Raw channel", "Primary input"))
             self.visual_sources.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.visual_sources.itemChanged.connect(lambda _: self._sync_visual_project("sources"))
-            editor_tabs.addTab(self.visual_sources, "Modules and MIDI map")
+            self.visual_physical = QTableWidget(0, 6)
+            self.visual_physical.setHorizontalHeaderLabels((
+                "Physical event", "Module", "Pad", "Zone", "MIDI type", "Raw note",
+            ))
+            self.visual_physical.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.visual_physical.itemChanged.connect(lambda _: self._sync_visual_project("physical"))
+            module_page = QWidget(); module_layout = QVBoxLayout()
+            module_layout.addWidget(QLabel("Module endpoints and channels")); module_layout.addWidget(self.visual_sources)
+            module_layout.addWidget(QLabel("Physical wiring and raw Note-On decoder")); module_layout.addWidget(self.visual_physical)
+            module_page.setLayout(module_layout)
+            editor_tabs.addTab(module_page, "Pads, modules and MIDI map")
             editor_tabs.addTab(self._matrix_panel(), "DDrum4 bank — slots, layers, variations")
             self.project_document = QTextEdit(); self.project_document.setAcceptRichText(False)
             self.project_document.setPlaceholderText("Advanced YAML source.")
@@ -358,6 +368,30 @@ def launch() -> int:
                     if column == 0:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.visual_sources.setItem(row, column, item)
+            bindings = document.get("physical_bindings", {})
+            note_decoders = {
+                decoder.get("emit", {}).get("physical"): decoder
+                for decoder in document.get("source_decoders", [])
+                if isinstance(decoder, dict) and decoder.get("match", {}).get("type") == "note"
+            }
+            physical_rows = []
+            for physical in document.get("physical_events", []):
+                binding = bindings.get(physical, {}) if isinstance(bindings, dict) else {}
+                decoder = note_decoders.get(physical, {})
+                match = decoder.get("match", {}) if isinstance(decoder, dict) else {}
+                physical_rows.append((
+                    physical, match.get("source", "MISSING"), binding.get("instrument", "MISSING"),
+                    binding.get("zone", "MISSING"), match.get("type", "MISSING"), match.get("note", "MISSING"),
+                ))
+            self.visual_physical.setRowCount(len(physical_rows))
+            for row, values in enumerate(physical_rows):
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column in (0, 1, 4):
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if value == "MISSING":
+                        item.setBackground(Qt.GlobalColor.darkRed)
+                    self.visual_physical.setItem(row, column, item)
 
         def _sync_visual_project(self, table: str) -> None:
             """Write a table edit back into Advanced YAML, preserving one source of truth."""
@@ -400,6 +434,21 @@ def launch() -> int:
                         source["endpoint"] = self.visual_sources.item(row, 1).text().strip()
                         source["channel"] = int(self.visual_sources.item(row, 2).text())
                         source["primary"] = self.visual_sources.item(row, 3).text().strip()
+                elif table == "physical":
+                    note_decoders = {
+                        decoder.get("emit", {}).get("physical"): decoder
+                        for decoder in document.get("source_decoders", [])
+                        if isinstance(decoder, dict) and decoder.get("match", {}).get("type") == "note"
+                    }
+                    for row in range(self.visual_physical.rowCount()):
+                        physical = self.visual_physical.item(row, 0).text()
+                        binding = document["physical_bindings"][physical]
+                        binding["instrument"] = self.visual_physical.item(row, 2).text().strip()
+                        binding["zone"] = self.visual_physical.item(row, 3).text().strip()
+                        decoder = note_decoders.get(physical)
+                        if decoder is None:
+                            raise ValueError(f"{physical} has no editable Note-On decoder")
+                        decoder["match"]["note"] = int(self.visual_physical.item(row, 5).text())
                 else:
                     action_rows = [(scene, action) for scene, actions in document.get("ddrum_state_actions", {}).items()
                                    if isinstance(actions, list) for action in actions if isinstance(action, dict)]
