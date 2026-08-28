@@ -8,9 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'firmware\ddrum4-midi-bridge'
-$python = 'C:\Python313\python.exe'
-if (-not (Test-Path -LiteralPath $python)) {
-    $python = (Get-Command python -ErrorAction Stop).Source
+$venvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
+$python = if (Test-Path -LiteralPath $venvPython) {
+    $venvPython
+} else {
+    (Get-Command python -ErrorAction Stop).Source
 }
 
 Write-Host "Building DDrum4 MIDI bridge (Uno)."

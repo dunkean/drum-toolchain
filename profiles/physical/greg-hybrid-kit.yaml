@@ -1,18 +1,19 @@
 kit: greg-hybrid-kit
 instruments:
-  - {id: kick_main, kind: kick, zones: [head]}
-  - {id: snare_main, kind: snare, zones: [head, rim], capabilities: [positional_sensing]}
-  - {id: snare_secondary, kind: snare, zones: [head, rim]}
-  - {id: tom_1, kind: tom, zones: [head]}
-  - {id: tom_2, kind: tom, zones: [head]}
-  - {id: tom_3, kind: tom, zones: [head]}
-  - {id: hihat_main, kind: hihat, zones: [bow, edge, chick, splash], capabilities: [continuous_openness]}
-  - {id: ride_main, kind: cymbal, zones: [bow, edge, bell], capabilities: [choke]}
-  - {id: crash_1, kind: cymbal, zones: [bow, edge], capabilities: [choke]}
-  - {id: crash_2, kind: cymbal, zones: [bow, edge], capabilities: [choke]}
-  - {id: splash_1, kind: cymbal, zones: [bow]}
-  - {id: splash_2, kind: cymbal, zones: [bow]}
-  - {id: stack, kind: cymbal, zones: [bow]}
-  - {id: china_1, kind: cymbal, zones: [bow], capabilities: [choke]}
-  - {id: china_2, kind: cymbal, zones: [bow], capabilities: [choke]}
-  - {id: hihat_aux, kind: percussion, zones: [head]}
+  - {id: kick_main, kind: kick, source_owner: ddrum4, zones: [head]}
+  - {id: snare_main, kind: snare, source_owner: edrumin, zones: [head, rim], capabilities: [positional_sensing]}
+  - {id: snare_secondary, kind: snare, source_owner: ddrum4, zones: [head, rim]}
+  - {id: tom_1, kind: tom, source_owner: ddrum4, zones: [head]}
+  - {id: tom_2, kind: tom, source_owner: ddrum4, zones: [head]}
+  - {id: tom_3, kind: tom, source_owner: ddrum4, zones: [head]}
+  - {id: hihat_main, kind: hihat, source_owner: edrumin, zones: [bow, edge, chick, splash], capabilities: [continuous_openness]}
+  - {id: ride_main, kind: cymbal, source_owner: edrumin, zones: [bow, bell], capabilities: [choke]}
+  - {id: crash_1, kind: cymbal, source_owner: ddti, zones: [bow, edge], capabilities: [choke]}
+  - {id: crash_2, kind: cymbal, source_owner: ddti, zones: [bow, edge], capabilities: [choke]}
+  - {id: crash_3, kind: cymbal, source_owner: ddti, zones: [edge], capabilities: [choke]}
+  - {id: splash_1, kind: cymbal, source_owner: ddti, zones: [bow], capabilities: [choke]}
+  - {id: splash_2, kind: cymbal, source_owner: ddti, zones: [bow], capabilities: [choke]}
+  - {id: stack, kind: cymbal, source_owner: ddti, zones: [bow], capabilities: [choke]}
+  - {id: china_1, kind: cymbal, source_owner: ddrum4, zones: [edge, bell], capabilities: [choke]}
+  - {id: china_2, kind: cymbal, source_owner: ddrum4, zones: [edge, bell], capabilities: [choke]}
+  - {id: hihat_aux, kind: percussion, source_owner: ddrum4, zones: [head]}

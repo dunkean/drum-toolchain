@@ -8,11 +8,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class DomainTests(unittest.TestCase):
-    def test_physical_kit_has_no_source_module_assignment(self) -> None:
+    def test_physical_kit_records_pad_owner_without_a_midi_address(self) -> None:
         kit = PhysicalKit.load(ROOT / "profiles/physical/greg-hybrid-kit.yaml")
         snare = kit.instrument("snare_main")
         self.assertEqual(snare.zones, ("head", "rim"))
         self.assertIn("positional_sensing", snare.capabilities)
+        self.assertEqual(snare.source_owner, "edrumin")
 
     def test_setup_resolves_composable_documents(self) -> None:
         setup = load_setup(ROOT / "profiles/setups/ddrum4-soundbank-development.yaml")

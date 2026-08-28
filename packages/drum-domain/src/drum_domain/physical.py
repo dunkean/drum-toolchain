@@ -1,4 +1,4 @@
-"""Physical-kit model with no routing or target-MIDI assumptions."""
+"""Physical-kit model with pad ownership, but no MIDI-address assumptions."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +14,7 @@ class PhysicalInstrument:
     kind: str
     zones: tuple[str, ...]
     capabilities: tuple[str, ...] = ()
+    source_owner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class PhysicalKit:
             kind = value.get("kind")
             zones = value.get("zones", [])
             capabilities = value.get("capabilities", [])
+            source_owner = value.get("source_owner")
             if not isinstance(instrument_id, str) or not instrument_id:
                 raise ValueError("physical instrument requires id")
             if instrument_id in known:
@@ -51,8 +53,10 @@ class PhysicalKit:
                 raise ValueError(f"{instrument_id}: zones must be a non-empty string list")
             if not isinstance(capabilities, list) or not all(isinstance(item, str) and item for item in capabilities):
                 raise ValueError(f"{instrument_id}: capabilities must be a string list")
+            if source_owner is not None and source_owner not in {"ddrum4", "ddti", "edrumin"}:
+                raise ValueError(f"{instrument_id}: source_owner must be ddrum4, ddti, or edrumin")
             known.add(instrument_id)
-            instruments.append(PhysicalInstrument(instrument_id, kind, tuple(zones), tuple(capabilities)))
+            instruments.append(PhysicalInstrument(instrument_id, kind, tuple(zones), tuple(capabilities), source_owner))
         return cls(identifier, tuple(instruments))
 
     def instrument(self, identifier: str) -> PhysicalInstrument:

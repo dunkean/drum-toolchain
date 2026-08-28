@@ -227,31 +227,36 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(steps["Arduino DDrum4 renderer"].message["status"], "planned")
         self.assertFalse(result.renders_audio)
 
-    def test_r15_simulator_covers_ten_sounds_from_each_of_three_modules(self) -> None:
+    def test_r15_simulator_models_the_declared_module_ownership(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         simulator = RigSimulator.from_path(project)
         self.assertEqual(simulator.project.ddrum4_bank["manifest"], "../banks/metalcore-r15-installed.yaml")
         self.assertEqual(simulator.project.ddrum4_bank_facts.bank_id, "metalcore-r15-installed")
-        notes = (0, 8, 16, 24, 32, 40, 48, 56, 64, 72)
-        expected_ddrum = (0, 8, 18, 24, 32, 40, 48, 56, 64, 72)
+        ddrum = simulator.simulate_pad("ddrum4", 0, 100)
+        edrumin = simulator.simulate_pad("edrumin", 3, 100)
+        ddti = simulator.simulate_pad("ddti", 16, 100)
+        self.assertEqual((ddrum.physical, edrumin.physical, ddti.physical),
+                         ("kick.hit", "hh.bow", "crash1.bow"))
+        self.assertEqual(
+            tuple(next(step.message["note"] for step in result.steps if step.stage == "Arduino DDrum4 renderer")
+                  for result in (ddrum, edrumin, ddti)),
+            (0, 72, 56),
+        )
+        self.assertTrue(all(
+            next(step.message["channel"] for step in result.steps if step.stage == "Arduino DDrum4 renderer") == 12
+            for result in (ddrum, edrumin, ddti)
+        ))
+        with self.assertRaisesRegex(ValueError, "no declared physical-pad decoder"):
+            simulator.simulate_pad("ddti", 0, 100)
 
-        for source in ("ddrum4", "ddti", "edrumin"):
-            results = [simulator.simulate_pad(source, note, 100) for note in notes]
-            rendered = tuple(next(step.message["note"] for step in result.steps
-                                  if step.stage == "Arduino DDrum4 renderer") for result in results)
-            channels = {next(step.message["channel"] for step in result.steps
-                             if step.stage == "Arduino DDrum4 renderer") for result in results}
-            self.assertEqual(rendered, expected_ddrum)
-            self.assertEqual(channels, {12})
-
-    def test_virtual_kit_is_complete_for_installed_r15_simulation(self) -> None:
+    def test_virtual_kit_is_complete_for_installed_r15_topology(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         rows = build_virtual_kit(RigSimulator.from_path(project))
 
-        self.assertEqual(len(rows), 10)
+        self.assertEqual(len(rows), 29)
         self.assertTrue(all(row.complete for row in rows))
         self.assertEqual(rows[0].physical, "kick.hit")
-        self.assertEqual(rows[0].raw_notes, {"ddrum4": 0, "ddti": 0, "edrumin": 0})
+        self.assertEqual(rows[0].raw_notes, {"ddrum4": 0})
         self.assertEqual((rows[0].ddrum4_slot, rows[0].ddrum4_sound_id, rows[0].ddrum4_note_p),
                          (1, "KICK_981", 1))
         self.assertEqual([(layer.index, layer.velocity, layer.sample) for layer in rows[0].ddrum4_layer_candidates],

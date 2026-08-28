@@ -414,11 +414,17 @@ class RigSimulator:
                 elif decoder.message_type in {"cc", "poly_aftertouch"}:
                     data1 = decoder.match["cc"] if decoder.message_type == "cc" else decoder.match.get("note", 0)
                     identifier = self._diagnostic_id(decoder.message_type, decoder.source, data1, scene, values)
-                    reason = ("firmware-project generation supports exact Note decoders only; "
-                              "CC/poly-aftertouch has no shared PC/Arduino/DDrum4/DrumGizmo policy")
-                    if decoder.message_type == "poly_aftertouch" and decoder.match.get("active_note"):
-                        reason += "; active_note/source_channel_note correlation also needs a live ledger"
-                    cases.append(DiagnosticCase(identifier, False, reason))
+                    candidate = RigSimulator(self.project)
+                    try:
+                        candidate.set_state(scene=scene, values=values)
+                        result = candidate.simulate_expression(decoder.source, decoder.message_type, data1, 64)
+                        declared_sd3 = next((step for step in result.steps if step.stage == "SD3 renderer"), None)
+                        if declared_sd3 is None or "unverified" in declared_sd3.detail:
+                            raise SimulationError("no declared shared expression route")
+                        cases.append(DiagnosticCase(identifier, True,
+                            f"{result.physical} expression reaches declared SD3 route; DDrum4 calibration remains planned"))
+                    except SimulationError as error:
+                        cases.append(DiagnosticCase(identifier, False, str(error)))
         scene_control = self.project.logical_control_protocol["scene"]
         for index, scene in enumerate(self.project.scenes):
             for channel_index, channel in enumerate(scene_control["channels"]):
