@@ -198,14 +198,28 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
             if((status!="measured"&&status!="user-confirmed") || event["type"].as<std::string>()!="poly_aftertouch" ||
                event["note_from"].as<std::string>()!="active_rendered_hit")
               invalid("runtime pressure expression route is not a reviewed active-hit aftertouch route");
+            // Scan the complete artifact instead of the decoders seen so
+            // far: source_decoders may list the correlated aftertouch before
+            // its primary Note decoder without changing the logical contract.
             bool foundPrimary=false;
-            for(const auto& primary:result.decoders) {
-              if(primary.source!=source || primary.physical!=physical ||
-                 (primary.matcher!=PhysicalMatcher::Note && primary.matcher!=PhysicalMatcher::NoteRange)) continue;
+            for(const auto& primaryRecord:records) {
+              const auto primaryMatch=primaryRecord["match"];
+              if(!primaryRecord["source"] || !primaryRecord["physical"] || !primaryMatch ||
+                 primaryRecord["source"]["id"].as<std::string>()!=record["source"]["id"].as<std::string>() ||
+                 primaryRecord["physical"].as<std::string>()!=physical || !primaryMatch["type"]) continue;
+              const auto primaryMatcher=primaryMatch["type"].as<std::string>();
+              uint8_t first=0, last=0;
+              if(primaryMatcher=="note") first=last=midi(primaryMatch,"note");
+              else if(primaryMatcher=="note_range") {
+                const auto range=primaryMatch["note_range"];
+                if(!range || range.size()!=2) invalid("runtime pressure primary note_range needs two values");
+                first=midiValue(range[0]); last=midiValue(range[1]);
+                if(last<first) invalid("runtime pressure primary note_range is descending");
+              } else continue;
               foundPrimary=true;
               const auto existing=std::find_if(result.pressureExpressions.begin(),result.pressureExpressions.end(),
-                                               [&primary](const RuntimePressureExpression& item){ return item.source==primary.source && item.inputFirst==primary.first && item.inputLast==primary.last; });
-              if(existing==result.pressureExpressions.end()) result.pressureExpressions.push_back({source,primary.first,primary.last});
+                                               [source,first,last](const RuntimePressureExpression& item){ return item.source==source && item.inputFirst==first && item.inputLast==last; });
+              if(existing==result.pressureExpressions.end()) result.pressureExpressions.push_back({source,first,last});
             }
             if(!foundPrimary) invalid("runtime pressure expression has no primary Note decoder for its physical event");
             accepted=true;

@@ -17,6 +17,15 @@ expression_routing:
       sd3: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
       drumgizmo: {status: unsupported, reason: fixture has no measured DrumGizmo choke behavior, event: {type: unsupported}}
 records:
+  # Kept before the hit decoder deliberately: the loader must resolve its
+  # primary raw note from the complete compiled artifact, not YAML ordering.
+  - scene: metal
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: poly_aftertouch, active_note: true}
+    emit: {physical: ride.bow, expressions: [pressure], correlate: source_channel_note}
+    physical: ride.bow
+    logical_target: ride.bow
+    renderers: {sd3: {note: 83, channel: 10}, drumgizmo: {note: 83, channel: 10, instrument: ride, articulation: bow}}
   - scene: metal
     source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
     match: {source: edrumin, type: note, note: 49}
@@ -31,10 +40,3 @@ records:
     physical: crash.bow
     logical_target: crash.bow
     renderers: {sd3: {note: 84, channel: 10}, drumgizmo: {note: 84, channel: 10, instrument: crash, articulation: bow}}
-  - scene: metal
-    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
-    match: {source: edrumin, type: poly_aftertouch, active_note: true}
-    emit: {physical: ride.bow, expressions: [pressure], correlate: source_channel_note}
-    physical: ride.bow
-    logical_target: ride.bow
-    renderers: {sd3: {note: 83, channel: 10}, drumgizmo: {note: 83, channel: 10, instrument: ride, articulation: bow}}
