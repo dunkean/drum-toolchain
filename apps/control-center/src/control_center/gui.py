@@ -170,9 +170,16 @@ def launch() -> int:
             ))
             self.visual_physical.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.visual_physical.itemChanged.connect(lambda _: self._sync_visual_project("physical"))
+            self.visual_expressions = QTableWidget(0, 7)
+            self.visual_expressions.setHorizontalHeaderLabels((
+                "Module", "Physical event", "Expression", "Raw control", "DDrum4", "SD3", "DrumGizmo",
+            ))
+            self.visual_expressions.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self.visual_expressions.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             module_page = QWidget(); module_layout = QVBoxLayout()
             module_layout.addWidget(QLabel("Module endpoints and channels")); module_layout.addWidget(self.visual_sources)
             module_layout.addWidget(QLabel("Physical wiring and raw Note-On decoder")); module_layout.addWidget(self.visual_physical)
+            module_layout.addWidget(QLabel("Continuous controls and renderer readiness")); module_layout.addWidget(self.visual_expressions)
             module_page.setLayout(module_layout)
             editor_tabs.addTab(module_page, "Pads, modules and MIDI map")
             editor_tabs.addTab(self._matrix_panel(), "DDrum4 bank — slots, layers, variations")
@@ -392,6 +399,35 @@ def launch() -> int:
                     if value == "MISSING":
                         item.setBackground(Qt.GlobalColor.darkRed)
                     self.visual_physical.setItem(row, column, item)
+            expression_rows = []
+            decoder_controls = {
+                (decoder.get("match", {}).get("source"), decoder.get("emit", {}).get("physical"),
+                 next(iter(decoder.get("emit", {}).get("expressions", [])), None)):
+                    f"{str(decoder.get('match', {}).get('type', '')).upper()} "
+                    f"{decoder.get('match', {}).get('cc', decoder.get('match', {}).get('active_note', '—'))}"
+                for decoder in document.get("source_decoders", []) if isinstance(decoder, dict)
+                and decoder.get("match", {}).get("type") in {"cc", "poly_aftertouch"}
+            }
+            for route in document.get("expression_routing", []):
+                if not isinstance(route, dict):
+                    continue
+                source, physical, expression = route.get("source"), route.get("physical"), route.get("expression")
+                targets = route.get("targets", {})
+                expression_rows.append((
+                    source, physical, expression, decoder_controls.get((source, physical, expression), "MISSING"),
+                    targets.get("ddrum4", {}).get("status", "MISSING"),
+                    targets.get("sd3", {}).get("status", "MISSING"),
+                    targets.get("drumgizmo", {}).get("status", "MISSING"),
+                ))
+            self.visual_expressions.setRowCount(len(expression_rows))
+            for row, values in enumerate(expression_rows):
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if value in {"MISSING", "planned", "unsupported"}:
+                        item.setBackground(Qt.GlobalColor.darkRed)
+                    elif value in {"measured", "user-confirmed"}:
+                        item.setBackground(Qt.GlobalColor.darkGreen)
+                    self.visual_expressions.setItem(row, column, item)
 
         def _sync_visual_project(self, table: str) -> None:
             """Write a table edit back into Advanced YAML, preserving one source of truth."""
