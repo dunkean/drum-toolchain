@@ -10,6 +10,7 @@ import sys
 from .service import CommandResult, ControlCenter
 from .ddrum4_matrix import format_matrix, load_kit_matrix
 from .simulator import RigSimulator, SimulationError
+from .live_measurement import LiveMeasurementCampaign
 
 
 def _print(result: CommandResult) -> int:
@@ -98,6 +99,17 @@ def main(argv: list[str] | None = None) -> int:
     diagnose = commands.add_parser("diagnose", help="offline no-pad coverage test for every declared route and control")
     diagnose.add_argument("project", type=Path)
     diagnose.add_argument("--json", action="store_true", help="print the machine-readable coverage report")
+    measurement = commands.add_parser("measurement-plan", help="write a no-I/O campaign for a later live promotion")
+    measurement.add_argument("project", type=Path)
+    measurement.add_argument("--output", required=True, type=Path)
+    review = commands.add_parser("measurement-review", help="review isolated trace files without opening MIDI")
+    review.add_argument("campaign", type=Path)
+    review.add_argument("--json", action="store_true")
+    promote = commands.add_parser("promote-live", help="create a new live YAML from a complete measurement campaign")
+    promote.add_argument("campaign", type=Path)
+    promote.add_argument("--output", required=True, type=Path)
+    promote.add_argument("--endpoint", action="append", required=True, metavar="SOURCE=PORT")
+    promote.add_argument("--control-endpoint", required=True, metavar="PORT")
     args = parser.parse_args(argv)
     center = ControlCenter(args.toolchain)
     if args.action == "kit-matrix":
@@ -157,6 +169,35 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(error))
         print(json.dumps(report.to_document(), indent=2, ensure_ascii=True) if args.json else report.render_text())
         return 0 if report.passed else 1
+    if args.action == "measurement-plan":
+        try:
+            plan, guide = LiveMeasurementCampaign.from_path(args.project).write_new(args.output)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps({"plan": str(plan), "guide": str(guide), "hardware_io": "disabled"}, indent=2))
+        return 0
+    if args.action == "measurement-review":
+        try:
+            result = LiveMeasurementCampaign.read(args.campaign).review_traces(args.campaign)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps(result, indent=2, ensure_ascii=True) if args.json else result["status"])
+        return 0 if result["status"] == "capture-complete-not-live" else 1
+    if args.action == "promote-live":
+        try:
+            endpoints: dict[str, str] = {}
+            for item in args.endpoint:
+                source, separator, endpoint = item.partition("=")
+                if not separator or not source or not endpoint or source in endpoints:
+                    raise ValueError("--endpoint must use unique SOURCE=PORT values")
+                endpoints[source] = endpoint
+            campaign = LiveMeasurementCampaign.read(args.campaign)
+            output = campaign.promote_live(args.campaign, args.output, endpoints=endpoints,
+                                           control_endpoint=args.control_endpoint)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps({"project": str(output), "hardware_io": "disabled", "next": "compile and satisfy the firmware flash gate"}, indent=2))
+        return 0
     if args.action in {"validate", "report", "compile"}:
         return _print(center.run_rig(args.action, args.project, output=getattr(args, "output", None),
                                      replace=getattr(args, "replace", False), base_dump=getattr(args, "base_dump", None),

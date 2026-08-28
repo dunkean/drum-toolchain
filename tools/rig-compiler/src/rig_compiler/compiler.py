@@ -356,6 +356,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "ddrum4-bank-plan": "planned", "virtual-kit-map": "planned" if unresolved or firmware_unlowerable or runtime_expressions_unlowered else "ready",
         "expression-capability-report": expression_report["status"],
         "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
+        "ddti-role-template": "simulation-only" if deployment == "simulation" else "ready",
         "source-note-contract": "simulation-only" if deployment == "simulation" else "ready",
     }
     report = {**provenance, "format": "rig-project-report/v1", "project": document.get("project", "unnamed-rig"),
@@ -464,6 +465,29 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
             "note": "Apply the stable channel/note contract in the eDRUMin editor; no device-write API is assumed.",
         },
     }
+    ddti_roles: dict[str, dict[str, int]] = {}
+    for decoder in document["source_decoders"]:
+        match, emit = decoder["match"], decoder["emit"]
+        if match["source"] != "ddti" or match["type"] != "note":
+            continue
+        physical = emit["physical"]
+        if "." not in physical:
+            continue
+        role, articulation = physical.rsplit(".", 1)
+        ddti_roles.setdefault(role, {})[articulation] = match["note"]
+    ddti_role_template = {
+        "format": "ddti-note-role-template/v1",
+        "name": f"{document.get('project', 'rig')} stable source notes",
+        "status": report_status["ddti-role-template"],
+        "source_sha256": digest,
+        "hardware_io": "disabled",
+        "rule": "This template changes only stable DDTi raw-note fields. Scene/VP remapping remains in Arduino/PC renderers.",
+        "roles": ddti_roles,
+        "staging_requirements": [
+            "Use an explicit ddti-input-layout/v1 with real Input/Tip/Ring assignments.",
+            "Stage from a complete captured DDTi dump and review the semantic diff before any write.",
+        ],
+    }
     return {
         "project-report.json": report, "runtime-profile.yaml": runtime, "ddrum4-routing-plan.json": routing,
         "ddrum4-routing-contract.json": contract, "firmware-project-mapping.json": firmware,
@@ -472,6 +496,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "ddrum4-bank-plan.yaml": bank, "virtual-kit-map.json": virtual_kit,
         "expression-capability-report.json": expression_report,
         "source-note-contract.yaml": source_note_contract,
+        "ddti-role-template.yaml": ddti_role_template,
         # This is intentionally a declarative request, never a sysex/dump artifact.
         "ddti-preset.yaml": {**provenance, "format": "ddti-preset/v1", "status": report_status["ddti-preset"],
                                    "reason": "base dump hash recorded; manual staging remains planned" if document.get("ddti_base_dump") else "--base-dump is required; no transferable dump was generated",

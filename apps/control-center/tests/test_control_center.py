@@ -70,6 +70,32 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(complete["status"], "capture-complete-not-live")
         self.assertTrue(all(row["status"] == "observed" for row in complete["rows"]))
 
+    def test_live_measurement_campaign_promotes_only_complete_traces_to_a_new_non_sim_profile(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            campaign.write_new(root)
+            per_source = {"ddrum4": (12, 40), "ddti": (2, 60), "edrumin": (3, 80)}
+            for offset, decoder in enumerate((item for item in campaign.project.source_decoders if item.message_type == "note")):
+                path = root / campaign.trace_relative_path(decoder.source, decoder.physical)
+                path.parent.mkdir(exist_ok=True)
+                channel, note = per_source[decoder.source]
+                MidiTrace("captured source", (TraceEvent(0, "note_on", channel, note + offset, 100),)).write(path)
+            destination = root / "metalcore-r15-live.yaml"
+            result = campaign.promote_live(
+                root, destination,
+                endpoints={"ddrum4": "UMC MIDI In", "ddti": "TriggerIO", "edrumin": "eDrumIn BLACK"},
+                control_endpoint="UMC MIDI Out",
+            )
+            live = yaml.safe_load(result.read_text(encoding="utf-8"))
+
+        self.assertEqual(live["deployment"], "live")
+        self.assertEqual(live["sources"]["ddrum4"]["endpoint"], "UMC MIDI In")
+        self.assertEqual(live["sources"]["ddti"]["channel"], 2)
+        self.assertEqual(live["control_bus"], {"endpoint": "UMC MIDI Out", "channel": 15, "status": "user-confirmed"})
+        self.assertTrue(all(not source["endpoint"].startswith("SIM_") for source in live["sources"].values()))
+
     def test_sd3_campaign_writes_resumable_sampler_session_and_reports_file_progress(self) -> None:
         campaign = Sd3CaptureCampaign(
             identifier="sd3_test_kit", sd3_preset="Test MegaKit", midi_output="SD3 input",

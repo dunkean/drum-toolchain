@@ -184,10 +184,13 @@ def launch() -> int:
             review_measurement = QPushButton("Review captured live traces…")
             review_measurement.setToolTip("Reads isolated trace files only. It never writes a live profile or opens a MIDI port.")
             review_measurement.clicked.connect(self.review_live_measurement_campaign)
+            promote_measurement = QPushButton("Create measured live profile…")
+            promote_measurement.setToolTip("Creates a new YAML only after every isolated note trace is complete. It never flashes or writes MIDI.")
+            promote_measurement.clicked.connect(self.promote_live_measurement_campaign)
             inspect_ports = QPushButton("Inspect visible MIDI ports (read-only)")
             inspect_ports.setToolTip("Lists OS-visible MIDI names only. It does not open, send to, or bind any MIDI port.")
             inspect_ports.clicked.connect(self.inspect_visible_midi_ports)
-            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(review_measurement); readiness_layout.addWidget(inspect_ports)
+            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(review_measurement); readiness_layout.addWidget(promote_measurement); readiness_layout.addWidget(inspect_ports)
             readiness_page.setLayout(readiness_layout)
             editor_tabs.addTab(readiness_page, "Validation & deployment")
             layout.addWidget(editor_tabs)
@@ -781,6 +784,44 @@ def launch() -> int:
             lines.extend(["", str(review["next"]),
                           "This report is evidence only; it does not modify the rig or authorize a firmware flash."])
             self.editor_readiness.setPlainText("\n".join(lines))
+
+        def promote_live_measurement_campaign(self) -> None:
+            """Create a new live YAML only from complete, isolated evidence."""
+            directory = QFileDialog.getExistingDirectory(self, "Select completed live measurement campaign directory")
+            if not directory:
+                return
+            try:
+                campaign = LiveMeasurementCampaign.read(Path(directory))
+                review = campaign.review_traces(Path(directory))
+                if review["status"] != "capture-complete-not-live":
+                    raise ValueError("review must be capture-complete-not-live before creating a live profile")
+                endpoints: dict[str, str] = {}
+                for identifier, source in campaign.project.sources.items():
+                    value, accepted = QInputDialog.getText(
+                        self, f"Measured {identifier} input", f"Exact operating-system MIDI input for {identifier} (C{source.channel}):"
+                    )
+                    if not accepted:
+                        return
+                    endpoints[identifier] = value.strip()
+                control_endpoint, accepted = QInputDialog.getText(
+                    self, "Measured control output", "Exact PC/Master-Merger MIDI output for CH15 logical controls:"
+                )
+                if not accepted:
+                    return
+                filename, _ = QFileDialog.getSaveFileName(
+                    self, "Create new measured live rig project", str(Path(directory) / "rig-live.yaml"), "Rig projects (*.yaml *.yml)"
+                )
+                if not filename:
+                    return
+                output = campaign.promote_live(Path(directory), Path(filename), endpoints=endpoints,
+                                               control_endpoint=control_endpoint.strip())
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot create measured live profile", str(error)); return
+            self.editor_readiness.setPlainText(
+                f"Created measured live profile: {output}\n\n"
+                "No MIDI, SysEx, DDTi staging, Arduino generation, or flash occurred. Compile this file next; "
+                "the compiler will continue to block firmware until expression/state-action gates are satisfied."
+            )
 
         def save_editor_project(self) -> None:
             try:

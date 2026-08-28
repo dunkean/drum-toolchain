@@ -9,8 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
+
+import yaml
 
 from drum_domain.rig_project import RigProject, load_rig_project
 from midi_lab.traces import MidiTrace
@@ -196,6 +199,95 @@ class LiveMeasurementCampaign:
                 "rows": rows,
                 "next": ("review every observed address, then manually create a deployment: live project"
                          if passed else "capture or re-capture every non-observed trace")}
+
+    def promote_live(
+        self,
+        directory: Path,
+        output: Path,
+        *,
+        endpoints: Mapping[str, str],
+        control_endpoint: str,
+    ) -> Path:
+        """Create one new measured live profile from complete isolated traces.
+
+        This is intentionally a narrow, one-way hand-off.  It never edits the
+        source simulation project, opens a MIDI port, stages a DDTi dump, or
+        changes firmware.  A later compiler pass remains the hardware-flash
+        gate, especially for unmeasured expression and native state actions.
+        """
+        review = self.review_traces(directory)
+        if review["status"] != "capture-complete-not-live":
+            raise ValueError("cannot promote live profile until every isolated note trace is observed")
+        output = output.resolve()
+        if output.exists():
+            raise FileExistsError(f"refusing to overwrite live rig project: {output}")
+        required_sources = set(self.project.sources)
+        if set(endpoints) != required_sources:
+            missing, extra = required_sources - set(endpoints), set(endpoints) - required_sources
+            details = []
+            if missing:
+                details.append("missing endpoint for " + ", ".join(sorted(missing)))
+            if extra:
+                details.append("unknown endpoint source " + ", ".join(sorted(extra)))
+            raise ValueError("; ".join(details))
+        if not isinstance(control_endpoint, str) or not control_endpoint.strip() or control_endpoint.upper().startswith("SIM_"):
+            raise ValueError("control_endpoint must be a measured non-SIM MIDI output name")
+        for source, endpoint in endpoints.items():
+            if not isinstance(endpoint, str) or not endpoint.strip() or endpoint.upper().startswith("SIM_"):
+                raise ValueError(f"endpoint for {source} must be a measured non-SIM MIDI port name")
+
+        observed = {row["id"]: row for row in review["rows"] if isinstance(row, dict)}
+        source_channels: dict[str, int] = {}
+        notes: dict[tuple[str, str], int] = {}
+        for decoder in self.project.source_decoders:
+            if decoder.message_type != "note":
+                continue
+            row = observed.get(f"{decoder.source}.{decoder.physical}")
+            if not isinstance(row, dict) or not isinstance(row.get("channel"), int) or not isinstance(row.get("note"), int):
+                raise ValueError(f"missing observed address for {decoder.source}.{decoder.physical}")
+            prior_channel = source_channels.setdefault(decoder.source, row["channel"])
+            if prior_channel != row["channel"]:
+                raise ValueError(f"source {decoder.source} has inconsistent observed MIDI channels")
+            notes[(decoder.source, decoder.physical)] = row["note"]
+
+        document = yaml.safe_load(self.project_path.read_text(encoding="utf-8"))
+        if not isinstance(document, dict):  # defensive; the project was validated at campaign creation.
+            raise ValueError("source rig project is not a YAML object")
+        document["deployment"] = "live"
+        if self.project.ddrum4_bank_facts is not None and isinstance(document.get("ddrum4_bank"), dict):
+            # A promoted profile may live outside ``profiles/projects``. Keep
+            # the immutable bank reference valid from its new location rather
+            # than silently dropping its SHA-checked r15 identity.
+            bank_path = self.project.ddrum4_bank_facts.manifest
+            try:
+                manifest_reference = os.path.relpath(bank_path, output.parent).replace("\\", "/")
+            except ValueError:  # Windows cannot make a relative path across drives.
+                manifest_reference = str(bank_path)
+            document["ddrum4_bank"]["manifest"] = manifest_reference
+        for identifier, source in document["sources"].items():
+            source["endpoint"] = endpoints[identifier]
+            source["channel"] = source_channels[identifier]
+        for decoder in document["source_decoders"]:
+            match, emit = decoder["match"], decoder["emit"]
+            if match["type"] == "note":
+                match["note"] = notes[(match["source"], emit["physical"])]
+        document["ddrum4_output_channel"] = source_channels["ddrum4"]
+        if document.get("control_bus") is not None:
+            document["control_bus"]["endpoint"] = control_endpoint
+            document["control_bus"]["status"] = "user-confirmed"
+        for native in document.get("native_control_map", {}).values():
+            if native.get("source") == "ddrum4":
+                native["channel"] = source_channels["ddrum4"]
+        for actions in document.get("ddrum_state_actions", {}).values():
+            for action in actions:
+                if action.get("type") == "program_change":
+                    action["channel"] = source_channels["ddrum4"]
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(yaml.safe_dump(document, sort_keys=False, allow_unicode=True), encoding="utf-8", newline="\n")
+        # Re-load immediately so neither an unrecognised endpoint nor a source
+        # channel mismatch can leak into a hand-authored live profile.
+        load_rig_project(output)
+        return output
 
     def write_new(self, directory: Path) -> tuple[Path, Path]:
         """Write a new offline plan without overwriting an existing campaign."""
