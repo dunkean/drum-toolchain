@@ -1,5 +1,12 @@
 # Sound bank Metalcore r15 — contenu, configuration DDrum4 et test global
 
+> **Archive du transfert audio r15.** Les tailles et Sounds DDrum4 restent une
+> référence de la banque installée, mais les exemples MIDI CH10/CH11 et le
+> firmware de diagnostic décrits ici ne sont plus le contrat du rig global.
+> Utiliser [Greg Hybrid r15 — configuration matérielle et MIDI](greg-hybrid-r15-hardware-setup.md)
+> pour les canaux CH12/CH2/CH3, les notes, CC4, Programs/Palettes et le gate de
+> flash actuels.
+
 Version du document : 2026-08-26
 Banque décrite : `kit-metalcore-4-hd-c4-r15-tom-rr-final`
 Manifeste : `encoded-kit-v12-restored-cymbals/kit-build.json`
