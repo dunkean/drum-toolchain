@@ -5,10 +5,29 @@ import sys
 import tempfile
 import unittest
 
-from midi_lab import compare_set, diff_files, scan_binary
+from midi_lab import build_megakit_preset, compare_set, diff_files, megakit_markdown, preset_inventory, scan_binary
 
 
 class Sd3ReverseTests(unittest.TestCase):
+    @staticmethod
+    def _preset(instboxes: list[str]) -> bytes:
+        body = "".join(instboxes)
+        return ("PlugVersion 3.3.7\nSAMPLER {\nHQ {\n" + body + "mixer {\n}\n}\n}\n").encode("latin-1") + b"\x00"
+
+    @staticmethod
+    def _instbox(number: int, library: str, drum: str, pad: str, aliases: str) -> str:
+        return (
+            f"instbox {number} {{\n"
+            f"xpad 0 {library} {{\n"
+            "pos \"Snare\"\n"
+            "mastermics {\nnrmaster 0\n}\n"
+            "micmap {\nnrmaster 0\n}\n"
+            "laylims {\n}\n"
+            f"drum \"{drum}\"  \"Sticks\" 1\n"
+            f"pads {{\npad {pad} {{\nmaxpoly 8\n}}\nalias {pad} {aliases}\n}}\n"
+            "}\n}\n"
+        )
+
     def test_scan_binary_reports_stable_facts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "base.bin"
@@ -88,3 +107,68 @@ class Sd3ReverseTests(unittest.TestCase):
             report = json.loads(diffset.stdout)
             self.assertEqual(report["variant_count"], 2)
             self.assertTrue(report["top_bins"])
+
+    def test_inventory_reads_sd3_instruments_and_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "kit.sd3p"
+            path.write_bytes(self._preset([self._instbox(0, "BASE", "SD01", "snareR", "38 40")]))
+            inventory = preset_inventory(path)
+            self.assertTrue(inventory["trailing_nul"])
+            self.assertEqual(inventory["instrument_count"], 1)
+            self.assertEqual(inventory["instruments"][0]["drum_id"], "SD01")
+            self.assertEqual(len(inventory["notes"]["38"]), 1)
+
+    def test_megakit_build_rewrites_base_and_clones_reviewed_block(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.sd3p"
+            source = root / "source.sd3p"
+            output = root / "out.sd3p"
+            recipe = root / "recipe.yaml"
+            base.write_bytes(self._preset([self._instbox(0, "BASE", "SD01", "snareR", "32 37")]))
+            source.write_bytes(self._preset([self._instbox(2, "ALT", "SD30", "snareR", "5")]))
+            recipe.write_text(
+                "\n".join([
+                    "schema_version: 1",
+                    "kind: sd3-preset-build",
+                    f"base_sha256: {scan_binary(base)['sha256']}",
+                    "base_aliases:",
+                    "  0: {snareR: [32]}",
+                    "clones:",
+                    "  - source: source.sd3p",
+                    f"    source_sha256: {scan_binary(source)['sha256']}",
+                    "    source_instbox: 2",
+                    "    target_instbox: 1",
+                    "    aliases: {snareR: [37]}",
+                    "expected_unique_notes: [32, 37]",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            result = build_megakit_preset(base, recipe, root, output)
+            inventory = preset_inventory(output)
+            self.assertEqual(result["instrument_count"], 2)
+            self.assertEqual(inventory["notes"]["37"][0]["library"], "ALT")
+            self.assertEqual(inventory["notes"]["37"][0]["drum_id"], "SD30")
+            self.assertEqual(len(inventory["notes"]["32"]), 1)
+
+    def test_megakit_markdown_identifies_shared_variations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            preset = root / "kit.sd3p"
+            plan = root / "plan.yaml"
+            note_map = root / "map.json"
+            preset.write_bytes(self._preset([self._instbox(0, "BASE", "CB01", "cowbell", "92")]))
+            plan.write_text(
+                "kind: sd3-megakit-plan\nvelocity_sets: {one: [100]}\narticulations:\n"
+                "  - {logical: perc.utility, note: 92, capture: true, velocities: one, rr: 1}\n"
+                "  - {logical: perc.cowbell, note: 92, capture: false, shared_with: perc.utility}\n",
+                encoding="utf-8",
+            )
+            note_map.write_text(json.dumps({
+                "format": "drum-note-map/v1",
+                "mappings": [{"id": "metalcore.perc.hit", "logical_target": "perc.utility", "note": 92}],
+            }), encoding="utf-8")
+            report = megakit_markdown(plan, note_map, preset)
+            self.assertIn("92 (G#6)", report)
+            self.assertIn("variation partagée", report)
+            self.assertIn("BASE / CB01 / cowbell", report)

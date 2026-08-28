@@ -89,6 +89,21 @@ class Router final : private juce::MidiInputCallback {
   bool globalControlConfigured() const noexcept { return runtimeProfile_ && runtimeProfile_->controlBusEnabled; }
   bool globalControlOpen() const noexcept { return controlOutput_.load(std::memory_order_acquire)!=nullptr; }
   juce::String globalControlEndpoint() const { return runtimeProfile_ ? juce::String(runtimeProfile_->controlBusEndpoint) : juce::String{}; }
+  bool startRuntimeByOutputName(std::string_view requested) {
+    if(!runtimeProfile_) { error_="Automatic live start requires a rig runtime profile"; return false; }
+    if(requested.empty()) { error_="DDRUM4_RENDERER_OUTPUT is empty"; return false; }
+    const auto devices=juce::MidiOutput::getAvailableDevices();
+    std::vector<const juce::MidiDeviceInfo*> matches;
+    const auto exact=juce::String::fromUTF8(requested.data(),static_cast<int>(requested.size()));
+    for(const auto& device:devices)
+      if(device.name==exact||device.identifier==exact) matches.push_back(&device);
+    if(matches.size()!=1) {
+      error_=matches.empty()?"Automatic renderer output not found: "+exact:"Automatic renderer output is ambiguous: "+exact;
+      return false;
+    }
+    start({},matches.front()->identifier);
+    return running();
+  }
   bool reload() {
     stop();
     try {
@@ -218,7 +233,9 @@ class MainComponent final : public juce::Component, private juce::Timer {
       runtimeVariables_[i].setSliderStyle(juce::Slider::LinearHorizontal); runtimeVariables_[i].setRange(0,127,1); runtimeVariables_[i].setTextBoxStyle(juce::Slider::TextBoxRight,false,50,22);
       runtimeVariables_[i].onValueChange=[this,i]{router_.setRuntimeVariable(i,static_cast<uint8_t>(runtimeVariables_[i].getValue()));};
     }
-    refreshPorts(); buildEditor(); showPage(0); startTimerHz(20);
+    refreshPorts(); buildEditor(); showPage(0);
+    if(const auto* output=std::getenv("DDRUM4_RENDERER_OUTPUT")) router_.startRuntimeByOutputName(output);
+    startTimerHz(20);
   }
   void paint(juce::Graphics& g) override { g.fillAll(juce::Colour(0xff15171b)); g.setColour(juce::Colour(0xff242a31)); g.fillRoundedRectangle(18,100,getWidth()-36,getHeight()-118,10); }
   void resized() override {

@@ -1,0 +1,14 @@
+# Recommended socket assignment for the physical kit. This is the one layout
+# the generated project expects when the pads are connected later.
+format: ddti-input-layout/v1
+name: Greg Hybrid DDTi cymbals
+kits: [0]
+bindings:
+  - {input: 1, zone: tip, role: crash1.bow}
+  - {input: 1, zone: ring, role: crash1.edge}
+  - {input: 2, zone: tip, role: crash2.bow}
+  - {input: 2, zone: ring, role: crash2.edge}
+  - {input: 3, zone: tip, role: crash3.edge}
+  - {input: 4, zone: tip, role: splash1.hit}
+  - {input: 5, zone: tip, role: splash2.hit}
+  - {input: 6, zone: tip, role: stack.hit}

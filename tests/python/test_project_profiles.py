@@ -28,7 +28,9 @@ class ProjectProfileFixtureTests(unittest.TestCase):
         self.assertEqual(set(planned), set(project.renderers["sd3"]))
         for logical, renderer in project.renderers["sd3"].items():
             self.assertEqual(planned[logical]["note"], renderer["note"])
-        self.assertEqual(plan["status"], "manual-sd3-application-required")
+        self.assertEqual(plan["status"], "generated-local-validation-required")
+        self.assertEqual(project.logical_routes["sleep_token"]["snare1.head"], "snare1.sleep")
+        self.assertEqual(project.logical_routes["sleep_token"]["snare2.head"], "snare2.sleep")
 
 
 if __name__ == "__main__":

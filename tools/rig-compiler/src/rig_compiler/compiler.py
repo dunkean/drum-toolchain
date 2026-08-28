@@ -519,7 +519,12 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
             render = route["renderers"][renderer]
             mapping = {"id": route["id"], "note": render["note"], "logical_target": route["logical_target"]}
             if renderer == "drumgizmo":
-                mapping.update({"instrument": render["instrument"], "articulation": render["articulation"]})
+                logical_instrument, logical_articulation = route["logical_target"].rsplit(".", 1)
+                mapping.update({
+                    "instrument": render["instrument"], "articulation": render["articulation"],
+                    "capture_instrument": logical_instrument,
+                    "capture_articulation": logical_articulation,
+                })
             mappings.append(mapping)
         return {**provenance, "format": "drum-note-map/v1", "target": target,
                 "status": "planned" if unsupported_source_expressions else (report_status["sd3-midimap"] if target == "sd3" else report_status["drumgizmo-midimap"]),

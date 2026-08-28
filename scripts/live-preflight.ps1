@@ -24,6 +24,9 @@ foreach ($name in @('converter', 'sd3')) {
 foreach ($port in @($session.required_ports)) {
     if ([string]::IsNullOrWhiteSpace([string]$port)) { $problems.Add('required_ports contains an empty name') }
 }
+if ([string]::IsNullOrWhiteSpace([string]$session.renderer_output)) {
+    $problems.Add('renderer_output must name the exact unique MIDI output opened automatically by the Converter.')
+}
 $requiredInputs = @($session.required_inputs)
 $requiredOutputs = @($session.required_outputs)
 foreach ($port in @($requiredInputs + $requiredOutputs)) {
@@ -45,14 +48,10 @@ if ([string]::IsNullOrWhiteSpace([string]$session.runtime_profile.project_hash))
 } elseif (Test-Path -LiteralPath $session.runtime_profile.path) {
     $runtimeText = Get-Content -LiteralPath $session.runtime_profile.path -Raw
     $runtimeFormat = [regex]::Match($runtimeText, '(?m)^format:\s*["'']?([^\r\n"'']+)["'']?\s*$')
-    $runtimeStatus = [regex]::Match($runtimeText, '(?m)^status:\s*["'']?([^\r\n"'']+)["'']?\s*$')
     $runtimeDeployment = [regex]::Match($runtimeText, '(?m)^deployment:\s*["'']?([^\r\n"'']+)["'']?\s*$')
     $runtimeHash = [regex]::Match($runtimeText, '(?m)^source_sha256:\s*["'']?([0-9a-fA-F]{64})["'']?\s*$')
     if (-not $runtimeFormat.Success -or $runtimeFormat.Groups[1].Value.Trim() -ne 'rig-runtime-profile/v1') {
         $problems.Add('runtime_profile.path is not a rig-runtime-profile/v1 artifact')
-    }
-    if (-not $runtimeStatus.Success -or $runtimeStatus.Groups[1].Value.Trim() -ne 'ready') {
-        $problems.Add('runtime_profile.status must be ready; compile a measured live project before launching')
     }
     if (-not $runtimeDeployment.Success -or $runtimeDeployment.Groups[1].Value.Trim() -ne 'live') {
         $problems.Add('runtime_profile.deployment must be live; simulation artifacts cannot launch a live session')
@@ -73,6 +72,19 @@ if ([string]::IsNullOrWhiteSpace([string]$session.asio_buffer_confirmation)) {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $venvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
 $python = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { (Get-Command python -ErrorAction Stop).Source }
+$runtimeTargetStatus = $null
+if ($null -ne $session.runtime_profile -and (Test-Path -LiteralPath $session.runtime_profile.path)) {
+    try {
+        $runtimeFactsJson = & $python -c "import json,sys,yaml; d=yaml.safe_load(open(sys.argv[1],encoding='utf-8')); r=sys.argv[2]; print(json.dumps({'status':(d.get('target_status') or {}).get(r,d.get('status','planned'))}))" ([string]$session.runtime_profile.path) ([string]$session.renderer)
+        if ($LASTEXITCODE -ne 0) { throw 'runtime YAML parser returned a non-zero exit code.' }
+        $runtimeTargetStatus = ($runtimeFactsJson | ConvertFrom-Json).status
+        if ([string]$runtimeTargetStatus -ne 'ready') {
+            $problems.Add("runtime_profile target '$($session.renderer)' must be ready; current status is '$runtimeTargetStatus'")
+        }
+    } catch {
+        $problems.Add("Could not read renderer-specific runtime status: $($_.Exception.Message)")
+    }
+}
 $midiInventory = $null
 try {
     $inventoryJson = & $python -c "import json, mido; print(json.dumps({'inputs': list(mido.get_input_names()), 'outputs': list(mido.get_output_names())}))"
@@ -87,6 +99,10 @@ try {
     }
     foreach ($port in $requiredOutputs) {
         if (@($midiInventory.outputs) -notcontains $port) { $problems.Add("required MIDI output is not visible: $port") }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$session.renderer_output) -and
+            @($midiInventory.outputs) -notcontains [string]$session.renderer_output) {
+        $problems.Add("renderer MIDI output is not visible: $($session.renderer_output)")
     }
 } catch {
     $problems.Add("Could not list MIDI ports read-only: $($_.Exception.Message)")

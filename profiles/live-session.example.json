@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "renderer": "sd3",
+  "renderer_output": "REPLACE_WITH_EXACT_SD3_MIDI_OUTPUT",
   "converter": { "path": "C:/replace/ddrum4_converter.exe", "arguments": [] },
   "sd3": { "path": "C:/replace/Superior Drummer 3.exe", "arguments": [] },
   "runtime_profile": {

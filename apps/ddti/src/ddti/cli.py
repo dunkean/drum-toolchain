@@ -257,3 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         from .gui import launch
         return launch(args.dump)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

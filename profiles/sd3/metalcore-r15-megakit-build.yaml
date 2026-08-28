@@ -1,0 +1,90 @@
+# Deterministic assembly recipe for the user's locally installed SD3 presets.
+# The source .sd3p files are deliberately not committed.  Their hashes prevent
+# applying block edits to a different preset revision by accident.
+schema_version: 1
+kind: sd3-preset-build
+id: greg_hybrid_r15_megakit
+base_sha256: 0a0f7d88127888f3ce313e833b1feb3155a3d6eea2bbf8e2f1ed86965f91f5b6
+base_aliases:
+  0:
+    kickR: [24]
+  1:
+    snareR: [32]
+    snareFO: [33]
+    snareRO: [34]
+    snareFX: [35]
+    snareSL: [36]
+  3:
+    tom1R: [56]
+  4:
+    tom2R: [57]
+  5:
+    tom4R: [58]
+  13:
+    splash3: [77]
+  27:
+    snare2: [48]
+clones:
+  - source: Drum+Deftones.sd3p
+    source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b
+    source_instbox: 17
+    target_instbox: 30
+    purpose: Deftones snare family from Death & Darkness, already proven as a Modern Metal X-Drum
+    aliases:
+      snareR: [37]
+      snareFO: [38]
+      snareMC: [39]
+      snareFX: [40]
+      snareSL: [41]
+  - source: Develop Device/Sleep_Token_Kit.sd3p
+    source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906
+    source_instbox: 2
+    target_instbox: 31
+    purpose: Sleep Token snare from Progressive Foundry
+    aliases:
+      snareR: [42]
+      snareFO: [43]
+      snareRO: [44]
+  - source: Kit_SleepToken.sd3p
+    source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
+    source_instbox: 0
+    target_instbox: 32
+    purpose: Sleep Token kick from Death & Darkness
+    aliases:
+      kickR: [25]
+  - source: Kit_SleepToken.sd3p
+    source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
+    source_instbox: 4
+    target_instbox: 33
+    purpose: Sleep Token high tom from Death & Darkness
+    aliases:
+      tom1R: [60]
+  - source: Kit_SleepToken.sd3p
+    source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
+    source_instbox: 5
+    target_instbox: 34
+    purpose: Sleep Token mid tom from Death & Darkness
+    aliases:
+      tom2R: [61]
+  - source: Kit_SleepToken.sd3p
+    source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
+    source_instbox: 6
+    target_instbox: 35
+    purpose: Sleep Token low tom from Death & Darkness
+    aliases:
+      tom3R: [62]
+  - source: DNBKit.sd3p
+    source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075
+    source_instbox: 5
+    target_instbox: 36
+    purpose: Distinct Electronic Edge snare for the flexible second-snare surface
+    aliases:
+      snare3: [49]
+  - source: Kit_SleepToken.sd3p
+    source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
+    source_instbox: 16
+    target_instbox: 37
+    purpose: Distinct second splash from Death & Darkness
+    aliases:
+      splash2: [78]
+expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 56, 57, 58, 59, 60, 61, 62, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]

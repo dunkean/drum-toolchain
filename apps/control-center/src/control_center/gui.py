@@ -16,7 +16,7 @@ from .ddrum4_matrix import Ddrum4KitMatrix, MatrixLayer, UNKNOWN, load_kit_matri
 from .service import ControlCenter
 from .simulator import RigSimulator, SimulationError
 from .virtual_kit import build_virtual_kit
-from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS,
+from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS, capture_rows_from_megakit_plan,
                        METALCORE_ELECTRONIC_V1_ADDITIONS)
 from .live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
 
@@ -1367,17 +1367,26 @@ def launch() -> int:
                 "One row is one SD3 articulation. Review MIDI notes against the loaded kit before creating the campaign. "
                 "The starter grid is only a starting point, not proof of your SD3 mapping."
             ))
-            self.capture_rows = QTableWidget(0, 6)
-            self.capture_rows.setHorizontalHeaderLabels(("Instrument", "Articulation", "MIDI note", "Velocities", "Variations", "Channel"))
+            self.capture_rows = QTableWidget(0, 8)
+            self.capture_rows.setHorizontalHeaderLabels((
+                "Instrument", "Articulation", "SD3 note", "Velocities", "Round robins", "Channel",
+                "Controllers", "DrumGizmo note",
+            ))
             self.capture_rows.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.capture_rows.setAlternatingRowColors(True)
+            self.capture_rows.verticalHeader().setVisible(False)
+            self.capture_rows.horizontalHeader().setStretchLastSection(True)
             grid_layout.addWidget(self.capture_rows)
+            complete = QPushButton("Load complete MegaKit plan…")
+            complete.setToolTip("Loads every distinct captured note, velocity layer and round-robin count from the reviewed MegaKit plan.")
+            complete.clicked.connect(self.load_complete_megakit_plan)
             starter = QPushButton("Load starter grid"); starter.clicked.connect(self.load_starter_grid)
             v1_additions = QPushButton("Add V1 Metalcore/electronic additions")
             v1_additions.setToolTip("Adds the architecture-defined electronic/perc capture rows without replacing the current inventory.")
             v1_additions.clicked.connect(self.add_v1_electronic_additions)
             add_row = QPushButton("Add articulation"); add_row.clicked.connect(self.add_capture_row)
             remove_row = QPushButton("Remove selected articulation"); remove_row.clicked.connect(self.remove_capture_row)
-            row = QHBoxLayout(); row.addWidget(starter); row.addWidget(v1_additions); row.addWidget(add_row); row.addWidget(remove_row); grid_layout.addLayout(row)
+            row = QHBoxLayout(); row.addWidget(complete); row.addWidget(starter); row.addWidget(v1_additions); row.addWidget(add_row); row.addWidget(remove_row); grid_layout.addLayout(row)
             grid.setLayout(grid_layout); layout.addWidget(grid)
 
             actions = QGroupBox("3. Guided campaign actions")
@@ -1392,6 +1401,9 @@ def launch() -> int:
             self.note_map = QLineEdit(); self.note_map.setPlaceholderText("Compiled drumgizmo-midimap.json for export")
             choose_map = QPushButton("Select DrumGizmo note map…"); choose_map.clicked.connect(self.select_note_map)
             row = QHBoxLayout(); row.addWidget(self.note_map); row.addWidget(choose_map); actions_layout.addLayout(row)
+            self.export_megakit_plan = QLineEdit(); self.export_megakit_plan.setPlaceholderText("MegaKit plan for shared variations (no duplicate WAV)")
+            choose_plan = QPushButton("Select MegaKit plan…"); choose_plan.clicked.connect(self.select_export_megakit_plan)
+            row = QHBoxLayout(); row.addWidget(self.export_megakit_plan); row.addWidget(choose_plan); actions_layout.addLayout(row)
             export = QPushButton("Export complete DrumGizmo kit"); export.clicked.connect(lambda: self.run_campaign_action("export-drumgizmo")); actions_layout.addWidget(export)
             verify = QPushButton("Verify DrumGizmo kit"); verify.clicked.connect(lambda: self.run_campaign_action("verify-drumgizmo")); actions_layout.addWidget(verify)
             actions.setLayout(actions_layout); layout.addWidget(actions)
@@ -1410,12 +1422,19 @@ def launch() -> int:
             if filename:
                 self.note_map.setText(filename)
 
+        def select_export_megakit_plan(self) -> None:
+            filename, _ = QFileDialog.getOpenFileName(self, "Select SD3 MegaKit plan", "", "YAML files (*.yaml *.yml)")
+            if filename:
+                self.export_megakit_plan.setText(filename)
+
         def add_capture_row(self, row: CaptureRow | None = None) -> None:
             values = row or CaptureRow("instrument", "articulation", 36, (24, 48, 72, 96, 120), 3)
             index = self.capture_rows.rowCount()
             self.capture_rows.insertRow(index)
             cells = (values.instrument, values.articulation, str(values.note),
-                     ",".join(str(value) for value in values.velocities), str(values.repetitions), str(values.channel))
+                     ",".join(str(value) for value in values.velocities), str(values.repetitions), str(values.channel),
+                     ",".join(f"{controller}={value}" for controller, value in values.controllers),
+                     "" if values.drumgizmo_note is None else str(values.drumgizmo_note))
             for column, value in enumerate(cells):
                 self.capture_rows.setItem(index, column, QTableWidgetItem(value))
 
@@ -1433,6 +1452,28 @@ def launch() -> int:
                 self.add_capture_row(row)
             self.campaign_log.setPlainText(
                 "Starter grid loaded. Review every MIDI note and add all kit-specific articulations before creating the campaign."
+            )
+
+        def load_complete_megakit_plan(self) -> None:
+            default = Path(__file__).resolve().parents[4] / "profiles" / "sd3" / "metalcore-r15-megakit-plan.yaml"
+            filename, _ = QFileDialog.getOpenFileName(
+                self, "Select reviewed SD3 MegaKit plan", str(default), "YAML files (*.yaml *.yml)"
+            )
+            if not filename:
+                return
+            if self.capture_rows.rowCount() and QMessageBox.question(
+                    self, "Replace inventory", "Replace the current inventory with the complete reviewed MegaKit capture grid?") != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                rows = capture_rows_from_megakit_plan(Path(filename))
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot load MegaKit plan", str(error)); return
+            self.capture_rows.setRowCount(0)
+            for capture_row in rows:
+                self.add_capture_row(capture_row)
+            self.campaign_log.setPlainText(
+                f"Loaded {len(rows)} capture articulations from {filename}, including explicit CC4 hi-hat positions. "
+                f"Total planned takes: {sum(len(row.raw_filenames()) for row in rows)}."
             )
 
         def add_v1_electronic_additions(self) -> None:
@@ -1459,7 +1500,17 @@ def launch() -> int:
                     return item.text().strip() if item is not None else ""
                 try:
                     velocities = tuple(int(value.strip()) for value in cell(3).split(",") if value.strip())
-                    rows.append(CaptureRow(cell(0), cell(1), int(cell(2)), velocities, int(cell(4)), int(cell(5))))
+                    controllers: list[tuple[int, int]] = []
+                    for assignment in (value.strip() for value in cell(6).split(",") if value.strip()):
+                        controller, separator, value = assignment.partition("=")
+                        if not separator:
+                            raise ValueError("controllers must use CC=VALUE, for example 4=127")
+                        controllers.append((int(controller), int(value)))
+                    drumgizmo_note = int(cell(7)) if cell(7) else None
+                    rows.append(CaptureRow(
+                        cell(0), cell(1), int(cell(2)), velocities, int(cell(4)), int(cell(5)),
+                        tuple(controllers), drumgizmo_note,
+                    ))
                 except ValueError as error:
                     raise ValueError(f"invalid articulation row {index + 1}: {error}") from error
             return tuple(rows)
@@ -1540,7 +1591,9 @@ def launch() -> int:
                     return
             try:
                 note_map = Path(self.note_map.text()) if self.note_map.text().strip() else None
+                megakit_plan = Path(self.export_megakit_plan.text()) if self.export_megakit_plan.text().strip() else None
                 command = self.center.sampler_command(action, self.campaign_directory, note_map=note_map,
+                                                      megakit_plan=megakit_plan,
                                                       confirm_capture=action == "capture")
             except ValueError as error:
                 QMessageBox.warning(self, "Cannot start campaign action", str(error)); return

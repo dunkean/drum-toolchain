@@ -11,12 +11,53 @@ from scipy.io import wavfile
 
 from drum_sampler.audio import QualityProfile
 from drum_sampler.library import SampleLibrary, SampleTake
-from drum_sampler.offline import (drumgizmo_note_overrides, merge_library_files,
+from drum_sampler.offline import (drumgizmo_capture_note_overrides, drumgizmo_note_overrides, expand_shared_variations, merge_library_files,
                                   prepare_selected_takes, run_offline_recipe, validate_drumgizmo_kit,
-                                  verify_drumgizmo_kit)
+                                  verify_drumgizmo_kit, resolved_drumgizmo_note_overrides)
 
 
 class OfflineSamplerTests(unittest.TestCase):
+    def test_megakit_capture_variants_replace_base_hihat_with_discrete_drumgizmo_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = Path(temporary) / "plan.yaml"
+            plan.write_text(
+                "kind: sd3-megakit-plan\narticulations:\n"
+                "  - logical: hh.bow\n"
+                "    capture_variants:\n"
+                "      - {articulation: bow_closed, controllers: [[4, 127]], drumgizmo_note: 112}\n"
+                "      - {articulation: bow_open, controllers: [[4, 0]], drumgizmo_note: 113}\n",
+                encoding="utf-8",
+            )
+            overrides, replaced = drumgizmo_capture_note_overrides(plan)
+            self.assertEqual(overrides, {("hh", "bow_closed"): 112, ("hh", "bow_open"): 113})
+            self.assertEqual(replaced, {("hh", "bow")})
+
+    def test_resolved_drumgizmo_map_removes_continuous_hihat_base(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            note_map = root / "map.json"
+            note_map.write_text(json.dumps({
+                "format": "drum-note-map/v1", "target": "drumgizmo",
+                "mappings": [
+                    {"logical_target": "hh.bow", "note": 64},
+                    {"logical_target": "kick.acoustic", "note": 24},
+                ],
+            }), encoding="utf-8")
+            plan = root / "plan.yaml"
+            plan.write_text(
+                "kind: sd3-megakit-plan\narticulations:\n"
+                "  - logical: hh.bow\n"
+                "    capture_variants:\n"
+                "      - {articulation: bow_closed, controllers: [[4, 127]], drumgizmo_note: 112}\n"
+                "      - {articulation: bow_open, controllers: [[4, 0]], drumgizmo_note: 113}\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(resolved_drumgizmo_note_overrides(note_map, plan), {
+                ("kick", "acoustic"): 24,
+                ("hh", "bow_closed"): 112,
+                ("hh", "bow_open"): 113,
+            })
+
     def test_compiler_note_map_parses_instrument_articulation_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "drumgizmo-midimap.json"
@@ -32,6 +73,15 @@ class OfflineSamplerTests(unittest.TestCase):
                                                       "instrument": "hi_hat", "articulation": "closed"}]}), encoding="utf-8")
             self.assertEqual(drumgizmo_note_overrides(path), {("hi_hat", "closed"): 42})
 
+    def test_compiler_note_map_prefers_capture_identity_for_generated_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "drumgizmo-midimap.json"
+            path.write_text(json.dumps({"format": "drum-note-map/v1", "target": "drumgizmo",
+                                        "mappings": [{"logical_target": "hh.electronic_open", "note": 69,
+                                                      "instrument": "hihat", "articulation": "open",
+                                                      "capture_instrument": "hh", "capture_articulation": "electronic_open"}]}), encoding="utf-8")
+            self.assertEqual(drumgizmo_note_overrides(path), {("hh", "electronic_open"): 69})
+
     def test_preparation_writes_new_file_and_preserves_raw(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); raw = root / "raw.wav"
@@ -45,6 +95,24 @@ class OfflineSamplerTests(unittest.TestCase):
             self.assertEqual(raw.read_bytes(), original)
             self.assertTrue((root / prepared.takes[0].prepared_file).is_file())
             self.assertEqual(prepared.takes[0].processing_history, ("offline-quality-profile",))
+
+    def test_shared_variation_reuses_captured_file_without_new_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = root / "plan.yaml"
+            plan.write_text(
+                "kind: sd3-megakit-plan\narticulations:\n"
+                "  - {logical: perc.clap, note: 50, capture: true}\n"
+                "  - {logical: stack.clap, note: 99, capture: false, shared_with: perc.clap}\n",
+                encoding="utf-8",
+            )
+            take = SampleTake("perc", "clap", 50, 10, 100, 1, "clap.wav", sample_rate=44100,
+                              channels=("left",), frames=32, status="captured")
+            expanded = expand_shared_variations(SampleLibrary("kit", ("left",), (take,)), plan)
+            self.assertEqual(len(expanded.takes), 2)
+            alias = expanded.takes[1]
+            self.assertEqual((alias.instrument, alias.articulation, alias.note), ("stack", "clap", 99))
+            self.assertEqual(alias.raw_file, take.raw_file)
 
     def test_merge_files_prefixes_audio_references(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

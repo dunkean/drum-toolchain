@@ -440,6 +440,27 @@ class DDTiTests(unittest.TestCase):
             self.assertEqual(main(["apply-role-preset", str(source), str(template_path), str(layout_path), str(staged_path)]), 0)
             self.assertEqual(decode_configuration(decode_dump(staged_path.read_bytes())).kits[0].inputs[1].ring.note, 40)
 
+    def test_greg_hybrid_ddti_layout_covers_the_declared_cymbal_contract(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        template = load_document(repository / "presets" / "greg-hybrid-ddti-raw.yaml")
+        layout = load_document(repository / "profiles" / "physical" / "greg-hybrid-ddti-layout.yaml")
+        roles = {
+            f"{role}.{articulation}": note
+            for role, articulations in template["roles"].items()
+            for articulation, note in articulations.items()
+        }
+        bindings = {binding["role"] for binding in layout["bindings"]}
+        self.assertEqual(bindings, set(roles))
+        self.assertEqual(sorted(roles.values()), list(range(16, 24)))
+        self.assertEqual(len({(binding["input"], binding["zone"]) for binding in layout["bindings"]}), 8)
+        kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
+        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
+        staged = apply_role_template(decode_configuration(decode_dump(raw)), template, layout)
+        for binding in layout["bindings"]:
+            zone = getattr(staged.kits[0].inputs[binding["input"] - 1], binding["zone"])
+            self.assertEqual(zone.channel, 2)
+            self.assertEqual(zone.note, roles[binding["role"]])
+
     def test_transfer_plan_accepts_only_a_complete_observed_dump(self) -> None:
         kits = b"".join(
             bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, index)) + (bytes((9, 35, 3)) * 20) + bytes(6) + bytes((0xF7,))

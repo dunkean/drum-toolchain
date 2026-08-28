@@ -1,22 +1,23 @@
-# Declarative build sheet for the user-created SD3 preset.  SD3P is a
-# proprietary binary and is intentionally not synthesized by this repository.
-# Apply this sheet with SD3 MIDI Learn, save the resulting preset manually as
-# "Greg Hybrid r15 MegaKit.sd3p", then record its revision in the capture run.
+# Capture sheet for the deterministically assembled user SD3 preset.  The
+# generated .sd3p stays under captures/ and is intentionally gitignored.
 schema_version: 1
 kind: sd3-megakit-plan
 id: greg_hybrid_r15_megakit
-sd3p_output: "Greg Hybrid r15 MegaKit.sd3p"
-status: manual-sd3-application-required
+sd3p_output: "captures/sd3/Greg_Hybrid_r15_MegaKit.sd3p"
+build_recipe: "profiles/sd3/metalcore-r15-megakit-build.yaml"
+status: generated-local-validation-required
 base_preset:
-  source: Modern Metal EZX
-  instruction: "Duplicate the existing Metalcore kit; retain its acoustic kit, close mics and routing as the baseline."
+  source: "captures/sd3/Kit_metalcore_4_capture.sd3p"
+  library: Modern Metal EZX
+  mixer_preset: Djentle Beast
+  instruction: "Retain the proven Metalcore instruments, mixer, CC4 hi-hat and cymbal choke aliases as the baseline."
 sources:
   modern_metal: {product: "Modern Metal EZX", role: "Metalcore acoustic baseline"}
-  death_darkness: {product: "Death & Darkness SDX", role: "Djentle Beast Deftones snare and optional cymbal colour"}
+  death_darkness: {product: "Death & Darkness SDX", role: "Djentle Beast Deftones snare plus Sleep kick and tom family"}
   electronic_edge: {product: "Electronic Edge EZX", role: "DnB, industrial and electronic drums"}
   hip_hop: {product: "Hip Hop EZX", role: "808, clap and compact electronic percussion"}
   metal_foundry: {product: "Metal Foundry SDX", role: "optional heavier acoustic alternate"}
-  progressive_foundry: {product: "Progressive Foundry SDX", role: "Sleep-oriented alternate body and ambience"}
+  progressive_foundry: {product: "Progressive Foundry SDX", role: "Sleep Token snare"}
 mixer:
   buses:
     - {id: kit_close, purpose: "capture source; close microphones, no master limiter"}
@@ -29,10 +30,10 @@ mixer:
     - "One MegaKit contains all rows below; scenes/palettes select notes externally and never load another SD3 kit."
 articulations:
   - {logical: kick.acoustic, note: 24, source: modern_metal, capture: true, velocities: dense7, rr: 4}
-  - {logical: kick.sleep, note: 25, source: progressive_foundry, capture: true, velocities: dense7, rr: 3}
+  - {logical: kick.sleep, note: 25, source: death_darkness, selection: "KD03 Felt", capture: true, velocities: dense7, rr: 3}
   - {logical: kick.dnb, note: 26, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: kick.industrial, note: 27, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
-  - {logical: kick.trap, note: 28, source: hip_hop, capture: true, velocities: dense5, rr: 2}
+  - {logical: kick.trap, note: 28, source: electronic_edge, selection: "KD3_16", capture: true, velocities: dense5, rr: 2}
   - {logical: snare1.metalcore, note: 32, source: modern_metal, capture: true, velocities: dense7, rr: 4}
   - {logical: snare2.metalcore, note: 33, source: modern_metal, capture: true, velocities: dense7, rr: 3}
   - {logical: rim1.rimshot, note: 35, source: modern_metal, capture: true, velocities: dense5, rr: 3}
@@ -41,51 +42,78 @@ articulations:
   - {logical: snare2.deftones, note: 38, source: death_darkness, selection: "Djentle Beast snare alternate articulation", capture: true, velocities: dense7, rr: 3}
   - {logical: rim2.rimshot, note: 40, source: death_darkness, capture: true, velocities: dense5, rr: 3}
   - {logical: rim2.cross, note: 41, source: death_darkness, capture: true, velocities: dense4, rr: 2}
-  - {logical: snare1.sleep, note: 42, source: progressive_foundry, capture: true, velocities: dense7, rr: 3}
-  - {logical: snare2.sleep, note: 43, source: progressive_foundry, capture: true, velocities: dense7, rr: 3}
+  - {logical: snare1.sleep, note: 42, source: progressive_foundry, selection: "Snare7 center", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare2.sleep, note: 43, source: progressive_foundry, selection: "Snare7 alternate", capture: true, velocities: dense7, rr: 3}
   - {logical: snare1.electro, note: 47, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: snare1.industrial, note: 48, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: snare2.electro, note: 49, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: perc.clap, note: 50, source: hip_hop, capture: true, velocities: dense4, rr: 2}
-  - {logical: perc.click, note: 51, source: electronic_edge, capture: true, velocities: dense4, rr: 1}
+  - {logical: perc.click, note: 51, source: hip_hop, selection: "Sidestick2", capture: true, velocities: dense4, rr: 1}
   - {logical: tom1.acoustic, note: 56, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: tom2.acoustic, note: 57, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: tom3.acoustic, note: 58, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: tom4.acoustic, note: 59, source: modern_metal, capture: true, velocities: dense5, rr: 3}
-  - {logical: tom1.sleep, note: 60, source: progressive_foundry, capture: true, velocities: dense5, rr: 2}
-  - {logical: tom2.sleep, note: 61, source: progressive_foundry, capture: true, velocities: dense5, rr: 2}
-  - {logical: tom3.sleep, note: 62, source: progressive_foundry, capture: true, velocities: dense5, rr: 2}
-  - {logical: hh.bow, note: 64, source: modern_metal, cc: 4, capture: true, velocities: dense5, rr: 3}
-  - {logical: hh.edge, note: 65, source: modern_metal, cc: 4, capture: true, velocities: dense5, rr: 3}
+  - {logical: tom1.sleep, note: 60, source: death_darkness, selection: "TO03_01", capture: true, velocities: dense5, rr: 2}
+  - {logical: tom2.sleep, note: 61, source: death_darkness, selection: "TO03_02", capture: true, velocities: dense5, rr: 2}
+  - {logical: tom3.sleep, note: 62, source: death_darkness, selection: "TO03_03", capture: true, velocities: dense5, rr: 2}
+  - logical: hh.bow
+    note: 64
+    source: modern_metal
+    cc: 4
+    capture: true
+    velocities: dense5
+    rr: 3
+    capture_variants:
+      - {articulation: bow_closed, controllers: [[4, 127]], drumgizmo_note: 112}
+      - {articulation: bow_quarter, controllers: [[4, 96]], drumgizmo_note: 113}
+      - {articulation: bow_half, controllers: [[4, 64]], drumgizmo_note: 114}
+      - {articulation: bow_three_quarter, controllers: [[4, 32]], drumgizmo_note: 115}
+      - {articulation: bow_open, controllers: [[4, 0]], drumgizmo_note: 116}
+  - logical: hh.edge
+    note: 65
+    source: modern_metal
+    cc: 4
+    capture: true
+    velocities: dense5
+    rr: 3
+    capture_variants:
+      - {articulation: edge_closed, controllers: [[4, 127]], drumgizmo_note: 117}
+      - {articulation: edge_third, controllers: [[4, 85]], drumgizmo_note: 118}
+      - {articulation: edge_two_thirds, controllers: [[4, 42]], drumgizmo_note: 119}
+      - {articulation: edge_open, controllers: [[4, 0]], drumgizmo_note: 120}
   - {logical: hh.pedal_close, note: 66, source: modern_metal, capture: true, velocities: dense4, rr: 2}
   - {logical: hh.pedal_splash, note: 67, source: modern_metal, capture: true, velocities: dense4, rr: 2}
   - {logical: hh.electronic_closed, note: 68, source: electronic_edge, capture: true, velocities: dense4, rr: 2}
   - {logical: hh.electronic_open, note: 69, source: electronic_edge, capture: true, velocities: dense4, rr: 2}
   - {logical: crash1.bow, note: 72, source: modern_metal, capture: true, velocities: dense5, rr: 3}
-  - {logical: crash1.edge, note: 73, source: modern_metal, capture: true, velocities: dense5, rr: 3}
+  - {logical: crash1.edge, note: 73, source: modern_metal, capture: false, shared_with: crash1.bow}
   - {logical: crash2.bow, note: 74, source: modern_metal, capture: true, velocities: dense5, rr: 3}
-  - {logical: crash2.edge, note: 75, source: modern_metal, capture: true, velocities: dense5, rr: 3}
+  - {logical: crash2.edge, note: 75, source: modern_metal, capture: false, shared_with: crash2.bow}
   - {logical: crash3.edge, note: 76, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: splash1.acoustic, note: 77, source: modern_metal, capture: true, velocities: dense4, rr: 2}
   - {logical: splash2.acoustic, note: 78, source: modern_metal, capture: true, velocities: dense4, rr: 2}
   - {logical: china1.edge, note: 79, source: modern_metal, capture: true, velocities: dense4, rr: 2}
-  - {logical: china1.bell, note: 80, source: modern_metal, capture: true, velocities: dense4, rr: 2}
+  - {logical: china1.bell, note: 80, source: modern_metal, capture: false, shared_with: china1.edge}
   - {logical: china2.edge, note: 81, source: modern_metal, capture: true, velocities: dense4, rr: 2}
-  - {logical: china2.bell, note: 82, source: modern_metal, capture: true, velocities: dense4, rr: 2}
+  - {logical: china2.bell, note: 82, source: modern_metal, capture: false, shared_with: china2.edge}
   - {logical: ride.bow, note: 83, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: ride.bell, note: 84, source: modern_metal, capture: true, velocities: dense4, rr: 3}
   - {logical: stack.acoustic, note: 85, source: modern_metal, capture: true, velocities: dense4, rr: 2}
-  - {logical: perc.metallic, note: 88, source: electronic_edge, capture: true, velocities: dense4, rr: 1}
+  - {logical: perc.metallic, note: 88, source: hip_hop, selection: "Anvil", capture: true, velocities: dense4, rr: 1}
   - {logical: stack.glitch, note: 89, source: electronic_edge, capture: true, velocities: dense4, rr: 1}
   - {logical: perc.utility, note: 92, source: hip_hop, selection: "cowbell", capture: true, velocities: dense4, rr: 1}
   - {logical: perc.cowbell, note: 92, source: hip_hop, selection: "same SD3 note/sample as perc.utility", capture: false, shared_with: perc.utility}
   - {logical: perc.woodblock, note: 93, source: hip_hop, capture: true, velocities: dense4, rr: 1}
-  - {logical: stack.metallic, note: 88, source: electronic_edge, selection: "same SD3 note/sample as perc.metallic", capture: false, shared_with: perc.metallic}
-  - {logical: stack.clap, note: 99, source: hip_hop, capture: true, velocities: dense4, rr: 2}
+  - {logical: stack.metallic, note: 88, source: hip_hop, selection: "same SD3 note/sample as perc.metallic", capture: false, shared_with: perc.metallic}
+  - {logical: stack.clap, note: 99, source: hip_hop, capture: false, shared_with: perc.clap}
 velocity_sets:
   dense7: [24, 40, 56, 72, 88, 104, 120]
   dense5: [24, 48, 72, 96, 120]
   dense4: [40, 64, 88, 112]
+positional_reserve:
+  - {logical: snare1.metalcore_edge, note: 34, source: modern_metal, status: not-routed-until-pad-measurement}
+  - {logical: snare1.deftones_edge, note: 39, source: death_darkness, status: not-routed-until-pad-measurement}
+  - {logical: snare1.sleep_edge, note: 44, source: progressive_foundry, status: not-routed-until-pad-measurement}
 scenes:
   metalcore: {base: modern_metal, palettes: [vp1_snare1, vp2_flex, vp3_percussion_family, vp4_percussion_variant]}
   sleep_token: {base: progressive_foundry, overrides: [kick.sleep, snare1.sleep, snare2.sleep, tom1.sleep, tom2.sleep, tom3.sleep]}

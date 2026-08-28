@@ -9,6 +9,7 @@ from typing import Any
 import xml.etree.ElementTree as ElementTree
 
 from scipy.io import wavfile
+import yaml
 
 from .audio import QualityProfile, process_wav
 from .library import SampleLibrary, SampleTake, merge_libraries
@@ -120,7 +121,11 @@ def drumgizmo_note_overrides(path: Path) -> dict[tuple[str, str], int]:
     for entry in document.get("mappings", []):
         if not isinstance(entry, dict) or not isinstance(entry.get("logical_target"), str) or not isinstance(entry.get("note"), int):
             raise ValueError("invalid DrumGizmo note-map entry")
-        if "instrument" in entry or "articulation" in entry:
+        if "capture_instrument" in entry or "capture_articulation" in entry:
+            instrument, articulation = entry.get("capture_instrument"), entry.get("capture_articulation")
+            if not isinstance(instrument, str) or not isinstance(articulation, str):
+                raise ValueError("invalid explicit DrumGizmo capture identity")
+        elif "instrument" in entry or "articulation" in entry:
             instrument, articulation = entry.get("instrument"), entry.get("articulation")
             if not isinstance(instrument, str) or not isinstance(articulation, str):
                 raise ValueError("invalid explicit DrumGizmo instrument or articulation")
@@ -136,6 +141,95 @@ def drumgizmo_note_overrides(path: Path) -> dict[tuple[str, str], int]:
             raise ValueError(f"conflicting DrumGizmo note overrides for {key}")
         result[key] = entry["note"]
     return result
+
+
+def drumgizmo_capture_note_overrides(path: Path) -> tuple[dict[tuple[str, str], int], set[tuple[str, str]]]:
+    """Read capture-only DrumGizmo zones from an SD3 MegaKit plan.
+
+    A continuous SD3 hi-hat is captured at reviewed CC4 positions.  Each
+    position becomes a distinct DrumGizmo articulation/note, while the base
+    ``hh.bow``/``hh.edge`` entry from the logical renderer map is replaced.
+    """
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("kind") != "sd3-megakit-plan":
+        raise ValueError("expected an sd3-megakit-plan")
+    result: dict[tuple[str, str], int] = {}
+    replaced: set[tuple[str, str]] = set()
+    for item in document.get("articulations", []):
+        if not isinstance(item, dict) or "capture_variants" not in item:
+            continue
+        logical, variants = item.get("logical"), item.get("capture_variants")
+        if not isinstance(logical, str) or logical.count(".") != 1 or not isinstance(variants, list) or not variants:
+            raise ValueError("capture variants need one instrument.articulation logical target")
+        instrument, base_articulation = logical.split(".", 1)
+        replaced.add((instrument, base_articulation))
+        for variant in variants:
+            if not isinstance(variant, dict):
+                raise ValueError(f"invalid capture variant for {logical}")
+            articulation, note = variant.get("articulation"), variant.get("drumgizmo_note")
+            if not isinstance(articulation, str) or not articulation or not isinstance(note, int) or not 0 <= note <= 127:
+                raise ValueError(f"capture variant for {logical} needs articulation and DrumGizmo note")
+            key = (instrument, articulation)
+            if key in result or note in result.values():
+                raise ValueError(f"duplicate DrumGizmo capture zone in {logical}")
+            result[key] = note
+    return result, replaced
+
+
+def resolved_drumgizmo_note_overrides(note_map: Path | None, megakit_plan: Path | None = None) -> dict[tuple[str, str], int]:
+    """Merge the compiled logical map with capture-only zone replacements."""
+    overrides = drumgizmo_note_overrides(note_map) if note_map is not None else {}
+    if megakit_plan is None:
+        return overrides
+    capture_overrides, replaced = drumgizmo_capture_note_overrides(megakit_plan)
+    for key in replaced:
+        overrides.pop(key, None)
+    collisions = set(overrides) & set(capture_overrides)
+    if collisions:
+        raise ValueError(f"DrumGizmo capture zones collide with renderer mappings: {sorted(collisions)}")
+    used_notes = {note: key for key, note in overrides.items()}
+    for key, note in capture_overrides.items():
+        if note in used_notes:
+            raise ValueError(f"DrumGizmo note {note} maps to both {used_notes[note]} and {key}")
+        overrides[key] = note
+        used_notes[note] = key
+    return overrides
+
+
+def expand_shared_variations(library: SampleLibrary, plan_path: Path) -> SampleLibrary:
+    """Add metadata-only logical aliases which reuse already captured WAVs."""
+    document = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("kind") != "sd3-megakit-plan":
+        raise ValueError("expected an sd3-megakit-plan")
+    articulations = document.get("articulations")
+    if not isinstance(articulations, list):
+        raise ValueError("SD3 MegaKit plan needs articulations")
+    takes = list(library.takes)
+    existing = {(take.instrument, take.articulation) for take in takes}
+    for item in articulations:
+        if not isinstance(item, dict) or item.get("capture") is not False:
+            continue
+        logical, shared_with, note = item.get("logical"), item.get("shared_with"), item.get("note")
+        if (not isinstance(logical, str) or logical.count(".") != 1 or
+                not isinstance(shared_with, str) or shared_with.count(".") != 1 or
+                not isinstance(note, int)):
+            raise ValueError("shared variation needs logical, shared_with, and note")
+        target = tuple(logical.split(".", 1))
+        source = tuple(shared_with.split(".", 1))
+        if target in existing:
+            raise ValueError(f"shared variation already exists in captured library: {logical}")
+        source_takes = [take for take in takes if (take.instrument, take.articulation) == source]
+        if not source_takes:
+            raise ValueError(f"shared variation source is missing from captured library: {shared_with}")
+        takes.extend(replace(
+            take,
+            instrument=target[0],
+            articulation=target[1],
+            note=note,
+            processing_history=take.processing_history + (f"shared-variation:{shared_with}",),
+        ) for take in source_takes)
+        existing.add(target)
+    return SampleLibrary(library.identifier, library.channel_layout, tuple(takes))
 
 
 def prepare_selected_takes(library: SampleLibrary, *, audio_root: Path, output_root: Path,

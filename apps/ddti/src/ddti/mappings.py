@@ -3,8 +3,9 @@
 The DDTi dump knows numbered electrical inputs, not the musician's physical
 kit. A GM or SD3 template therefore never guesses that Input 1 is a kick or
 that a ring is a rim. The user-owned layout document supplies that missing
-relationship, after which only the already-confirmed MIDI-note bytes are
-changed in an offline staged configuration.
+relationship. A template may also declare one stable output channel, after
+which only the already-confirmed per-zone channel/note bytes are changed in an
+offline staged configuration.
 """
 from __future__ import annotations
 
@@ -65,6 +66,9 @@ def apply_role_template(
         kit_numbers.append(kit)
     if not kit_numbers:
         raise ValueError("input layout must select at least one kit")
+    channel = template.get("channel")
+    if channel is not None and (type(channel) is not int or not 1 <= channel <= 16):
+        raise ValueError("role template channel must be an integer in 1..16")
 
     bindings = _sequence(layout.get("bindings"), "input layout bindings must be a list")
     staged_bindings: list[tuple[int, str, int]] = []
@@ -87,5 +91,5 @@ def apply_role_template(
     updated = configuration
     for kit in kit_numbers:
         for input_number, zone, note in staged_bindings:
-            updated = updated.with_note(kit, input_number, zone, note)
+            updated = updated.with_zone(kit, input_number, zone, channel=channel, note=note)
     return updated

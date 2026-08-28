@@ -81,7 +81,13 @@ change aucun réglage de module.
 
 - [ ] Vérifier au THRU toutes les routes, sans doublon USB/DIN et sans boucle.
 - [ ] Mesurer dynamique, positions hi-hat, aftertouch/choke et latence.
-- [ ] Compléter le MegaKit SD3 et le kit DrumGizmo à partir des captures.
+- [x] Générer le MegaKit SD3 déterministe à partir du preset Metalcore et des
+  presets utilisateur validés par SHA-256 ; les notes, sources, scènes et VP
+  sont publiées dans `docs/greg-hybrid-r15-megakit.md` et son PDF.
+- [x] Générer la campagne complète de 685 prises, dont cinq ouvertures HH bow
+  et quatre edge pilotées par CC4, ainsi que l'export DrumGizmo reprenable.
+- [ ] Exécuter les 685 captures lorsque le port MIDI SD3 et le retour audio
+  UMC seront visibles, puis valider les WAV et le kit DrumGizmo réel.
 - [ ] Autoriser explicitement le mode MIDI live du convertisseur seulement
   après ces mesures.
 
@@ -100,7 +106,8 @@ change aucun réglage de module.
   aussi le dernier hit : un choke après un changement de Scene/VP reste lié à
   la destination rendue avant ce changement.
 - [x] Définir la verticale DrumGizmo `CC4 → note de zone` avec seuils et notes
-  explicites par profil ; elle reste `planned` sans captures du kit exporté.
+  explicites par profil. Les captures cibles utilisent les notes 112–120 ;
+  l'activation live reste `planned` jusqu'à la mesure réelle du pédalier.
 - [ ] Décider et prouver les autres expressions DrumGizmo (choke, pression,
   position) ; elles restent explicitement non supportées.
 
@@ -110,3 +117,13 @@ Ne passer le shield Arduino en programmation qu'après un artefact
 `firmware-project-mapping.json` avec `deployment: live`, `status: ready` et
 `hardware_flash: ready`. Le header actuellement versionné est volontairement
 inerte et ne route aucun son.
+
+## Lancement Windows final
+
+Après promotion du profil mesuré, `scripts/prepare-greg-hybrid-live.ps1`
+compile le projet, vérifie séparément `runtime.sd3=ready` et
+`firmware=ready`, puis écrit la configuration locale gitignorée. Le raccourci
+`Launch-Greg-Hybrid-Live.cmd` lance SD3 et le Converter, ouvre les ports exacts,
+publie Scene/VP sur CH15 et applique le plan d'alimentation enregistré. Le
+raccourci `Stop-Greg-Hybrid-Live.cmd` arrête uniquement les processus possédés
+par la session et restaure le plan précédent.

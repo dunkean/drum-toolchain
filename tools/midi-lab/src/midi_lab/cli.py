@@ -10,7 +10,7 @@ from .ports import resolve_unique_port
 from .traces import MidiTrace, TraceEvent
 from .ddrum4_programs import decode_ddrum4_program
 from .latency import analyze_latency_run, prepared_run, read_latency_run, validate_latency_run, write_json_new
-from .sd3_reverse import compare_set, diff_files, scan_binary, write_json
+from .sd3_reverse import build_megakit_preset, compare_set, diff_files, megakit_markdown, preset_inventory, scan_binary, write_json
 
 
 def _trace_event(message, timestamp_ms: int) -> TraceEvent:
@@ -131,6 +131,20 @@ def build_parser() -> argparse.ArgumentParser:
     sd3_diffset.add_argument("--bin-size", type=int, default=256)
     sd3_diffset.add_argument("--top-bins", type=int, default=20)
     sd3_diffset.add_argument("--output", type=Path, help="write JSON summary to this file")
+    sd3_inventory = subparsers.add_parser("sd3-inventory", help="inspect instruments and MIDI aliases in a text SD3 preset")
+    sd3_inventory.add_argument("file", type=Path)
+    sd3_inventory.add_argument("--output", type=Path, help="write JSON inventory to this file")
+    sd3_build = subparsers.add_parser("sd3-build-megakit", help="build a reviewed MegaKit without changing source presets")
+    sd3_build.add_argument("--base", required=True, type=Path)
+    sd3_build.add_argument("--recipe", required=True, type=Path)
+    sd3_build.add_argument("--preset-library", required=True, type=Path)
+    sd3_build.add_argument("--output", required=True, type=Path)
+    sd3_build.add_argument("--force", action="store_true", help="replace only the generated output path")
+    sd3_report = subparsers.add_parser("sd3-megakit-report", help="write the complete preset/scene/palette Markdown table")
+    sd3_report.add_argument("--plan", required=True, type=Path)
+    sd3_report.add_argument("--note-map", required=True, type=Path)
+    sd3_report.add_argument("--preset", required=True, type=Path)
+    sd3_report.add_argument("--output", required=True, type=Path)
     return parser
 
 
@@ -198,6 +212,25 @@ def main(argv: list[str] | None = None) -> int:
         else:
             import json
             print(json.dumps(report, indent=2, sort_keys=True))
+    elif args.command == "sd3-inventory":
+        inventory = preset_inventory(args.file)
+        if args.output:
+            write_json(args.output, inventory)
+            print(f"wrote SD3 preset inventory to {args.output}")
+        else:
+            import json
+            print(json.dumps(inventory, indent=2, sort_keys=True))
+    elif args.command == "sd3-build-megakit":
+        result = build_megakit_preset(
+            args.base, args.recipe, args.preset_library, args.output, force=args.force,
+        )
+        import json
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.command == "sd3-megakit-report":
+        report = megakit_markdown(args.plan, args.note_map, args.preset)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(report, encoding="utf-8", newline="\n")
+        print(f"wrote SD3 MegaKit report to {args.output}")
     elif args.command == "send-ddrum4-program":
         if not args.send:
             raise ValueError("sending a Program Change is a MIDI write; pass --send after checking the output")

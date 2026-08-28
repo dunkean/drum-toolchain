@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "project": "profiles/projects/metalcore-r15-topology-simulator.yaml",
+  "project": "profiles/projects/metalcore-r15-chain-simulator.yaml",
   "renderer": "sd3",
+  "renderer_output": "ddrum_converted",
   "converter": { "path": "C:/replace/ddrum4_converter.exe", "arguments": [] },
   "sd3": { "path": "C:/replace/Superior Drummer 3.exe", "arguments": [] },
   "runtime_profile": {
-    "path": "C:/replace/build/rig/metalcore-r15-topology-simulator/runtime-profile.yaml",
+    "path": "C:/replace/build/rig/metalcore-r15-chain-simulator/runtime-profile.yaml",
     "project_hash": "REPLACE_WITH_COMPILED_PROJECT_HASH"
   },
   "required_inputs": ["eDrumIn BLACK", "TriggerIO", "UMC404HD 192k MIDI In"],

@@ -1,0 +1,24 @@
+schema_version: 1
+kind: edrumin-manual-profile
+id: greg_hybrid_edrumin
+status: ready-for-manual-application
+channel: 3
+device_scope:
+  - snare1
+  - hihat1
+  - ride
+notes:
+  - {physical: snare1.head, note: 0, zone: head}
+  - {physical: snare1.rimshot, note: 1, zone: rimshot}
+  - {physical: snare1.cross, note: 2, zone: cross_stick}
+  - {physical: hh.bow, note: 3, zone: bow, expression: cc4}
+  - {physical: hh.edge, note: 4, zone: edge, expression: cc4}
+  - {physical: hh.pedal_close, note: 5, zone: pedal_close}
+  - {physical: hh.pedal_splash, note: 6, zone: pedal_splash}
+  - {physical: ride.bow, note: 7, zone: bow}
+  - {physical: ride.bell, note: 8, zone: bell}
+controllers:
+  - {physical: hh.bow, expression: openness, type: cc, cc: 4, closed: 127, open: 0, status: measurement-required}
+application:
+  method: eDRUMin desktop editor
+  rule: "Apply the channel and notes exactly; measure only trigger thresholds, curves and CC4 closed/open endpoints after pads are connected."

@@ -11,6 +11,7 @@ from .service import CommandResult, ControlCenter
 from .ddrum4_matrix import format_matrix, load_kit_matrix
 from .simulator import RigSimulator, SimulationError
 from .live_measurement import LiveMeasurementCampaign
+from .campaign import Sd3CaptureCampaign, capture_rows_from_megakit_plan
 
 
 def _print(result: CommandResult) -> int:
@@ -110,6 +111,16 @@ def main(argv: list[str] | None = None) -> int:
     promote.add_argument("--output", required=True, type=Path)
     promote.add_argument("--endpoint", action="append", required=True, metavar="SOURCE=PORT")
     promote.add_argument("--control-endpoint", required=True, metavar="PORT")
+    campaign = commands.add_parser("create-sd3-campaign", help="create a complete no-I/O SD3 capture campaign from a MegaKit plan")
+    campaign.add_argument("plan", type=Path)
+    campaign.add_argument("--output", required=True, type=Path)
+    campaign.add_argument("--id", required=True)
+    campaign.add_argument("--preset", required=True)
+    campaign.add_argument("--midi-output", required=True)
+    campaign.add_argument("--audio-input", required=True)
+    campaign.add_argument("--channels", default="left,right")
+    campaign.add_argument("--sample-rate", type=int, default=44100)
+    campaign.add_argument("--tail-ms", type=int, default=5000)
     args = parser.parse_args(argv)
     center = ControlCenter(args.toolchain)
     if args.action == "kit-matrix":
@@ -175,6 +186,29 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as error:
             parser.error(str(error))
         print(json.dumps({"plan": str(plan), "guide": str(guide), "hardware_io": "disabled"}, indent=2))
+        return 0
+    if args.action == "create-sd3-campaign":
+        try:
+            channels = tuple(value.strip() for value in args.channels.split(",") if value.strip())
+            capture_campaign = Sd3CaptureCampaign(
+                identifier=args.id,
+                sd3_preset=args.preset,
+                midi_output=args.midi_output,
+                audio_input=args.audio_input,
+                channels=channels,
+                rows=capture_rows_from_megakit_plan(args.plan),
+                sample_rate=args.sample_rate,
+                tail_ms=args.tail_ms,
+            )
+            capture_campaign.write_new(args.output)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps({
+            "campaign": str(args.output / "campaign.json"),
+            "session": str(args.output / "capture-session.json"),
+            "expected_take_count": capture_campaign.total_takes,
+            "hardware_io": "disabled",
+        }, indent=2))
         return 0
     if args.action == "measurement-review":
         try:

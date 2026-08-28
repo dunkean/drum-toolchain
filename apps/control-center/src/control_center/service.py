@@ -74,7 +74,9 @@ class ControlCenter:
             raise ValueError("compile requires an explicit output directory")
         if action != "compile" and (replace or base_dump is not None):
             raise ValueError(f"{action} does not accept compile options")
-        command = [self.toolchain, action, str(project)]
+        prefix = ([sys.executable, "-m", "rig_compiler.cli"]
+                  if self.toolchain == "drum-toolchain" else [self.toolchain])
+        command = [*prefix, action, str(project)]
         if output is not None:
             command.extend(("--output", str(output)))
         if replace:
@@ -94,6 +96,7 @@ class ControlCenter:
 
     @staticmethod
     def sampler_command(action: str, run_directory: Path, *, note_map: Path | None = None,
+                        megakit_plan: Path | None = None,
                         confirm_capture: bool = False) -> tuple[str, ...]:
         """Build a capture-campaign command from conventional run artefacts.
 
@@ -126,17 +129,20 @@ class ControlCenter:
         if action == "export-drumgizmo":
             if note_map is None:
                 raise ValueError("DrumGizmo export requires a compiled note map")
-            return (*command, "export-drumgizmo", "--library", str(library), "--audio-root", str(raw),
-                    "--output-directory", str(run_directory / "drumgizmo-kit"), "--note-map", str(note_map),
-                    "--report", str(reports / "drumgizmo-export.json"))
+            export_command = (*command, "export-drumgizmo", "--library", str(library), "--audio-root", str(raw),
+                              "--output-directory", str(run_directory / "drumgizmo-kit"), "--note-map", str(note_map))
+            if megakit_plan is not None:
+                export_command = (*export_command, "--megakit-plan", str(megakit_plan))
+            return (*export_command, "--report", str(reports / "drumgizmo-export.json"))
         if action == "verify-drumgizmo":
             return (*command, "verify-drumgizmo", "--kit-directory", str(run_directory / "drumgizmo-kit"),
                     "--report", str(reports / "drumgizmo-verify.json"))
         raise ValueError(f"unsupported sampler action: {action}")
 
     def run_sampler(self, action: str, run_directory: Path, *, note_map: Path | None = None,
+                    megakit_plan: Path | None = None,
                     confirm_capture: bool = False, dry_run: bool = False) -> CommandResult:
-        command = self.sampler_command(action, run_directory, note_map=note_map,
+        command = self.sampler_command(action, run_directory, note_map=note_map, megakit_plan=megakit_plan,
                                        confirm_capture=confirm_capture)
         if dry_run:
             return CommandResult(command, None, dry_run=True)
@@ -154,18 +160,18 @@ class ControlCenter:
         if action == "export-config":
             if output is None:
                 raise ValueError("DDTi export-config requires an output preset")
-            command = ["ddti", action, str(dump), str(output)]
+            command = [sys.executable, "-m", "ddti.cli", action, str(dump), str(output)]
             if name:
                 command.extend(("--name", name))
             return tuple(command)
         if action == "apply-config":
             if preset is None or output is None:
                 raise ValueError("DDTi apply-config requires a preset and staged output")
-            return ("ddti", action, str(dump), str(preset), str(output))
+            return (sys.executable, "-m", "ddti.cli", action, str(dump), str(preset), str(output))
         if action == "diff":
             if preset is None:
                 raise ValueError("DDTi diff requires a second dump")
-            return ("ddti", action, str(dump), str(preset))
+            return (sys.executable, "-m", "ddti.cli", action, str(dump), str(preset))
         raise ValueError(f"unsupported offline DDTi action: {action}")
 
     def run_ddti(self, action: str, dump: Path, *, preset: Path | None = None,
@@ -181,7 +187,7 @@ class ControlCenter:
                        converter: Path | None = None, external: Path | None = None, runtime_profile: Path | None = None,
                        converter_arguments: Sequence[str] = (), renderer_target: str = "sd3") -> tuple[str, ...]:
         if target == "ddti":
-            return ("ddti-editor",)
+            return (sys.executable, "-m", "ddti.gui")
         if target == "ddrum4ui":
             if ddrum4ui is None:
                 raise ValueError("ddrum4UI requires an explicit executable path")

@@ -1,0 +1,13 @@
+# Stable raw DDTi contract. Scenes and palettes never change these notes;
+# Arduino/PC select the renderer output from the shared logical state.
+format: ddti-note-role-template/v1
+name: Greg Hybrid raw DDTi cymbal layout
+status: ready-for-offline-staging
+channel: 2
+roles:
+  crash1: {bow: 16, edge: 17}
+  crash2: {bow: 18, edge: 19}
+  crash3: {edge: 20}
+  splash1: {hit: 21}
+  splash2: {hit: 22}
+  stack: {hit: 23}

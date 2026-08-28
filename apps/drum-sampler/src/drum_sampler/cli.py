@@ -17,8 +17,9 @@ from .library import SampleLibrary
 from .session import CaptureRequest, CaptureSessionPlan
 from .quality import CaptureQualityPolicy, audit_library
 from .audio import load_quality_profile
-from .offline import (drumgizmo_note_overrides, export_report, merge_library_files,
+from .offline import (drumgizmo_note_overrides, expand_shared_variations, export_report, merge_library_files,
                       prepare_selected_takes, run_offline_recipe, verify_drumgizmo_kit)
+from .offline import resolved_drumgizmo_note_overrides
 
 
 def _request(value: str) -> CaptureRequest:
@@ -63,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     drumgizmo.add_argument("--title")
     drumgizmo.add_argument("--reference-audio", action="store_true", help="reference source WAV paths instead of copying them into the kit")
     drumgizmo.add_argument("--note-map", type=Path, help="generated drumgizmo-midimap.json artifact")
+    drumgizmo.add_argument("--megakit-plan", type=Path, help="expand metadata-only shared variations without recapturing or duplicating WAVs")
     drumgizmo.add_argument("--report", type=Path, help="write an offline export report")
     verify_drumgizmo = subparsers.add_parser("verify-drumgizmo", help="validate a kit XML and record DrumGizmo version/backend without starting audio")
     verify_drumgizmo.add_argument("--kit-directory", required=True, type=Path)
@@ -99,7 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.command == "export-drumgizmo":
             library = SampleLibrary.read(args.library)
-            overrides = drumgizmo_note_overrides(args.note_map) if args.note_map else {}
+            if args.megakit_plan:
+                library = expand_shared_variations(library, args.megakit_plan)
+            overrides = resolved_drumgizmo_note_overrides(args.note_map, args.megakit_plan)
             export = export_drumgizmo(library, audio_root=args.audio_root, output_directory=args.output_directory, title=args.title, copy_audio=not args.reference_audio, midi_notes=overrides)
             if args.report:
                 args.report.parent.mkdir(parents=True, exist_ok=True)

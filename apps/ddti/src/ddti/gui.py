@@ -915,3 +915,7 @@ def launch(dump_path: Path | None = None) -> int:
     editor.resize(1240, 780)
     editor.show()
     return application.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(launch())

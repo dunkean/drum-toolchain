@@ -18,6 +18,14 @@ Le template contient aussi un exemple `hihat_continuous` : il calibre un CC entr
 
 Sur Windows, crée d'abord un port loopMIDI nommé `ddrum_converted`, sélectionne le MIDI OUT du ddrum4 comme entrée, puis ce port comme sortie. Dans SD3, sélectionne `ddrum_converted` comme entrée MIDI et sauvegarde un preset e-drums dédié.
 
+Pour un profil `rig-runtime-profile/v1`, le lancement supervisé utilise trois
+variables de processus : `DDRUM4_RUNTIME_PROFILE`, `DDRUM4_RENDERER_TARGET`
+et `DDRUM4_RENDERER_OUTPUT`. La dernière doit correspondre exactement et une
+seule fois à un MIDI OUT visible. Le Converter ouvre alors toutes les entrées
+du profil, le renderer et le bus global CH15, publie Scene/VP, puis démarre le
+routage sans clic manuel. Une sortie absente ou ambiguë laisse le routeur
+arrêté avec une erreur lisible.
+
 ## CLI
 
 ```powershell

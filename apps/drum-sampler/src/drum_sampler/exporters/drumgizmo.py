@@ -72,6 +72,7 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
     samples_dir = output_directory / "samples"
     instruments_dir = output_directory / "instruments"
     copied: list[Path] = []
+    copied_sources: dict[Path, Path] = {}
     instruments: list[Path] = []
     title = title or library.identifier
     for (instrument, articulation), takes in sorted(groups.items()):
@@ -88,14 +89,18 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
             if not source.is_file():
                 raise ValueError(f"captured sample is missing: {source}")
             if copy_audio:
-                destination = samples_dir / f"{name}-{index:03d}{source.suffix.lower()}"
-                if destination.exists():
-                    if destination.read_bytes() != source.read_bytes():
-                        raise FileExistsError(f"refusing to overwrite different exported audio: {destination}")
-                else:
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, destination)
-                    copied.append(destination)
+                source_key = source.resolve()
+                destination = copied_sources.get(source_key)
+                if destination is None:
+                    destination = samples_dir / f"{name}-{index:03d}{source.suffix.lower()}"
+                    if destination.exists():
+                        if destination.read_bytes() != source.read_bytes():
+                            raise FileExistsError(f"refusing to overwrite different exported audio: {destination}")
+                    else:
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source, destination)
+                        copied.append(destination)
+                    copied_sources[source_key] = destination
                 file_value = (Path("..") / "samples" / destination.name).as_posix()
             else:
                 file_value = str(source.resolve())

@@ -28,8 +28,10 @@ foreach ($name in @('converter', 'sd3')) {
         if ($name -eq 'converter') {
             $previousRuntimeProfile = [Environment]::GetEnvironmentVariable('DDRUM4_RUNTIME_PROFILE', 'Process')
             $previousRendererTarget = [Environment]::GetEnvironmentVariable('DDRUM4_RENDERER_TARGET', 'Process')
+            $previousRendererOutput = [Environment]::GetEnvironmentVariable('DDRUM4_RENDERER_OUTPUT', 'Process')
             [Environment]::SetEnvironmentVariable('DDRUM4_RUNTIME_PROFILE', $runtimeProfilePath, 'Process')
             [Environment]::SetEnvironmentVariable('DDRUM4_RENDERER_TARGET', $rendererTarget, 'Process')
+            [Environment]::SetEnvironmentVariable('DDRUM4_RENDERER_OUTPUT', [string]$session.renderer_output, 'Process')
             $restoreConverterEnvironment = $true
         }
         try {
@@ -38,6 +40,7 @@ foreach ($name in @('converter', 'sd3')) {
             if ($restoreConverterEnvironment) {
                 [Environment]::SetEnvironmentVariable('DDRUM4_RUNTIME_PROFILE', $previousRuntimeProfile, 'Process')
                 [Environment]::SetEnvironmentVariable('DDRUM4_RENDERER_TARGET', $previousRendererTarget, 'Process')
+                [Environment]::SetEnvironmentVariable('DDRUM4_RENDERER_OUTPUT', $previousRendererOutput, 'Process')
             }
         }
         try { $process.PriorityClass = 'High' } catch { Write-Warning "Could not set High priority for ${name}: $($_.Exception.Message)" }

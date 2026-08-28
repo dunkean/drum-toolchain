@@ -177,6 +177,7 @@ class ControlCenterTests(unittest.TestCase):
             self.assertEqual(session["kind"], "capture-session")
             self.assertEqual(session["requests"][0]["note"], 40)
             self.assertEqual(session["requests"][0]["velocities"], [40, 80])
+            self.assertEqual(session["requests"][0]["controllers"], [])
             self.assertEqual(campaign.progress(run).captured_takes, 0)
             raw = run / "raw-wav"; raw.mkdir()
             (raw / "snare_main__rimshot__v040__rr01_raw.wav").write_bytes(b"raw")
@@ -209,10 +210,32 @@ class ControlCenterTests(unittest.TestCase):
         rows = capture_rows_from_megakit_plan(plan)
 
         self.assertGreater(len(rows), len(STARTER_ROWS))
-        self.assertEqual(len({row.note for row in rows}), len(rows))
-        self.assertIn(CaptureRow("snare1_deftones", "hit", 37, (24, 40, 56, 72, 88, 104, 120), 3), rows)
+        self.assertEqual(len({row.raw_filenames() for row in rows}), len(rows))
+        self.assertIn(CaptureRow("snare1", "deftones", 37, (24, 40, 56, 72, 88, 104, 120), 3), rows)
+        bow = [row for row in rows if row.instrument == "hh" and row.articulation.startswith("bow_")]
+        edge = [row for row in rows if row.instrument == "hh" and row.articulation.startswith("edge_")]
+        self.assertEqual((len(bow), len(edge)), (5, 4))
+        self.assertEqual({row.controllers for row in bow}, {((4, 127),), ((4, 96),), ((4, 64),), ((4, 32),), ((4, 0),)})
+        self.assertEqual({row.drumgizmo_note for row in bow + edge}, set(range(112, 121)))
         self.assertNotIn("perc_cowbell", {row.instrument for row in rows})
         self.assertNotIn("stack_metallic", {row.instrument for row in rows})
+
+    def test_cli_creates_complete_sd3_campaign_from_megakit_plan(self) -> None:
+        repository = Path(__file__).resolve().parents[3]
+        plan = repository / "profiles" / "sd3" / "metalcore-r15-megakit-plan.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "campaign"
+            command = [
+                sys.executable, "-m", "control_center.cli", "create-sd3-campaign", str(plan),
+                "--output", str(output), "--id", "greg_hybrid_r15_full",
+                "--preset", "Greg_Hybrid_r15_MegaKit", "--midi-output", "SD3_MEGA_INPUT",
+                "--audio-input", "SD3_PRINT_LOOPBACK",
+            ]
+            completed = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            campaign = Sd3CaptureCampaign.read(output)
+            self.assertEqual(len(campaign.rows), len(capture_rows_from_megakit_plan(plan)))
+            self.assertGreater(campaign.total_takes, 500)
 
     def test_complete_chain_simulator_traces_ddrum4_return_and_both_software_renderers(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
@@ -537,15 +560,23 @@ sounds: []
         center = ControlCenter("drum-toolchain")
         command = center.rig_command("compile", Path("profiles/projects/kit.yaml"), output=Path("build/kit"),
                                      replace=True, base_dump=Path("captures/base.syx"))
-        self.assertEqual(command, ("drum-toolchain", "compile", str(Path("profiles/projects/kit.yaml")), "--output",
+        self.assertEqual(command, (sys.executable, "-m", "rig_compiler.cli", "compile", str(Path("profiles/projects/kit.yaml")), "--output",
                                    str(Path("build/kit")), "--replace", "--base-dump", str(Path("captures/base.syx"))))
+
+    def test_custom_rig_compiler_executable_remains_supported(self) -> None:
+        center = ControlCenter("custom-drum-toolchain")
+        self.assertEqual(
+            center.rig_command("validate", Path("project.yaml")),
+            ("custom-drum-toolchain", "validate", "project.yaml"),
+        )
 
     def test_ddti_commands_are_offline_export_diff_or_stage_only(self) -> None:
         center = ControlCenter()
+        prefix = (sys.executable, "-m", "ddti.cli")
         self.assertEqual(center.ddti_command("export-config", Path("base.syx"), output=Path("preset.yaml")),
-                         ("ddti", "export-config", "base.syx", "preset.yaml"))
+                         (*prefix, "export-config", "base.syx", "preset.yaml"))
         self.assertEqual(center.ddti_command("apply-config", Path("base.syx"), preset=Path("preset.yaml"), output=Path("staged.syx")),
-                         ("ddti", "apply-config", "base.syx", "preset.yaml", "staged.syx"))
+                         (*prefix, "apply-config", "base.syx", "preset.yaml", "staged.syx"))
         with self.assertRaisesRegex(ValueError, "unsupported"):
             center.ddti_command("write-config", Path("base.syx"))
 
@@ -561,7 +592,7 @@ sounds: []
 
     def test_run_collects_logs_without_hardware(self) -> None:
         def runner(command: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            self.assertEqual(tuple(command), ("drum-toolchain", "report", "project.yaml"))
+            self.assertEqual(tuple(command), (sys.executable, "-m", "rig_compiler.cli", "report", "project.yaml"))
             self.assertTrue(kwargs["capture_output"])
             return subprocess.CompletedProcess(command, 0, "report\n", "")
         result = ControlCenter(runner=runner).run_rig("report", Path("project.yaml"))
@@ -595,7 +626,7 @@ sounds: []
         center = ControlCenter()
         with self.assertRaisesRegex(ValueError, "explicit executable"):
             center.launch_command("ddrum4ui")
-        self.assertEqual(center.launch_command("ddti"), ("ddti-editor",))
+        self.assertEqual(center.launch_command("ddti"), (sys.executable, "-m", "ddti.gui"))
 
     def test_control_center_lists_and_stops_only_processes_it_started(self) -> None:
         class Process:

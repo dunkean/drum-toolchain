@@ -28,6 +28,8 @@ class CaptureRow:
     velocities: tuple[int, ...]
     repetitions: int
     channel: int = 10
+    controllers: tuple[tuple[int, int], ...] = ()
+    drumgizmo_note: int | None = None
 
     def __post_init__(self) -> None:
         if not _IDENTIFIER.fullmatch(self.instrument):
@@ -42,16 +44,27 @@ class CaptureRow:
             raise ValueError("velocities must be in 1..127")
         if self.repetitions < 1:
             raise ValueError("repetitions must be positive")
+        if any(not 0 <= controller <= 127 or not 0 <= value <= 127
+               for controller, value in self.controllers):
+            raise ValueError("controller numbers and values must be in 0..127")
+        if len({controller for controller, _ in self.controllers}) != len(self.controllers):
+            raise ValueError("one capture row cannot set the same controller twice")
+        if self.drumgizmo_note is not None and not 0 <= self.drumgizmo_note <= 127:
+            raise ValueError("DrumGizmo note must be in 0..127")
 
     def to_document(self) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "instrument": self.instrument,
             "articulation": self.articulation,
             "note": self.note,
             "channel": self.channel,
+            "controllers": [list(pair) for pair in self.controllers],
             "velocities": list(self.velocities),
             "repetitions": self.repetitions,
         }
+        if self.drumgizmo_note is not None:
+            document["drumgizmo_note"] = self.drumgizmo_note
+        return document
 
     def raw_filenames(self) -> tuple[str, ...]:
         return tuple(
@@ -153,7 +166,15 @@ class Sd3CaptureCampaign:
             "gate_ms": 100,
             "tail_ms": self.tail_ms,
             "cooldown_ms": 300,
-            "requests": [row.to_document() | {"controllers": []} for row in self.rows],
+            "requests": [{
+                "instrument": row.instrument,
+                "articulation": row.articulation,
+                "note": row.note,
+                "channel": row.channel,
+                "controllers": [list(pair) for pair in row.controllers],
+                "velocities": list(row.velocities),
+                "repetitions": row.repetitions,
+            } for row in self.rows],
         }
 
     def write_new(self, run_directory: Path) -> None:
@@ -186,6 +207,8 @@ class Sd3CaptureCampaign:
                     instrument=row["instrument"], articulation=row["articulation"], note=row["note"],
                     channel=row.get("channel", 10), velocities=tuple(row["velocities"]),
                     repetitions=row["repetitions"],
+                    controllers=tuple(tuple(pair) for pair in row.get("controllers", [])),
+                    drumgizmo_note=row.get("drumgizmo_note"),
                 ) for row in rows),
             )
         except (KeyError, TypeError) as error:
@@ -231,10 +254,34 @@ def capture_rows_from_megakit_plan(path: Path) -> tuple[CaptureRow, ...]:
         if (not isinstance(logical, str) or not isinstance(note, int) or not isinstance(repetitions, int)
                 or not isinstance(velocities, list) or not all(isinstance(value, int) for value in velocities)):
             raise ValueError(f"invalid capture articulation in SD3 MegaKit plan: {logical!r}")
-        if note in notes:
-            raise ValueError(f"SD3 MegaKit plan captures duplicate MIDI note {note}")
-        notes.add(note)
-        rows.append(CaptureRow(logical.replace(".", "_"), "hit", note, tuple(velocities), repetitions))
+        if logical.count(".") != 1:
+            raise ValueError(f"capture logical target must be instrument.articulation: {logical!r}")
+        instrument, articulation = logical.split(".", 1)
+        variants = item.get("capture_variants")
+        if variants is not None:
+            if not isinstance(variants, list) or not variants:
+                raise ValueError(f"capture_variants must be a non-empty list for {logical!r}")
+            for variant in variants:
+                if not isinstance(variant, Mapping):
+                    raise ValueError(f"invalid capture variant for {logical!r}")
+                variant_name = variant.get("articulation")
+                controllers = variant.get("controllers")
+                drumgizmo_note = variant.get("drumgizmo_note")
+                if (not isinstance(variant_name, str) or not isinstance(controllers, list)
+                        or not all(isinstance(pair, list) and len(pair) == 2
+                                   and all(isinstance(value, int) for value in pair) for pair in controllers)
+                        or not isinstance(drumgizmo_note, int)):
+                    raise ValueError(f"invalid capture variant for {logical!r}")
+                rows.append(CaptureRow(
+                    instrument, variant_name, note, tuple(velocities), repetitions,
+                    controllers=tuple((pair[0], pair[1]) for pair in controllers),
+                    drumgizmo_note=drumgizmo_note,
+                ))
+        else:
+            if note in notes:
+                raise ValueError(f"SD3 MegaKit plan captures duplicate MIDI note {note}")
+            notes.add(note)
+            rows.append(CaptureRow(instrument, articulation, note, tuple(velocities), repetitions))
     if not rows:
         raise ValueError("SD3 MegaKit plan has no capture rows")
     return tuple(rows)
