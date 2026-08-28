@@ -199,6 +199,7 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
     physical_events = set(document["physical_events"])
     decoder_keys: set[tuple[Any, ...]] = set()
     note_intervals: dict[str, list[tuple[int, int]]] = {}
+    primary_hit_decoders: set[tuple[str, str]] = set()
     poly_aftertouch_sources: set[str] = set()
     emitted: set[str] = set()
     for index, decoder in enumerate(document["source_decoders"]):
@@ -225,6 +226,10 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                 if interval[0] <= high and low <= interval[1]:
                     _fail(f"source_decoders[{index}]: overlapping note decoder")
             note_intervals[source].append(interval)
+            # Correlated pressure may only be attached to a hit this source
+            # can actually emit.  Keep this independent from declaration
+            # order: profile authors commonly put expression decoders first.
+            primary_hit_decoders.add((source, emit["physical"]))
         if message_type == "poly_aftertouch":
             if source in poly_aftertouch_sources:
                 _fail(f"source_decoders[{index}]: ambiguous poly_aftertouch decoder")
@@ -342,6 +347,8 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
             _fail(f"expression_routing[{index}]: openness requires a CC decoder with correlation: none")
         if route["expression"] == "pressure" and (matcher != "poly_aftertouch" or route["correlation"] != "source_channel_note"):
             _fail(f"expression_routing[{index}]: pressure requires correlated poly-aftertouch")
+        if route["expression"] == "pressure" and (route["source"], route["physical"]) not in primary_hit_decoders:
+            _fail(f"expression_routing[{index}]: pressure needs a primary note or note_range decoder for the same source and physical event")
         for target_name, target in route["targets"].items():
             status, event = target["status"], target["event"]
             event_type = event["type"]

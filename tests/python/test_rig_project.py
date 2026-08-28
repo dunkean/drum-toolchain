@@ -130,6 +130,28 @@ class RigProjectTests(unittest.TestCase):
         with self.assertRaisesRegex(RigProjectError, "active_note and correlate"):
             self.load(document)
 
+    def test_rejects_pressure_without_a_primary_hit_from_the_same_source(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][3]["emit"]["expressions"] = ["pressure"]
+        document["expression_routing"] = [{
+            "source": "ddti", "physical": "cymbal.choke", "expression": "pressure",
+            "correlation": "source_channel_note",
+            "targets": {
+                "ddrum4": {"status": "user-confirmed", "event": {
+                    "type": "poly_aftertouch", "note_from": "active_rendered_hit",
+                }},
+                "sd3": {"status": "user-confirmed", "event": {
+                    "type": "poly_aftertouch", "note_from": "active_rendered_hit",
+                }},
+                "drumgizmo": {"status": "unsupported", "reason": "no choke renderer", "event": {
+                    "type": "unsupported",
+                }},
+            },
+        }]
+        with self.assertRaisesRegex(RigProjectError, "pressure needs a primary note or note_range decoder"):
+            self.load(document)
+
     def test_rejects_ambiguous_exact_note_position(self) -> None:
         document = valid_project()
         fill_renderers(document)
