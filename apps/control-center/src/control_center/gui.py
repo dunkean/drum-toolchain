@@ -1017,6 +1017,23 @@ def launch() -> int:
             for decoder in simulator.project.source_decoders:
                 if decoder.source != source or decoder.message_type not in {"cc", "poly_aftertouch"}:
                     continue
+                if decoder.message_type == "poly_aftertouch" and decoder.match.get("active_note"):
+                    # Pressure/choke has no fixed note of its own: expose the
+                    # exact raw hit(s) it may correlate with, rather than a
+                    # meaningless placeholder ``0`` in the simulator UI.
+                    primary_notes: list[int] = []
+                    for primary in simulator.project.source_decoders:
+                        if primary.source != source or primary.physical != decoder.physical:
+                            continue
+                        if primary.message_type == "note":
+                            primary_notes.append(primary.match["note"])
+                        elif primary.message_type == "note_range":
+                            low, high = primary.match["note_range"]
+                            primary_notes.extend(range(low, high + 1))
+                    for data1 in sorted(set(primary_notes)):
+                        label = f"{decoder.physical} · pressure active hit {data1}"
+                        self.studio_expression.addItem(label, (decoder.message_type, data1, decoder.physical))
+                    continue
                 data1 = decoder.match.get("cc") if decoder.message_type == "cc" else decoder.match.get("note", 0)
                 label = f"{decoder.physical} · {decoder.message_type} {data1}"
                 self.studio_expression.addItem(label, (decoder.message_type, data1, decoder.physical))
