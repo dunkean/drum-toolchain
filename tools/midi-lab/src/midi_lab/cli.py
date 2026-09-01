@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
+import json
 from pathlib import Path
 import sys
 import time
@@ -9,8 +11,10 @@ import time
 from .ports import resolve_unique_port
 from .traces import MidiTrace, TraceEvent
 from .ddrum4_programs import decode_ddrum4_program
+from .ddrum4_echo import summarize_echo_probe
 from .latency import analyze_latency_run, prepared_run, read_latency_run, validate_latency_run, write_json_new
 from .sd3_reverse import build_megakit_preset, compare_set, diff_files, megakit_markdown, preset_inventory, scan_binary, write_json
+from .sd3_edrum import build_sd3_edrum_preset
 
 
 def _trace_event(message, timestamp_ms: int) -> TraceEvent:
@@ -85,6 +89,20 @@ def build_parser() -> argparse.ArgumentParser:
     send_program.add_argument("--channel", required=True, type=int, help="DDrum4 MIDI channel, 1..16")
     send_program.add_argument("--program", required=True, type=int, help="DDrum4 Program Change, 0..123")
     send_program.add_argument("--send", action="store_true", help="required: actually send the Program Change")
+    echo_probe = subparsers.add_parser(
+        "ddrum4-echo-probe",
+        help="measure DDrum4 performance soft-through on a physically isolated direct return path",
+    )
+    echo_probe.add_argument("--midi-input", required=True, help="input receiving DDrum4 MIDI OUT through hardware THRU")
+    echo_probe.add_argument("--midi-output", required=True, help="output wired directly to DDrum4 MIDI IN")
+    echo_probe.add_argument("--channel", type=int, default=12)
+    echo_probe.add_argument("--note", type=int, default=127)
+    echo_probe.add_argument("--count", type=int, default=100)
+    echo_probe.add_argument("--window-ms", type=int, default=100)
+    echo_probe.add_argument("--report", required=True, type=Path)
+    echo_probe.add_argument("--confirm-isolated-topology", action="store_true",
+                            help="required: Arduino OUT is disconnected and cannot feed DDrum4 IN")
+    echo_probe.add_argument("--send", action="store_true", help="required: transmit the bounded diagnostic sequence")
     record = subparsers.add_parser("record", help="record a bounded MIDI trace from one explicit input")
     record.add_argument("--input", required=True, help="unique MIDI input name")
     record.add_argument("--seconds", required=True, type=float)
@@ -145,6 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
     sd3_report.add_argument("--note-map", required=True, type=Path)
     sd3_report.add_argument("--preset", required=True, type=Path)
     sd3_report.add_argument("--output", required=True, type=Path)
+    sd3_edrum = subparsers.add_parser("sd3-build-edrum-map", help="build a portable SD3 EdrumPresets mapping")
+    sd3_edrum.add_argument("--profile", required=True, type=Path)
+    sd3_edrum.add_argument("--output", required=True, type=Path)
+    sd3_edrum.add_argument("--force", action="store_true", help="replace only the generated output path")
     return parser
 
 
@@ -231,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(report, encoding="utf-8", newline="\n")
         print(f"wrote SD3 MegaKit report to {args.output}")
+    elif args.command == "sd3-build-edrum-map":
+        result = build_sd3_edrum_preset(args.profile, args.output, force=args.force)
+        import json
+        print(json.dumps(result, indent=2, sort_keys=True))
     elif args.command == "send-ddrum4-program":
         if not args.send:
             raise ValueError("sending a Program Change is a MIDI write; pass --send after checking the output")
@@ -241,6 +267,65 @@ def main(argv: list[str] | None = None) -> int:
         with mido.open_output(name) as output_port:
             output_port.send(mido.Message("program_change", channel=args.channel - 1, program=args.program))
         print(f"sent PC {args.program} ({decode_ddrum4_program(args.program).label}) to {name} on channel {args.channel}")
+    elif args.command == "ddrum4-echo-probe":
+        if not args.send or not args.confirm_isolated_topology:
+            raise ValueError(
+                "the echo probe transmits MIDI; pass --send --confirm-isolated-topology only after disconnecting Arduino OUT"
+            )
+        if not 1 <= args.channel <= 16 or not 0 <= args.note <= 127:
+            raise ValueError("echo probe channel must be 1..16 and note must be 0..127")
+        if not 1 <= args.count <= 1000 or not 1 <= args.window_ms <= 1000:
+            raise ValueError("echo probe count/window must be within 1..1000")
+        if args.report.exists():
+            raise FileExistsError(f"refusing to overwrite echo probe report: {args.report}")
+        mido = _mido()
+        input_name = resolve_unique_port(mido.get_input_names(), args.midi_input)
+        output_name = resolve_unique_port(mido.get_output_names(), args.midi_output)
+        samples: list[dict[str, object]] = []
+        background: list[dict[str, object]] = []
+        with mido.open_input(input_name) as input_port, mido.open_output(output_name) as output_port:
+            for index in range(args.count):
+                messages = (
+                    ("note_on", mido.Message("note_on", channel=args.channel - 1, note=args.note,
+                                             velocity=(index * 37) % 127 + 1)),
+                    ("poly_aftertouch", mido.Message("polytouch", channel=args.channel - 1,
+                                                     note=args.note, value=(index * 53) % 127 + 1)),
+                    ("zero_velocity_note_on", mido.Message("note_on", channel=args.channel - 1,
+                                                           note=args.note, velocity=0)),
+                )
+                for kind, message in messages:
+                    for pending in input_port.iter_pending():
+                        background.append(asdict(_trace_event(pending, 0)))
+                    sent = _trace_event(message, 0)
+                    output_port.send(message)
+                    started = time.monotonic()
+                    received: list[dict[str, object]] = []
+                    deadline = started + args.window_ms / 1000.0
+                    while time.monotonic() < deadline:
+                        for pending in input_port.iter_pending():
+                            event = asdict(_trace_event(pending, int((time.monotonic() - started) * 1000)))
+                            event["latency_ms"] = event.pop("timestamp_ms")
+                            received.append(event)
+                        time.sleep(0.001)
+                    samples.append({"sequence": len(samples), "kind": kind,
+                                    "sent": asdict(sent), "received": received})
+        summary = summarize_echo_probe(samples)
+        report = {
+            "kind": "ddrum4-performance-soft-through-probe/v1",
+            "hardware_io": "enabled-confirmed-isolated",
+            "midi_input": input_name, "midi_output": output_name,
+            "channel": args.channel, "note": args.note, "repetitions_per_type": args.count,
+            "window_ms": args.window_ms, "summary": summary, "background": background,
+            "samples": samples,
+        }
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.report.with_suffix(args.report.suffix + ".tmp")
+        temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+        temporary.replace(args.report)
+        print(f"wrote isolated DDrum4 echo probe to {args.report}: {summary['conclusion']}")
+        for message_type, verdict in summary["verdict_by_type"].items():
+            print(f"  {message_type}: {verdict} "
+                  f"({summary['exact_returns_by_type'][message_type]}/{summary['sent_by_type'][message_type]} exact)")
     elif args.command == "record":
         if args.seconds <= 0:
             raise ValueError("--seconds must be positive")

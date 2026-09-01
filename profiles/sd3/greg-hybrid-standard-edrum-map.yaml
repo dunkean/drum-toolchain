@@ -1,0 +1,47 @@
+schema_version: 1
+kind: sd3-edrum-preset
+name: Greg_Hybrid_Standard_SD3_Kits
+source_plan: metalcore-r15-megakit-plan.yaml
+include_positional_reserve: true
+hats_splash_note: 67
+
+# Incoming notes are the stable SD3 renderer namespace produced by the PC
+# converter. Scene/palette-specific sounds fall back to the same physical role
+# in a regular SD3 kit. Optional cymbal positions keep the current kit layout;
+# a loaded kit with an empty position must have an instrument added there.
+mappings:
+  - {input_notes: [24, 25, 26, 27, 28], pad: kickR, standard_note: 36}
+  - {input_notes: [32, 37, 42, 47, 48, 49, 55], pad: snareR, standard_note: 38}
+  - {input_notes: [33, 38, 43], pad: snareFO, standard_note: 38}
+  - {input_notes: [34, 39, 44], pad: snareRO, standard_note: 38}
+  - {input_notes: [35, 40, 45], pad: snareFX, standard_note: 40}
+  - {input_notes: [36, 41, 46], pad: snareSL, standard_note: 37}
+  - {input_notes: [50, 99], pad: claps, standard_note: 39}
+  - {input_notes: [51], pad: sidestick, standard_note: 37}
+  - {input_notes: [52, 56, 60], pad: tom1R, standard_note: 48}
+  - {input_notes: [53, 57, 61], pad: tom2R, standard_note: 47}
+  - {input_notes: [54, 58, 62], pad: tom4R, standard_note: 43}
+  - {input_notes: [59, 63], pad: tom5R, standard_note: 41}
+  - {input_notes: [64], pad: hatsTipTrig, standard_note: 20}
+  - {input_notes: [65], pad: hatsTrig, standard_note: 18}
+  - {input_notes: [66], pad: hatsPL, standard_note: 44}
+  - {input_notes: [67], pad: hatsPLO, standard_note: 44}
+  - {input_notes: [68], pad: hatsCL, standard_note: 42}
+  - {input_notes: [69], pad: hatsO1, standard_note: 46}
+  - {input_notes: [72, 73], pad: crash2, standard_note: 49}
+  - {input_notes: [74, 75], pad: crash5, standard_note: 57}
+  - {input_notes: [76], pad: crash4, standard_note: 52}
+  - {input_notes: [77, 78], pad: splash3, standard_note: 55}
+  - {input_notes: [79, 80], pad: china2, standard_note: 55}
+  - {input_notes: [81, 82], pad: china6, standard_note: 52}
+  - {input_notes: [83], pad: ride4, standard_note: 51}
+  - {input_notes: [84], pad: ride4BL, standard_note: 53}
+  - {input_notes: [85, 89], pad: crash3, standard_note: 55}
+  - {input_notes: [86], pad: spock5, standard_note: 57}
+  - {input_notes: [88, 92, 93], pad: cowbell, standard_note: 56}
+  - {input_notes: [100, 101, 102, 103], pad: snareR, standard_note: 38}
+
+controllers:
+  # SD3 e-drum presets encode CC addresses as 128 + CC. The common internal
+  # hi-hat controller is CC1, matching Toontrack's installed presets.
+  - {input_cc: 4, pad: hatsCtrl, standard_cc: 1}

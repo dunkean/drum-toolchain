@@ -177,11 +177,12 @@ def write_json(path: Path, document: dict[str, Any]) -> None:
 
 
 _INSTBOX_RE = re.compile(r"^instbox\s+(\d+)\s+\{$")
-_XPAD_RE = re.compile(r"^xpad\s+\d+\s+(\S+)\s+\{$")
+_XPAD_RE = re.compile(r"^xpad\s+(\d+)\s+(\S+)\s+\{$")
 _POS_RE = re.compile(r'^pos\s+"([^"]+)"')
-_DRUM_RE = re.compile(r'^drum\s+"([^"]*)"\s+"([^"]*)"\s+(-?\d+)')
+_DRUM_RE = re.compile(r'^drum\s+"([^"]*)"(?:\s+"([^"]*)")?(?:\s+-?\d+)?')
 _ALIAS_RE = re.compile(r"^alias\s+(\S+)\s+(.+)$")
 _MIC_ENTRY_RE = re.compile(r'^("([^"]+)"\s+"[^"]*"\s+[01]\s+)-?\d+$')
+_STACK_RE = re.compile(r"^stack\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(active|inactive)$")
 
 
 def _preset_lines(path: Path) -> tuple[list[str], bool]:
@@ -225,21 +226,41 @@ def _instrument_spans(lines: list[str]) -> dict[int, tuple[int, int]]:
     return spans
 
 
-def _block_inventory(number: int, block: list[str]) -> dict[str, Any]:
+def _xpad_spans(block: list[str]) -> dict[int, tuple[int, int]]:
+    """Return xpad spans that are direct children of one instbox block."""
+    spans: dict[int, tuple[int, int]] = {}
+    depth = 0
+    for index, line in enumerate(block):
+        stripped = line.strip()
+        if depth == 1 and (match := _XPAD_RE.match(stripped)):
+            number = int(match.group(1))
+            if number in spans:
+                raise ValueError(f"duplicate xpad {number}")
+            spans[number] = (index, _block_end(block, index))
+        if stripped.endswith("{"):
+            depth += 1
+        elif stripped == "}":
+            depth -= 1
+    return spans
+
+
+def _xpad_inventory(number: int, xpad_number: int, block: list[str]) -> dict[str, Any]:
     library = ""
     position = ""
     drum_id = ""
     beater = ""
     aliases: list[dict[str, Any]] = []
-    for line in block:
+    pads_start, pads_end = _named_block(block, "pads")
+    pad_alias_lines = {index for index in range(pads_start + 1, pads_end - 1)}
+    for index, line in enumerate(block):
         stripped = line.strip()
         if match := _XPAD_RE.match(stripped):
-            library = match.group(1)
+            library = match.group(2)
         elif match := _POS_RE.match(stripped):
             position = match.group(1)
         elif match := _DRUM_RE.match(stripped):
-            drum_id, beater = match.group(1), match.group(2)
-        elif match := _ALIAS_RE.match(stripped):
+            drum_id, beater = match.group(1), match.group(2) or ""
+        elif index in pad_alias_lines and (match := _ALIAS_RE.match(stripped)):
             values = match.group(2).split()
             aliases.append({
                 "pad": match.group(1),
@@ -247,12 +268,40 @@ def _block_inventory(number: int, block: list[str]) -> dict[str, Any]:
             })
     return {
         "instbox": number,
+        "xpad": xpad_number,
         "library": library,
         "position": position,
         "drum_id": drum_id,
         "beater": beater,
         "aliases": aliases,
     }
+
+
+def _block_inventory(number: int, block: list[str]) -> dict[str, Any]:
+    xpads = [
+        _xpad_inventory(number, xpad_number, block[start:end])
+        for xpad_number, (start, end) in sorted(_xpad_spans(block).items())
+    ]
+    if not xpads:
+        raise ValueError(f"instbox {number} has no xpad")
+    # Keep the historical summary fields for reports, but expose xpad-level
+    # ownership so aliases can never be attributed to another stacked sound.
+    summary = dict(xpads[-1])
+    summary["xpads"] = xpads
+    summary["aliases"] = [alias for xpad in xpads for alias in xpad["aliases"]]
+    summary["stack_routes"] = [
+        {
+            "index": int(match.group(1)),
+            "source_xpad": int(match.group(2)),
+            "source_pad": match.group(3),
+            "target_xpad": int(match.group(4)),
+            "target_pad": match.group(5),
+            "active": match.group(6) == "active",
+        }
+        for line in block
+        if (match := _STACK_RE.match(line.strip()))
+    ]
+    return summary
 
 
 def preset_inventory(path: Path) -> dict[str, Any]:
@@ -264,15 +313,17 @@ def preset_inventory(path: Path) -> dict[str, Any]:
     ]
     notes: dict[int, list[dict[str, Any]]] = {}
     for instrument in instruments:
-        for alias in instrument["aliases"]:
-            for value in alias["values"]:
-                if isinstance(value, int):
-                    notes.setdefault(value, []).append({
-                        "instbox": instrument["instbox"],
-                        "pad": alias["pad"],
-                        "library": instrument["library"],
-                        "drum_id": instrument["drum_id"],
-                    })
+        for xpad in instrument["xpads"]:
+            for alias in xpad["aliases"]:
+                for value in alias["values"]:
+                    if isinstance(value, int):
+                        notes.setdefault(value, []).append({
+                            "instbox": instrument["instbox"],
+                            "xpad": xpad["xpad"],
+                            "pad": alias["pad"],
+                            "library": xpad["library"],
+                            "drum_id": xpad["drum_id"],
+                        })
     return {
         "path": str(path),
         "sha256": sha256_hex(path.read_bytes()),
@@ -419,6 +470,84 @@ def _validate_expected_mappings(inventory: dict[str, Any], expected: dict[Any, A
     return sorted(validated)
 
 
+def _validate_expected_stack_mappings(inventory: dict[str, Any], expected: dict[Any, Any]) -> list[int]:
+    """Prove that an aliased source reaches every intended stacked voice."""
+    instruments = {instrument["instbox"]: instrument for instrument in inventory["instruments"]}
+    validated: list[int] = []
+    for note_text, requested in expected.items():
+        note = int(note_text)
+        owners = inventory["notes"].get(str(note), [])
+        if len(owners) != 1:
+            raise ValueError(f"expected stack mapping note {note} has {len(owners)} owners")
+        owner = owners[0]
+        instrument = instruments[owner["instbox"]]
+        active = [
+            route for route in instrument["stack_routes"]
+            if route["active"]
+            and route["source_xpad"] == owner["xpad"]
+            and route["source_pad"] == owner["pad"]
+        ]
+        if not active:
+            raise ValueError(f"expected stack mapping note {note} has no active target")
+        source_facts = {
+            "instbox": owner["instbox"],
+            "source_xpad": owner["xpad"],
+            "source_pad": owner["pad"],
+        }
+        expected_targets = requested.get("targets") if isinstance(requested, dict) else None
+        if expected_targets is not None:
+            if not isinstance(expected_targets, list) or not expected_targets:
+                raise ValueError(f"expected stack mapping note {note} targets must be a non-empty list")
+            actual_targets: list[dict[str, Any]] = []
+            for route in active:
+                targets = [xpad for xpad in instrument["xpads"] if xpad["xpad"] == route["target_xpad"]]
+                if len(targets) != 1:
+                    raise ValueError(f"expected stack mapping note {note} target xpad is missing")
+                target = targets[0]
+                actual_targets.append({
+                    "target_xpad": route["target_xpad"],
+                    "target_pad": route["target_pad"],
+                    "target_library": target["library"],
+                    "target_drum_id": target["drum_id"],
+                })
+            normalize = lambda values: sorted(values, key=lambda value: (
+                int(value["target_xpad"]), str(value["target_pad"]),
+                str(value["target_library"]), str(value["target_drum_id"]),
+            ))
+            if normalize(actual_targets) != normalize(expected_targets):
+                raise ValueError(
+                    f"expected stack mapping targets mismatch for note {note}: "
+                    f"actual={normalize(actual_targets)}, expected={normalize(expected_targets)}"
+                )
+            facts = source_facts
+            requested_facts = {key: value for key, value in requested.items() if key != "targets"}
+        else:
+            if len(active) != 1:
+                raise ValueError(f"expected stack mapping note {note} has {len(active)} active targets")
+            route = active[0]
+            targets = [xpad for xpad in instrument["xpads"] if xpad["xpad"] == route["target_xpad"]]
+            if len(targets) != 1:
+                raise ValueError(f"expected stack mapping note {note} target xpad is missing")
+            target = targets[0]
+            facts = {
+                **source_facts,
+                "target_xpad": route["target_xpad"],
+                "target_pad": route["target_pad"],
+                "target_library": target["library"],
+                "target_drum_id": target["drum_id"],
+            }
+            requested_facts = requested
+        mismatches = {
+            key: (facts.get(key), value)
+            for key, value in requested_facts.items()
+            if facts.get(key) != value
+        }
+        if mismatches:
+            raise ValueError(f"expected stack mapping mismatch for note {note}: {mismatches}")
+        validated.append(note)
+    return sorted(validated)
+
+
 def _apply_mixer_overrides(lines: list[str], overrides: dict[str, dict[str, Any]]) -> list[str]:
     if not overrides:
         return lines
@@ -430,13 +559,24 @@ def _apply_mixer_overrides(lines: list[str], overrides: dict[str, dict[str, Any]
         raise ValueError(f"mixer entries do not exist in base preset: {missing}")
 
     replacements: list[tuple[int, int, list[str]]] = []
-    supported = {"volume", "route", "mute", "solo", "username"}
+    supported = {"volume", "route", "mute", "solo", "username", "clear_effects"}
     for name, requested in overrides.items():
         unsupported = sorted(set(requested) - supported)
         if unsupported:
             raise ValueError(f"unsupported mixer overrides for {name}: {unsupported}")
         start, end = children[name]
         block = list(mixer[start:end])
+        clear_effects = requested.get("clear_effects", False)
+        if not isinstance(clear_effects, bool):
+            raise ValueError(f"mixer clear_effects override for {name} must be boolean")
+        if clear_effects:
+            effect_spans = [
+                (effect_start, effect_end)
+                for child_name, effect_start, effect_end in _direct_child_spans(block)
+                if child_name.startswith("effect ")
+            ]
+            for effect_start, effect_end in sorted(effect_spans, reverse=True):
+                block[effect_start:effect_end] = []
         newline = "\r\n" if block[0].endswith("\r\n") else "\n"
         depth = 0
         found: set[str] = set()
@@ -451,7 +591,7 @@ def _apply_mixer_overrides(lines: list[str], overrides: dict[str, dict[str, Any]
             if depth != 1:
                 continue
             key = stripped.partition(" ")[0]
-            if key in requested:
+            if key in requested and key != "clear_effects":
                 value = f'"{requested[key]}"' if key == "username" else requested[key]
                 block[index] = f"{key} {value}{newline}"
                 found.add(key)
@@ -462,7 +602,7 @@ def _apply_mixer_overrides(lines: list[str], overrides: dict[str, dict[str, Any]
             )
             block.insert(route_index, f'username "{requested["username"]}"{newline}')
             found.add("username")
-        absent = sorted(set(requested) - found)
+        absent = sorted(set(requested) - found - {"clear_effects"})
         if absent:
             raise ValueError(f"mixer properties do not exist for {name}: {absent}")
         replacements.append((start, end, block))
@@ -536,7 +676,20 @@ def _named_block(block: list[str], name: str) -> tuple[int, int]:
     raise ValueError(f"missing {name} block")
 
 
-def _rewrite_aliases(block: list[str], aliases: dict[str, list[Any]], drop_unspecified: bool) -> list[str]:
+def _rewrite_all_named_blocks(block: list[str], name: str, replacement: list[str]) -> list[str]:
+    """Replace every named block, including one inside each stacked xpad."""
+    rewritten = list(block)
+    starts = [index for index, line in enumerate(rewritten) if line.strip() == f"{name} {{"]
+    if not starts:
+        raise ValueError(f"missing {name} block")
+    for start in reversed(starts):
+        end = _block_end(rewritten, start)
+        rewritten[start:end] = replacement
+    return rewritten
+
+
+def _rewrite_aliases(block: list[str], aliases: dict[str, list[Any]], drop_unspecified: bool,
+                     add_missing: bool = False) -> list[str]:
     rewritten: list[str] = []
     seen: set[str] = set()
     newline = "\r\n" if any(line.endswith("\r\n") for line in block) else "\n"
@@ -553,8 +706,92 @@ def _rewrite_aliases(block: list[str], aliases: dict[str, list[Any]], drop_unspe
         elif not drop_unspecified:
             rewritten.append(line)
     missing = set(aliases) - seen
+    if missing and add_missing:
+        pads = {
+            match.group(1)
+            for line in rewritten
+            if (match := re.match(r"^pad\s+(\S+)\s+\{$", line.strip()))
+        }
+        unknown_pads = missing - pads
+        if unknown_pads:
+            raise ValueError(f"aliases reference pads absent from selected xpad: {sorted(unknown_pads)}")
+        xpad_spans = _xpad_spans(rewritten)
+        if len(xpad_spans) != 1:
+            raise ValueError("adding aliases requires exactly one selected xpad")
+        pads_start, pads_end = _named_block(rewritten, "pads")
+        additions = [
+            f"alias {pad} {' '.join(str(value) for value in aliases[pad])}{newline}"
+            for pad in sorted(missing)
+        ]
+        rewritten[pads_end - 1:pads_end - 1] = additions
+        seen.update(missing)
+        missing = set()
     if missing:
         raise ValueError(f"aliases do not exist in source block: {sorted(missing)}")
+    return rewritten
+
+
+def _rewrite_xpad_aliases(block: list[str], aliases_by_xpad: dict[int, dict[str, list[Any]]]) -> list[str]:
+    """Rewrite aliases independently while preserving a multi-xpad instrument stack."""
+    rewritten = list(block)
+    spans = _xpad_spans(rewritten)
+    unknown = sorted(set(aliases_by_xpad) - set(spans))
+    if unknown:
+        raise ValueError(f"xpad aliases reference absent xpads: {unknown}")
+    newline = "\r\n" if rewritten[0].endswith("\r\n") else "\n"
+    for number, (start, end) in sorted(spans.items(), reverse=True):
+        requested = aliases_by_xpad.get(number, {})
+        wrapped = [f"instbox 0 {{{newline}", *rewritten[start:end], f"}}{newline}"]
+        wrapped = _rewrite_aliases(
+            wrapped,
+            requested,
+            drop_unspecified=True,
+            add_missing=bool(requested),
+        )
+        rewritten[start:end] = wrapped[1:-1]
+    return rewritten
+
+
+def _rewrite_stack_routes(block: list[str], routes: list[dict[str, Any]]) -> list[str]:
+    """Replace native SD3 stack links with reviewed proxy-to-xpad routes."""
+    if not routes:
+        return block
+    spans = _xpad_spans(block)
+    pad_names: dict[int, set[str]] = {}
+    for number, (start, end) in spans.items():
+        pad_names[number] = {
+            match.group(1)
+            for line in block[start:end]
+            if (match := re.match(r"^pad\s+(\S+)\s+\{$", line.strip()))
+        }
+    normalized: list[tuple[int, str, int, str, bool]] = []
+    for index, route in enumerate(routes):
+        if not isinstance(route, dict):
+            raise ValueError(f"stack route {index} must be an object")
+        unknown = sorted(set(route) - {"source_xpad", "source_pad", "target_xpad", "target_pad", "active"})
+        if unknown:
+            raise ValueError(f"stack route {index} has unsupported fields: {unknown}")
+        source_xpad = int(route["source_xpad"])
+        target_xpad = int(route["target_xpad"])
+        source_pad = str(route["source_pad"])
+        target_pad = str(route["target_pad"])
+        active = route.get("active", True)
+        if not isinstance(active, bool):
+            raise ValueError(f"stack route {index} active must be boolean")
+        if source_xpad not in spans or source_pad not in pad_names[source_xpad]:
+            raise ValueError(f"stack route {index} source pad does not exist: xpad {source_xpad}.{source_pad}")
+        if target_xpad not in spans or target_pad not in pad_names[target_xpad]:
+            raise ValueError(f"stack route {index} target pad does not exist: xpad {target_xpad}.{target_pad}")
+        normalized.append((source_xpad, source_pad, target_xpad, target_pad, active))
+
+    rewritten = [line for line in block if not _STACK_RE.match(line.strip())]
+    newline = "\r\n" if rewritten[0].endswith("\r\n") else "\n"
+    additions = [
+        f"stack {index} {source_xpad} {source_pad} {target_xpad} {target_pad} "
+        f"{'active' if active else 'inactive'}{newline}"
+        for index, (source_xpad, source_pad, target_xpad, target_pad, active) in enumerate(normalized)
+    ]
+    rewritten[-1:-1] = additions
     return rewritten
 
 
@@ -627,7 +864,9 @@ def _master_entries(mastermics: list[str]) -> dict[str, int]:
 def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_count: int,
                      overrides: dict[str, Any], exact_match: bool,
                      require_explicit: bool,
-                     require_used_explicit_pads: set[str] | None = None) -> list[str]:
+                     require_used_explicit_pads: set[str] | None = None,
+                     require_used_explicit_xpad_pads: dict[int, set[str]] | None = None,
+                     preserve_disabled: bool = False) -> list[str]:
     entries = _master_entries(base_mastermics)
     resolved: dict[str, int] = {}
     for source_name, target in overrides.items():
@@ -662,24 +901,40 @@ def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_coun
         missing_explicit = sorted(source_names - set(overrides))
         if missing_explicit:
             raise ValueError(f"micmap entries require explicit map or null: {missing_explicit}")
-    if require_used_explicit_pads:
+    if require_used_explicit_pads or require_used_explicit_xpad_pads:
         used_sources: set[str] = set()
         found_pads: set[str] = set()
-        for index, line in enumerate(block):
-            match = re.match(r"^pad\s+(\S+)\s+\{$", line.strip())
-            if not match or match.group(1) not in require_used_explicit_pads:
-                continue
-            found_pads.add(match.group(1))
-            end = _block_end(block, index)
-            for pad_line in block[index:end]:
-                if not pad_line.strip().startswith("usemic "):
+
+        def collect_used_mics(start: int, end: int, requested: set[str], label: str) -> None:
+            for index in range(start, end):
+                match = re.match(r"^pad\s+(\S+)\s+\{$", block[index].strip())
+                if not match or match.group(1) not in requested:
                     continue
-                for used_name in re.findall(r'"([^"]+)"', pad_line):
-                    if used_name in source_names:
-                        used_sources.add(used_name)
-                    elif used_name.endswith("R") and used_name[:-1] in source_names:
-                        used_sources.add(used_name[:-1])
-        missing_pads = sorted(require_used_explicit_pads - found_pads)
+                pad = match.group(1)
+                found_pads.add(f"{label}{pad}")
+                pad_end = _block_end(block, index)
+                for pad_line in block[index:pad_end]:
+                    if not pad_line.strip().startswith("usemic "):
+                        continue
+                    for used_name in re.findall(r'"([^"]+)"', pad_line):
+                        if used_name in source_names:
+                            used_sources.add(used_name)
+                        elif used_name.endswith("R") and used_name[:-1] in source_names:
+                            used_sources.add(used_name[:-1])
+
+        requested_labels: set[str] = set()
+        if require_used_explicit_pads:
+            requested_labels.update(require_used_explicit_pads)
+            collect_used_mics(0, len(block), require_used_explicit_pads, "")
+        if require_used_explicit_xpad_pads:
+            spans = _xpad_spans(block)
+            for xpad, pads in require_used_explicit_xpad_pads.items():
+                if xpad not in spans:
+                    raise ValueError(f"used-mic validation references absent xpad: {xpad}")
+                label = f"xpad {xpad}:"
+                requested_labels.update(f"{label}{pad}" for pad in pads)
+                collect_used_mics(*spans[xpad], pads, label)
+        missing_pads = sorted(requested_labels - found_pads)
         if missing_pads:
             raise ValueError(f"aliased pads have no source pad block: {missing_pads}")
         missing_used = sorted(used_sources - set(overrides))
@@ -706,10 +961,15 @@ def _rewrite_micmaps(block: list[str], base_mastermics: list[str], base_mic_coun
             match = _MIC_ENTRY_RE.match(stripped)
             if depth == 1 and match:
                 source_name = match.group(2)
-                target_index = resolved.get(
-                    source_name,
-                    entries.get(source_name, -1) if exact_match else -1,
-                )
+                source_index = int(stripped.rsplit(" ", 1)[1])
+                if source_name in resolved:
+                    # An explicit map/null always wins. preserve_disabled only
+                    # protects source mics that the recipe did not review.
+                    target_index = resolved[source_name]
+                elif preserve_disabled and source_index < 0:
+                    target_index = -1
+                else:
+                    target_index = entries.get(source_name, -1) if exact_match else -1
                 rewritten[index] = f"{match.group(1)}{target_index}{newline}"
     unknown = sorted(set(resolved) - source_names)
     if unknown:
@@ -722,7 +982,11 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
                  micmap_overrides: dict[str, Any], micmap_exact_match: bool,
                  micmap_require_explicit: bool,
                  micmap_require_used_explicit: bool,
-                 pad_overrides: dict[str, dict[str, Any]]) -> list[str]:
+                 micmap_preserve_disabled: bool,
+                 pad_overrides: dict[str, dict[str, Any]],
+                 source_xpad: int | None = None,
+                 aliases_by_xpad: dict[int, dict[str, list[Any]]] | None = None,
+                 stack_routes: list[dict[str, Any]] | None = None) -> list[str]:
     lines, _ = _preset_lines(source)
     spans = _instrument_spans(lines)
     if source_instbox not in spans:
@@ -730,9 +994,32 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
     start, end = spans[source_instbox]
     block = list(lines[start:end])
     newline = "\r\n" if block[0].endswith("\r\n") else "\n"
-    block[0] = f"instbox {target_instbox} {{{newline}"
-    master_start, master_end = _named_block(block, "mastermics")
-    block[master_start:master_end] = base_mastermics
+    if source_xpad is not None and aliases_by_xpad is not None:
+        raise ValueError("source_xpad and xpad_aliases are mutually exclusive")
+    if source_xpad is not None:
+        xpads = _xpad_spans(block)
+        if source_xpad not in xpads:
+            raise ValueError(f"xpad {source_xpad} not found in source instbox {source_instbox}")
+        xpad_start, xpad_end = xpads[source_xpad]
+        selected = list(block[xpad_start:xpad_end])
+        # A complete retained stack keeps its original xpad identifiers, but
+        # one extracted xpad becomes a standalone instrument and must start at
+        # zero or SD3 crashes while parsing it.
+        selected[0] = re.sub(r"^xpad\s+\d+", "xpad 0", selected[0])
+        block = [f"instbox {target_instbox} {{{newline}", *selected, f"}}{newline}"]
+    else:
+        block[0] = f"instbox {target_instbox} {{{newline}"
+    required_xpad_pads: dict[int, set[str]] | None = None
+    if micmap_require_used_explicit and stack_routes:
+        required_xpad_pads = {}
+        for route in stack_routes:
+            required_xpad_pads.setdefault(int(route["target_xpad"]), set()).add(str(route["target_pad"]))
+    elif micmap_require_used_explicit and aliases_by_xpad is not None:
+        required_xpad_pads = {
+            number: set(xpad_aliases)
+            for number, xpad_aliases in aliases_by_xpad.items()
+        }
+    block = _rewrite_all_named_blocks(block, "mastermics", base_mastermics)
     block = _rewrite_micmaps(
         block,
         base_mastermics,
@@ -740,10 +1027,15 @@ def _clone_block(source: Path, source_instbox: int, target_instbox: int,
         micmap_overrides,
         micmap_exact_match,
         micmap_require_explicit,
-        set(aliases) if micmap_require_used_explicit else None,
+        set(aliases) if micmap_require_used_explicit and aliases_by_xpad is None else None,
+        required_xpad_pads,
+        micmap_preserve_disabled,
     )
     block = _rewrite_pad_overrides(block, pad_overrides)
-    return _rewrite_aliases(block, aliases, drop_unspecified=True)
+    block = _rewrite_stack_routes(block, stack_routes or [])
+    if aliases_by_xpad is not None:
+        return _rewrite_xpad_aliases(block, aliases_by_xpad)
+    return _rewrite_aliases(block, aliases, drop_unspecified=True, add_missing=source_xpad is not None)
 
 
 def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
@@ -774,12 +1066,20 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
     base_mic_count = int(base_mic_count_line.split()[1])
 
     replacements: list[tuple[int, int, list[str]]] = []
-    for number_text, aliases in recipe.get("base_aliases", {}).items():
-        number = int(number_text)
+    base_aliases = {int(number): aliases for number, aliases in recipe.get("base_aliases", {}).items()}
+    base_pad_overrides = {
+        int(number): overrides for number, overrides in recipe.get("base_pad_overrides", {}).items()
+    }
+    for number in sorted(set(base_aliases) | set(base_pad_overrides)):
         if number not in spans:
             raise ValueError(f"base instbox {number} does not exist")
         start, end = spans[number]
-        replacements.append((start, end, _rewrite_aliases(lines[start:end], aliases, drop_unspecified=False)))
+        replacement = list(lines[start:end])
+        if number in base_aliases:
+            replacement = _rewrite_aliases(replacement, base_aliases[number], drop_unspecified=False)
+        if number in base_pad_overrides:
+            replacement = _rewrite_pad_overrides(replacement, base_pad_overrides[number])
+        replacements.append((start, end, replacement))
     for start, end, replacement in sorted(replacements, reverse=True):
         lines[start:end] = replacement
 
@@ -790,29 +1090,48 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
         preset_library,
     )
 
+    clone_specs = list(recipe.get("clones", []))
+    target_instboxes = [int(clone["target_instbox"]) for clone in clone_specs]
+    duplicate_targets = sorted({number for number in target_instboxes if target_instboxes.count(number) > 1})
+    if duplicate_targets:
+        raise ValueError(f"duplicate clone target instbox values: {duplicate_targets}")
+    colliding_targets = sorted(set(target_instboxes) & set(spans))
+    if colliding_targets:
+        raise ValueError(f"clone target instbox values collide with the base preset: {colliding_targets}")
+
     clones: list[str] = []
     source_hashes: dict[str, str] = dict(mixer_source_hashes)
-    for clone in recipe.get("clones", []):
-        source = preset_library / clone["source"]
+    # Recipe order is editorial. SD3 requires appended instboxes to be
+    # serialized in ascending numeric order; 30,42,31,43 crashes its loader.
+    for clone in sorted(clone_specs, key=lambda item: int(item["target_instbox"])):
+        source_name = str(clone["source"])
+        source = base if source_name == "@base" else preset_library / source_name
         if not source.is_file():
             raise FileNotFoundError(f"required source preset is missing: {source}")
         actual_source = sha256_hex(source.read_bytes())
         expected_source = str(clone["source_sha256"]).lower()
         if actual_source != expected_source:
             raise ValueError(f"source SHA256 mismatch for {source}: expected {expected_source}, got {actual_source}")
-        source_hashes[str(clone["source"])] = actual_source
+        source_hashes[source_name] = actual_source
         clones.extend(_clone_block(
             source,
             int(clone["source_instbox"]),
             int(clone["target_instbox"]),
-            clone["aliases"],
+            clone.get("aliases", {}),
             base_mastermics,
             base_mic_count,
             clone.get("micmap_overrides", {}),
             bool(clone.get("micmap_exact_match", True)),
             bool(clone.get("micmap_require_explicit", False)),
             bool(clone.get("micmap_require_used_explicit", False)),
+            bool(clone.get("micmap_preserve_disabled", False)),
             clone.get("pad_overrides", {}),
+            int(clone["source_xpad"]) if "source_xpad" in clone else None,
+            {
+                int(number): aliases
+                for number, aliases in clone.get("xpad_aliases", {}).items()
+            } if "xpad_aliases" in clone else None,
+            list(clone.get("stack_routes", [])),
         ))
 
     mixer_index = next((index for index, line in enumerate(lines) if line.strip() == "mixer {"), None)
@@ -838,6 +1157,10 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
             inventory,
             recipe.get("expected_mappings", {}),
         )
+        validated_stack_mappings = _validate_expected_stack_mappings(
+            inventory,
+            recipe.get("expected_stack_mappings", {}),
+        )
         validated_mixer_routes = _validate_mixer_routes(output)
     except ValueError:
         output.unlink(missing_ok=True)
@@ -851,13 +1174,20 @@ def build_megakit_preset(base: Path, recipe_path: Path, preset_library: Path,
         "source_sha256": source_hashes,
         "validated_unique_notes": sorted(expected_notes),
         "validated_mappings": validated_mappings,
+        "validated_stack_mappings": validated_stack_mappings,
         "validated_mixer_routes": validated_mixer_routes,
     }
 
 
-def _midi_note_name(note: int) -> str:
+def _sd3_note_name(note: int) -> str:
+    """Return the octave convention displayed by Superior Drummer 3.
+
+    SD3 labels MIDI note 60 as C3, one octave below the common scientific
+    convention used by many generic MIDI utilities (C4).  Reports dedicated
+    to SD3 must follow the UI so an operator never inspects the wrong key.
+    """
     names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
-    return f"{names[note % 12]}{note // 12 - 1}"
+    return f"{names[note % 12]}{note // 12 - 2}"
 
 
 def megakit_markdown(plan_path: Path, note_map_path: Path, preset_path: Path) -> str:
@@ -871,27 +1201,34 @@ def megakit_markdown(plan_path: Path, note_map_path: Path, preset_path: Path) ->
         raise ValueError("unsupported SD3 note map")
     velocity_sets = plan.get("velocity_sets", {})
     routes_by_logical: dict[str, list[str]] = {}
+    trigger_by_logical: dict[str, tuple[int, ...]] = {}
     for mapping in note_map.get("mappings", []):
         if isinstance(mapping, dict) and isinstance(mapping.get("logical_target"), str):
             routes_by_logical.setdefault(mapping["logical_target"], []).append(str(mapping.get("id", "")))
+            if isinstance(mapping.get("note"), int):
+                layers = mapping.get("layers", [])
+                if isinstance(layers, list) and all(isinstance(note, int) for note in layers):
+                    trigger_by_logical.setdefault(mapping["logical_target"], (mapping["note"], *layers))
     lines = [
         "# Greg Hybrid r15 — SD3 MegaKit",
         "",
         f"- Preset: `{preset_path.name}`",
         f"- Preset SHA-256: `{inventory['sha256']}`",
         f"- Instruments SD3: **{inventory['instrument_count']}**",
-        "Convention de nommage: MIDI 0 = C-1.",
+        "Convention de nommage SD3: MIDI 0 = C-2 (MIDI 60 = C3).",
         "",
         "Une ligne `variation partagée` ne duplique aucun WAV : elle réutilise exactement la note et le son indiqués par `shared_with`.",
         "",
-        "| Son logique | Note | Source SD3 réelle | Layers de capture | RR | Kits / palettes | Statut |",
-        "| --- | ---: | --- | --- | ---: | --- | --- |",
+        "| Son logique | Déclenchement SD3 live | Source SD3 réelle | Layers de capture | RR | Kits / palettes | Statut |",
+        "| --- | --- | --- | --- | ---: | --- | --- |",
     ]
     for articulation in plan.get("articulations", []):
         if not isinstance(articulation, dict):
             continue
         logical = str(articulation["logical"])
         note = int(articulation["note"])
+        trigger = trigger_by_logical.get(logical, (note,))
+        trigger_text = " + ".join(f"{value} ({_sd3_note_name(value)})" for value in trigger)
         owners = inventory["notes"].get(str(note), [])
         if len(owners) == 1:
             owner = owners[0]
@@ -926,7 +1263,7 @@ def megakit_markdown(plan_path: Path, note_map_path: Path, preset_path: Path) ->
         else:
             status = f"variation partagée → {articulation.get('shared_with', 'même note')}"
         lines.append(
-            f"| `{logical}` | {note} ({_midi_note_name(note)}) | {actual} | {layers} | {rr} | {usage_text} | {status} |"
+            f"| `{logical}` | {trigger_text} | {actual} | {layers} | {rr} | {usage_text} | {status} |"
         )
     lines.extend([
         "",
@@ -945,7 +1282,7 @@ def megakit_markdown(plan_path: Path, note_map_path: Path, preset_path: Path) ->
             actual = f"{owner['library']} / {owner['drum_id'] or owner['pad']} / {owner['pad']}"
         else:
             actual = "ERREUR: note absente ou collision"
-        lines.append(f"| `{articulation['logical']}` | {note} ({_midi_note_name(note)}) | {actual} | {articulation['status']} |")
+        lines.append(f"| `{articulation['logical']}` | {note} ({_sd3_note_name(note)}) | {actual} | {articulation['status']} |")
     lines.extend([
         "",
         "## Contrôle global",

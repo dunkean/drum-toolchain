@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from midi_lab.cli import main
+from midi_lab.ddrum4_echo import summarize_echo_probe
 from midi_lab.live_session import LiveSessionError, preview_drumgizmo_session, start_drumgizmo_session
 
 
@@ -27,7 +28,8 @@ class MidiCliTests(unittest.TestCase):
             '<audiofile channel="left" file="../samples/kick.wav" filechannel="1"/>'
             '</sample></samples></instrument>', encoding="utf-8")
         (kit / "drumkit.xml").write_text(
-            '<drumkit version="2.0" samplerate="44100"><channels><channel name="left"/>'
+            '<drumkit version="2.0" samplerate="44100"><metadata><author>test</author>'
+            '<email>test@example.invalid</email><version>1.0.0</version></metadata><channels><channel name="left"/>'
             '</channels><instruments><instrument name="kick" file="instruments/kick.xml"/>'
             '</instruments></drumkit>', encoding="utf-8")
         (kit / "midimap.xml").write_text('<midimap><map note="36" instr="kick"/></midimap>', encoding="utf-8")
@@ -35,6 +37,37 @@ class MidiCliTests(unittest.TestCase):
     def test_list_reports_an_unavailable_backend_without_a_traceback(self) -> None:
         with patch("midi_lab.cli._port_names", side_effect=RuntimeError("ALSA unavailable")):
             self.assertEqual(main(["list"]), 2)
+
+    def test_ddrum4_echo_summary_distinguishes_absent_exact_and_transformed_returns(self) -> None:
+        sent_by_kind = {
+            "note_on": {"message_type": "note_on", "channel": 12, "data1": 127, "data2": 64},
+            "poly_aftertouch": {"message_type": "polytouch", "channel": 12, "data1": 127, "data2": 96},
+            "zero_velocity_note_on": {"message_type": "note_on", "channel": 12, "data1": 127, "data2": 0},
+        }
+        absent_samples = [{"kind": kind, "sent": sent, "received": []}
+                          for kind, sent in sent_by_kind.items()]
+        exact_samples = [{"kind": kind, "sent": sent, "received": [{**sent, "latency_ms": 7}]}
+                         for kind, sent in sent_by_kind.items()]
+        duplicate_samples = list(exact_samples)
+        duplicate_samples[0] = {"kind": "note_on", "sent": sent_by_kind["note_on"], "received": [
+            {**sent_by_kind["note_on"], "latency_ms": 7},
+            {**sent_by_kind["note_on"], "latency_ms": 8},
+        ]}
+        transformed_samples = list(absent_samples)
+        transformed_samples[0] = {"kind": "note_on", "sent": sent_by_kind["note_on"], "received": [
+            {**sent_by_kind["note_on"], "data2": 63, "latency_ms": 8},
+        ]}
+        absent = summarize_echo_probe(absent_samples)
+        exact = summarize_echo_probe(exact_samples)
+        duplicated = summarize_echo_probe(duplicate_samples)
+        transformed = summarize_echo_probe(transformed_samples)
+
+        self.assertEqual(absent["conclusion"], "no-performance-soft-through-observed")
+        self.assertEqual(exact["conclusion"], "complete-performance-soft-through-observed")
+        self.assertEqual(exact["max_exact_latency_ms"], 7)
+        self.assertEqual(duplicated["conclusion"], "loop-or-duplicate-return-observed")
+        self.assertEqual(duplicated["duplicate_exact_return_total"], 1)
+        self.assertEqual(transformed["conclusion"], "transformed-performance-return-observed")
 
     def test_drumgizmo_session_requires_confirmation_and_connects_explicit_ports(self) -> None:
         class Process:

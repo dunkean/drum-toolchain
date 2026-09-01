@@ -28,12 +28,46 @@ base_aliases:
     snare2: [48]
   29:
     tom4: [54]
+base_pad_overrides:
+  # The source rimshot is intentionally much louder than the regular snare
+  # articulations.  Keep its character while leaving capture headroom.
+  1:
+    snareFX: {pvolume: 0.39}
+  # Closed-loop v14 calibration showed the third acoustic tom about 8 dB
+  # below the other acoustic toms at the same representative velocity.
+  5:
+    tom4R: {pvolume: 2.50}
+  # Pedal chick/splash are physical performance articulations, not quiet
+  # utility previews. Keep them below stick hits but clearly audible live.
+  2:
+    hatsPL: {pvolume: 3.50}
+    hatsPLO: {pvolume: 3.50}
+  # The Electronic Edge glitch transient was 12.6 dB above the alternate
+  # stack and 24.7 dB above the acoustic stack at the same velocity in the
+  # closed-loop v14 report. Align all three stack choices before capture.
+  19:
+    FX1: {pvolume: 0.058}
+  # The v16 family gate caught both utility percussion voices below the
+  # playable percussion range. Preserve their contrast without hiding them.
+  18:
+    opentri: {pvolume: 2.40}
+  20:
+    cowbell: {pvolume: 1.80}
 mixer_overrides:
+  # Preserve the source mix while leaving deterministic safety headroom for
+  # the transient-heavy rimshots and imported, compressed scene buses.
+  # The source preset's opaque master limiter pins hard transients around
+  # -0.13 dBFS regardless of the upstream scene gains. Keep the scene/bus
+  # processing, but remove that final limiter for deterministic capture and
+  # leave safety headroom at the output fader.
+  "output 0": {volume: 0.55, clear_effects: true}
   X-Sub1: {volume: 0.75, route: "buss 10"}
   X-SubR1: {volume: 0.75, route: "buss 10"}
   X-Perc: {volume: 0.68, route: "buss 11"}
   X-PercR: {volume: 0.68, route: "buss 11"}
-  X-FX-11: {volume: 0.46, route: "buss 12"}
+  # The Electronic Edge high tom is substantially quieter than TL06 at the
+  # same MIDI velocity.  This channel trim aligns the electronic tom family.
+  X-FX-11: {volume: 2.25, route: "buss 12"}
   X-FX-1R1: {volume: 0.46, route: "buss 12"}
   X-FX-12: {volume: 0.46, route: "buss 12"}
   X-FX-1R2: {volume: 0.46, route: "buss 12"}
@@ -54,10 +88,15 @@ mixer_overrides:
   X-PercS-1R: {volume: 0.18, route: "buss 14"}
   X-Sub: {volume: 0.35, route: "buss 16"}
   X-SubR: {volume: 0.35, route: "buss 16"}
-  X-Riser: {volume: 0.20, route: "buss 18"}
-  X-RiserR: {volume: 0.20, route: "buss 18"}
-  X-Perc5: {volume: 0.35, route: "buss 17"}
-  X-PercR5: {volume: 0.35, route: "buss 17"}
+  # Imported snare close mics must remain on independent mixer lanes. Folding
+  # top, bottom and ambience into one X-channel phase-cancelled the signal.
+  # SD3 serializes route buss N to mixer entries buss 2N / buss 2N+1.
+  X-Perc5: {volume: 0.50, route: "buss 17", clear_effects: true} # Deftones complete snare and native stack
+  X-PercR5: {volume: 0.50, route: "buss 17", clear_effects: true}
+  X-Riser: {volume: 0.75, route: "buss 18"}      # Sleep top condenser
+  X-RiserR: {volume: 0.75, route: "buss 18"}
+  X-Cowbell1: {volume: 0.147911, route: "buss 18"}   # Sleep top dynamic
+  X-Cowbell2: {volume: 0.144659, route: "buss 18"}   # Sleep bottom
   X-Perc4: {volume: 0.78, route: "buss 15"}
   X-PercR4: {volume: 0.78, route: "buss 15"}
   "buss 20": {volume: 0.65035, route: "output 0", username: "DnB Kicks"}
@@ -72,12 +111,14 @@ mixer_overrides:
   "buss 29": {volume: 0.58, route: "output 0"}
   "buss 30": {volume: 0.55, route: "output 0", username: "Electro Drums"}
   "buss 31": {volume: 0.55, route: "output 0"}
-  "buss 32": {volume: 0.826498, route: "output 0", username: "Sleep Token Toms"}
-  "buss 33": {volume: 0.826498, route: "output 0"}
-  "buss 34": {volume: 0.595662, route: "output 0", username: "Deftones Snare"}
-  "buss 35": {volume: 0.595661, route: "output 0"}
-  "buss 36": {volume: 1.0, route: "output 0", username: "Sleep Token Snare"}
-  "buss 37": {volume: 1.0, route: "output 0"}
+  "buss 32": {volume: 0.37, route: "output 0", username: "Sleep Token Toms"}
+  "buss 33": {volume: 0.37, route: "output 0"}
+  # Close-only diagnostic buses. OH/rooms are restored on separate lanes only
+  # after the close articulations have passed real audio calibration.
+  "buss 34": {volume: 0.50, route: "output 0", username: "Deftones Snare L", clear_effects: true}
+  "buss 35": {volume: 0.50, route: "output 0", username: "Deftones Snare R", clear_effects: true}
+  "buss 36": {volume: 0.75, route: "output 0", username: "Sleep Token Snare Close"}
+  "buss 37": {volume: 0.75, route: "output 0", username: "Sleep Token Snare OH (reserved)"}
 mixer_effect_imports:
   - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 0", target_entry: "buss 20"}
   - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 1", target_entry: "buss 21"}
@@ -93,8 +134,7 @@ mixer_effect_imports:
   - {source: DNBKit.sd3p, source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075, source_entry: "buss 5", target_entry: "buss 31"}
   - {source: Kit_SleepToken.sd3p, source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff, source_entry: "buss 4", target_entry: "buss 32"}
   - {source: Kit_SleepToken.sd3p, source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff, source_entry: "buss 5", target_entry: "buss 33"}
-  - {source: Drum+Deftones.sd3p, source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b, source_entry: "buss 2", target_entry: "buss 34"}
-  - {source: Drum+Deftones.sd3p, source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b, source_entry: "buss 3", target_entry: "buss 35"}
+  - {source: Develop Device/Sleep_Token_Kit.sd3p, source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906, source_entry: SnareTop-C, target_entry: X-Riser}
   - {source: Develop Device/Sleep_Token_Kit.sd3p, source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906, source_entry: "buss 2", target_entry: "buss 36"}
   - {source: Develop Device/Sleep_Token_Kit.sd3p, source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906, source_entry: "buss 3", target_entry: "buss 37"}
 clones:
@@ -102,46 +142,124 @@ clones:
     source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b
     source_instbox: 17
     target_instbox: 30
-    purpose: Deftones snare family from Death & Darkness, already proven as a Modern Metal X-Drum
+    source_xpad: 0
+    purpose: Complete standalone Deftones base snare articulations
     aliases:
       snareR: [37]
       snareFO: [38]
-      snareMC: [39]
+      snareRO: [39]
       snareFX: [40]
       snareSL: [41]
+    pad_overrides:
+      snareR: {pvolume: 0.58}
+      snareFX: {pvolume: 0.34}
     micmap_exact_match: false
     micmap_require_used_explicit: true
     micmap_overrides:
-      SnareTop-C: X-Perc5
-      SnareTop-D: X-Perc5
-      SnareBottom: X-Perc5
-      Oh: X-Perc5
-      AmbMid: X-Perc5
+      SnareTop-C: SnareTop-C
+      SnareTop-D: null
+      SnareBottom: null
+      Oh: null
+      AmbMid: null
   - source: Develop Device/Sleep_Token_Kit.sd3p
     source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906
     source_instbox: 2
     target_instbox: 31
-    purpose: Sleep Token snare from Progressive Foundry
+    source_xpad: 0
+    purpose: Complete standalone Sleep Token base snare articulations
     aliases:
       snareR: [42]
       snareFO: [43]
       snareRO: [44]
+      snareFX: [45]
+      snareSL: [46]
+    pad_overrides:
+      snareFO: {pvolume: 0.35}
+      snareFX: {pvolume: 0.35}
     micmap_exact_match: false
     micmap_require_used_explicit: true
     micmap_overrides:
-      SnareTop-C: X-Riser
-      SnareTop-D: X-Riser
-      SnareBottom: X-Riser
-      Oh: X-Riser
-      Oh251: X-Riser
-      AmbNear: X-Riser
-      AmbMid: X-Riser
-      AmbFar: X-Riser
-      AmbPZM2: X-Riser
-      Oh-414: X-Riser
-      AmbNear-NarrowM49: X-Riser
-      AmbFar-WideAEA44: X-Riser
-      AmbBooth-Royer: X-Riser
+      SnareTop-C: SnareTop-C
+      SnareTop-D: null
+      SnareBottom: null
+      Oh: null
+      Oh251: null
+      AmbNear: null
+      AmbMid: null
+      AmbFar: null
+      AmbPZM2: null
+  - source: Drum+Deftones.sd3p
+    source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b
+    source_instbox: 17
+    source_xpad: 1
+    target_instbox: 42
+    purpose: Standalone SD02 layer for the Deftones Center composite
+    aliases:
+      Snare: [100]
+    pad_overrides:
+      Snare: {pvolume: 0.24}
+    micmap_exact_match: false
+    micmap_require_used_explicit: true
+    micmap_overrides:
+      Snare: SnareTop-C
+      OH: null
+      Ambience: null
+  - source: Drum+Deftones.sd3p
+    source_sha256: 86290f0af020156846c57d2a46224c47d23fd28cabe41273773914b4e02b8d4b
+    source_instbox: 17
+    source_xpad: 3
+    target_instbox: 43
+    purpose: Standalone SD30 layer for the Deftones Center composite
+    aliases:
+      Snare: [101]
+    pad_overrides:
+      Snare: {pvolume: 0.18}
+    micmap_exact_match: false
+    micmap_require_used_explicit: true
+    micmap_overrides:
+      Snare: SnareTop-C
+      OH: null
+      Ambience: null
+  - source: Develop Device/Sleep_Token_Kit.sd3p
+    source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906
+    source_instbox: 2
+    source_xpad: 1
+    target_instbox: 45
+    purpose: Standalone Snare8 layer for the Sleep Token Center composite
+    aliases:
+      snareR: [102]
+    pad_overrides:
+      snareR: {pvolume: 0.52}
+    micmap_exact_match: false
+    micmap_require_used_explicit: true
+    micmap_overrides:
+      SnareTop-C: SnareTop-C
+      SnareTop-D: null
+      SnareBottom: null
+      Oh-414: null
+      AmbNear-NarrowM49: null
+      AmbFar-WideAEA44: null
+      AmbBooth-Royer: null
+  - source: Develop Device/Sleep_Token_Kit.sd3p
+    source_sha256: d4a6092cfdaf7cfb93228e9e425c090288e8baba64bb2c22fdf2db5781f18906
+    source_instbox: 2
+    source_xpad: 2
+    target_instbox: 46
+    purpose: Standalone Snare7 layer for the Sleep Token Center composite
+    aliases:
+      snareR: [103]
+    pad_overrides:
+      snareR: {pvolume: 1.13}
+    micmap_exact_match: false
+    micmap_require_used_explicit: true
+    micmap_overrides:
+      SnareTop-C: SnareTop-C
+      SnareTop-D: null
+      SnareBottom: null
+      Oh-414: null
+      AmbNear-NarrowM49: null
+      AmbFar-WideAEA44: null
+      AmbBooth-Royer: null
   - source: Kit_SleepToken.sd3p
     source_sha256: 42e9cf32c964f3010a3c26f0710e3e220f41b08d93f155278367216aeb5f9cff
     source_instbox: 0
@@ -206,6 +324,8 @@ clones:
     purpose: Distinct Electronic Edge snare for the flexible second-snare surface
     aliases:
       snare3: [49]
+    pad_overrides:
+      snare3: {pvolume: 0.40}
     micmap_overrides:
       Snare-3: X-Perc4
   - source: Kit_SleepToken.sd3p
@@ -215,6 +335,8 @@ clones:
     purpose: Distinct second splash from Death & Darkness
     aliases:
       splash2: [78]
+    pad_overrides:
+      splash2: {pvolume: 0.20}
     micmap_overrides:
       Splash2: Splash
   - source: DNBKit.sd3p
@@ -224,22 +346,27 @@ clones:
     purpose: Electronic Edge high tom for DnB, industrial and electro scenes
     aliases:
       tom1: [52]
+    pad_overrides:
+      tom1: {pvolume: 4.0}
     micmap_overrides:
       Tom1: X-FX-11
-  - source: DNBKit.sd3p
-    source_sha256: fc3ea0a672bf065a2a9ca68c7e698780f9729883aa39c14d96ac028829b0f075
-    source_instbox: 14
+  - source: "@base"
+    source_sha256: 0a0f7d88127888f3ce313e833b1feb3155a3d6eea2bbf8e2f1ed86965f91f5b6
+    source_instbox: 29
     target_instbox: 39
-    purpose: Pitched Electronic Edge low tom used as a stronger mid tom variation
+    purpose: Pitched clone of the proven Electronic Edge TL06 low tom used as a mid tom variation
     aliases:
       tom4: [53]
     pad_overrides:
       tom4: {pitch: 1.189207}
+    micmap_exact_match: false
+    micmap_require_used_explicit: true
     micmap_overrides:
-      Tom4: X-FX-12
+      Tom4: X-Claps-2
   - source: 2_Complete_metal_foundry.sd3p
     source_sha256: 78589328d4dc17495da942198c1c079be0ed0260eff33946153f33b296a6d8ec
     source_instbox: 2
+    source_xpad: 1
     target_instbox: 40
     purpose: Metal Foundry Zeppelin snare isolated on the Industrial Drums bus
     aliases:
@@ -282,13 +409,43 @@ clones:
       TomU4: X-Sub
       Oh: X-Sub
       AmbMid: X-Sub
-expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 88, 89, 92, 93, 99]
+  - source: top20(2).sd3p
+    source_sha256: 23096b607958ed144eaf56aa0d24f30bed8391fd048aa4706d2809338f13fb87
+    source_instbox: 12
+    target_instbox: 44
+    purpose: Progressive Foundry 20-inch/17-inch/13-inch Custom Stack kept as Toontrack's single Spock voice
+    aliases:
+      spock5: [86]
+    pad_overrides:
+      spock5: {pvolume: 0.24}
+    micmap_exact_match: false
+    micmap_require_used_explicit: true
+    micmap_overrides:
+      OhMono-Centre: Crash3
+      Oh-414: Oh
+      AmbNear-NarrowM49: AmbNear
+expected_unique_notes: [24, 25, 26, 27, 28, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 88, 89, 92, 93, 99, 100, 101, 102, 103]
 expected_mappings:
-  47: {instbox: 26, pad: snare1, library: EZX2_ElectronicEdge, drum_id: ""}
+  37: {instbox: 30, xpad: 0, pad: snareR, library: SL-DEATH, drum_id: SD11_01}
+  38: {instbox: 30, xpad: 0, pad: snareFO, library: SL-DEATH, drum_id: SD11_01}
+  39: {instbox: 30, xpad: 0, pad: snareRO, library: SL-DEATH, drum_id: SD11_01}
+  40: {instbox: 30, xpad: 0, pad: snareFX, library: SL-DEATH, drum_id: SD11_01}
+  41: {instbox: 30, xpad: 0, pad: snareSL, library: SL-DEATH, drum_id: SD11_01}
+  42: {instbox: 31, xpad: 0, pad: snareR, library: SL-DEATH, drum_id: SD01_01}
+  43: {instbox: 31, xpad: 0, pad: snareFO, library: SL-DEATH, drum_id: SD01_01}
+  44: {instbox: 31, xpad: 0, pad: snareRO, library: SL-DEATH, drum_id: SD01_01}
+  45: {instbox: 31, xpad: 0, pad: snareFX, library: SL-DEATH, drum_id: SD01_01}
+  46: {instbox: 31, xpad: 0, pad: snareSL, library: SL-DEATH, drum_id: SD01_01}
+  47: {instbox: 26, pad: snare1, library: EZX2_ElectronicEdge, drum_id: SD1_34}
   48: {instbox: 27, pad: snare2, library: EZX2_ElectronicEdge, drum_id: SD2_35}
   49: {instbox: 36, pad: snare3, library: EZX2_ElectronicEdge, drum_id: SD3_34}
-  52: {instbox: 38, pad: tom1, library: EZX2_ElectronicEdge, drum_id: ""}
-  53: {instbox: 39, pad: tom4, library: EZX2_ElectronicEdge, drum_id: ""}
+  52: {instbox: 38, pad: tom1, library: EZX2_ElectronicEdge, drum_id: TH06}
+  53: {instbox: 39, pad: tom4, library: EZX2_ElectronicEdge, drum_id: TL06}
   54: {instbox: 29, pad: tom4, library: EZX2_ElectronicEdge, drum_id: TL06}
   55: {instbox: 40, pad: snareR, library: SL-DFH, drum_id: SD_ZEPPELIN4}
   63: {instbox: 41, pad: tom4R, library: SL-DEATH, drum_id: TO03_04}
+  86: {instbox: 44, pad: spock5, library: SL-PROGRESSIVEFOUNDRY, drum_id: Crash4-5}
+  100: {instbox: 42, xpad: 0, pad: Snare, library: SP-DeathAndDarkness, drum_id: SD02}
+  101: {instbox: 43, xpad: 0, pad: Snare, library: SP-DeathAndDarkness, drum_id: SD30}
+  102: {instbox: 45, xpad: 0, pad: snareR, library: SL-PROGRESSIVEFOUNDRY, drum_id: Snare8}
+  103: {instbox: 46, xpad: 0, pad: snareR, library: SL-PROGRESSIVEFOUNDRY, drum_id: Snare7}
