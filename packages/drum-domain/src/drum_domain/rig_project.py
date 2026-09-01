@@ -247,7 +247,7 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
     decoder_keys: set[tuple[Any, ...]] = set()
     note_intervals: dict[str, list[tuple[int, int]]] = {}
     primary_hit_decoders: set[tuple[str, str]] = set()
-    poly_aftertouch_sources: set[str] = set()
+    poly_aftertouch_matchers: dict[str, list[int | None]] = {}
     emitted: set[str] = set()
     for index, decoder in enumerate(document["source_decoders"]):
         match = decoder["match"]
@@ -278,9 +278,15 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
             # order: profile authors commonly put expression decoders first.
             primary_hit_decoders.add((source, emit["physical"]))
         if message_type == "poly_aftertouch":
-            if source in poly_aftertouch_sources:
+            # One catch-all active-note matcher consumes the whole source and
+            # therefore cannot coexist with another pressure decoder. Exact
+            # note matchers, however, are how a multi-cymbal module keeps each
+            # choke tied to the physical hit recorded in the bounded ledger.
+            note = match.get("note")
+            existing = poly_aftertouch_matchers.setdefault(source, [])
+            if note is None and existing or note is not None and None in existing:
                 _fail(f"source_decoders[{index}]: ambiguous poly_aftertouch decoder")
-            poly_aftertouch_sources.add(source)
+            existing.append(note)
         if emit["physical"] not in physical_events:
             _fail(f"source_decoders[{index}]: unknown physical event {emit['physical']!r}")
         expressions = set(emit.get("expressions", []))
@@ -316,6 +322,16 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
         _fail("state.defaults.scene must name a declared scene")
     if set(defaults) != {"scene", *variables}:
         _fail("state.defaults must define scene and every variable, with no extras")
+    value_labels = state.get("value_labels", {})
+    unknown_label_variables = set(value_labels) - variables
+    if unknown_label_variables:
+        _fail(f"state.value_labels names unknown variable {sorted(unknown_label_variables)[0]!r}")
+    for variable, labels in value_labels.items():
+        numeric_values = [int(value) for value in labels]
+        if len(set(labels.values())) != len(labels):
+            _fail(f"state.value_labels.{variable} uses duplicate labels")
+        if defaults[variable] not in numeric_values:
+            _fail(f"state.value_labels.{variable} must label its default value")
 
     protocol = document["logical_control_protocol"]
     if set(protocol) != {"scene", *variables}:
@@ -360,6 +376,57 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
         missing = logical_sounds - set(renderer)
         if missing:
             _fail(f"renderer {renderer_name}: logical sounds without renderer: {', '.join(sorted(missing))}")
+    for logical, renderer in document["renderers"]["ddrum4"].items():
+        policy = renderer.get("position_policy")
+        notes = renderer.get("position_notes")
+        boundaries = renderer.get("position_upper_boundaries")
+        if policy == "note_range_quantized":
+            if not isinstance(notes, list) or not isinstance(boundaries, list):
+                _fail(f"renderer ddrum4 {logical!r}: note_range_quantized needs position_notes and position_upper_boundaries")
+            if notes[0] != renderer["note"]:
+                _fail(f"renderer ddrum4 {logical!r}: position_notes must begin at the normal renderer note")
+            if len(boundaries) != len(notes) - 1:
+                _fail(f"renderer ddrum4 {logical!r}: position boundaries must separate every position note")
+            if any(right <= left for left, right in zip(boundaries, boundaries[1:])):
+                _fail(f"renderer ddrum4 {logical!r}: position boundaries must rise")
+        elif notes is not None or boundaries is not None:
+            _fail(f"renderer ddrum4 {logical!r}: position notes require note_range_quantized")
+    for logical, renderer in document["renderers"]["sd3"].items():
+        layers = renderer.get("layers", ())
+        if renderer["note"] in layers:
+            _fail(f"renderer sd3 {logical!r}: primary note cannot also be an added layer")
+        controllers = renderer.get("controllers", ())
+        controller_numbers = [pair[0] for pair in controllers]
+        if len(set(controller_numbers)) != len(controller_numbers):
+            _fail(f"renderer sd3 {logical!r}: fixed controller numbers must be unique")
+        if renderer.get("cc") in controller_numbers:
+            _fail(f"renderer sd3 {logical!r}: live expression CC cannot also be a fixed controller")
+    for logical, renderer in document["renderers"]["drumgizmo"].items():
+        policy = renderer.get("position_policy")
+        notes = renderer.get("position_notes")
+        targets = renderer.get("position_targets")
+        boundaries = renderer.get("position_upper_boundaries")
+        if policy == "note_range_quantized":
+            if not isinstance(notes, list) or not isinstance(targets, list) or not isinstance(boundaries, list):
+                _fail(f"renderer drumgizmo {logical!r}: note_range_quantized needs position_notes, position_targets and position_upper_boundaries")
+            if renderer["note"] not in notes:
+                _fail(f"renderer drumgizmo {logical!r}: normal note must belong to position_notes")
+            if len(targets) != len(notes) or len(boundaries) != len(notes) - 1:
+                _fail(f"renderer drumgizmo {logical!r}: position boundaries must separate every position note")
+            if len(set(notes)) != len(notes):
+                _fail(f"renderer drumgizmo {logical!r}: position notes must be unique")
+            if len(set(targets)) != len(targets) or logical not in targets:
+                _fail(f"renderer drumgizmo {logical!r}: position_targets must be unique and include the normal logical sound")
+            if any(right <= left for left, right in zip(boundaries, boundaries[1:])):
+                _fail(f"renderer drumgizmo {logical!r}: position boundaries must rise")
+            for note, target in zip(notes, targets, strict=True):
+                if target not in document["renderers"]["drumgizmo"]:
+                    _fail(f"renderer drumgizmo {logical!r}: position target {target!r} has no DrumGizmo renderer")
+                target_renderer = document["renderers"]["drumgizmo"][target]
+                if target_renderer["note"] != note:
+                    _fail(f"renderer drumgizmo {logical!r}: position note {note} differs from target {target!r}")
+        elif notes is not None or targets is not None or boundaries is not None:
+            _fail(f"renderer drumgizmo {logical!r}: position grid requires note_range_quantized")
 
     # Expression routes are intentionally explicit and target-qualified.  A
     # raw CC must never infer a renderer CC from an output note, and an
@@ -392,6 +459,8 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
         matcher = decoder["match"]["type"]
         if route["expression"] == "openness" and (matcher != "cc" or route["correlation"] != "none"):
             _fail(f"expression_routing[{index}]: openness requires a CC decoder with correlation: none")
+        if route["expression"] == "position" and (matcher != "cc" or route["correlation"] != "none"):
+            _fail(f"expression_routing[{index}]: position requires a CC decoder with correlation: none")
         if route["expression"] == "pressure" and (matcher != "poly_aftertouch" or route["correlation"] != "source_channel_note"):
             _fail(f"expression_routing[{index}]: pressure requires correlated poly-aftertouch")
         if route["expression"] == "pressure" and (route["source"], route["physical"]) not in primary_hit_decoders:
@@ -404,12 +473,28 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
                     _fail(f"expression_routing[{index}].targets.{target_name}: unsupported target needs reason and event.type: unsupported")
                 continue
             if route["expression"] == "pressure":
-                if target_name not in {"ddrum4", "sd3"}:
+                if target_name not in {"ddrum4", "sd3", "drumgizmo"}:
                     _fail(f"expression_routing[{index}].targets.{target_name}: pressure is not implemented for this renderer")
                 if event_type != "poly_aftertouch" or event.get("note_from") != "active_rendered_hit":
                     _fail(f"expression_routing[{index}].targets.{target_name}: pressure needs poly_aftertouch from active_rendered_hit")
+                if status not in {"planned", "measured", "user-confirmed"}:
+                    _fail(f"expression_routing[{index}].targets.{target_name}: invalid pressure target status")
+                continue
+            if route["expression"] == "position":
+                if target_name != "sd3":
+                    _fail(f"expression_routing[{index}].targets.{target_name}: positional CC is currently implemented only for SD3")
+                if event_type != "cc" or event.get("transform") != "passthrough":
+                    _fail(f"expression_routing[{index}].targets.sd3: position needs a passthrough CC event")
                 if status not in {"measured", "user-confirmed"}:
-                    _fail(f"expression_routing[{index}].targets.{target_name}: pressure target must be measured or user-confirmed")
+                    _fail(f"expression_routing[{index}].targets.sd3: positional CC target must be measured or user-confirmed")
+                if not isinstance(event.get("channel"), int) or not isinstance(event.get("cc"), int):
+                    _fail(f"expression_routing[{index}].targets.sd3: positional CC event needs channel and cc")
+                for scene in scenes:
+                    for variant in logical_route_variants(routes[scene][route["physical"]]):
+                        renderer = document["renderers"]["sd3"][variant.logical_target]
+                        if (renderer.get("channel", 10) != event["channel"]
+                                or renderer.get("position_cc") != event["cc"]):
+                            _fail(f"expression_routing[{index}].targets.sd3: renderer {variant.logical_target!r} must declare the same position_cc")
                 continue
             if target_name == "drumgizmo":
                 if event_type != "quantized_note":
@@ -496,12 +581,13 @@ def _validate_semantics(document: Mapping[str, Any]) -> None:
     # measured values replace the endpoint placeholders.
     unresolved = any("MEASURE_ME" in source["endpoint"] for source in sources.values())
     if not unresolved:
-        notes: dict[int, str] = {}
+        notes: dict[int, tuple[str, tuple[object, ...]]] = {}
         for logical, renderer in document["renderers"]["drumgizmo"].items():
             note = renderer["note"]
-            if note in notes:
-                _fail(f"drumgizmo renderer: note {note} maps both {notes[note]!r} and {logical!r}")
-            notes[note] = logical
+            signature = (renderer.get("channel", 10), renderer["instrument"], renderer["articulation"])
+            if note in notes and notes[note][1] != signature:
+                _fail(f"drumgizmo renderer: note {note} maps both {notes[note][0]!r} and {logical!r}")
+            notes[note] = (logical, signature)
 
     control_targets = {"scene", *variables}
     native_keys: list[tuple[str | None, int, str, int]] = []
@@ -592,8 +678,12 @@ def load_rig_project(path: Path) -> RigProject:
     _validate_physical_bindings(path, document)
     bank_facts = _bank_facts(path, document.get("ddrum4_bank"), document["ddrum4_output_channel"])
     if bank_facts is not None:
-        invalid_notes = sorted({renderer["note"] for renderer in document["renderers"]["ddrum4"].values()
-                                if renderer["note"] not in bank_facts.playable_notes})
+        declared_notes = {
+            note
+            for renderer in document["renderers"]["ddrum4"].values()
+            for note in (renderer["note"], *renderer.get("position_notes", ()))
+        }
+        invalid_notes = sorted(note for note in declared_notes if note not in bank_facts.playable_notes)
         if invalid_notes:
             _fail(f"ddrum4 renderer note {invalid_notes[0]} is outside the linked bank NOTE#/NOTE P ranges")
     state = document["state"]

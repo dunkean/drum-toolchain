@@ -7,7 +7,8 @@
 namespace ddrum4 {
 class Converter {
  public:
-  static constexpr size_t maxOutputEvents = 4;
+  // Also bounds the app's shared output queue used by the richer rig runtime.
+  static constexpr size_t maxOutputEvents = 8;
   explicit Converter(const Profile& profile);
   void selectKit(size_t kitIndex, const char* origin = "UI") noexcept;
   void clearLedger() noexcept;

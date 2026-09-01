@@ -36,7 +36,9 @@ bool RigRuntime::duplicate(uint16_t source, const MidiEvent& input) noexcept {
 void RigRuntime::remember(uint16_t source, const MidiEvent& input, const RuntimeRenderer& renderer) noexcept {
   auto& queue=(*active_)[source][input.channel-1][input.data1];
   if(queue.size==queue.entries.size()) { queue.head=static_cast<uint8_t>((queue.head+1)%queue.entries.size()); --queue.size; ++queue.discardedOffs; }
-  queue.entries[(queue.head+queue.size)%queue.entries.size()]={renderer.channel,renderer.note}; ++queue.size;
+  Active active; active.channel=renderer.channel; active.notes[0]=renderer.note; active.noteCount=1;
+  for(uint8_t index=0;index<renderer.layerCount;++index) active.notes[active.noteCount++]=renderer.layers[index];
+  queue.entries[(queue.head+queue.size)%queue.entries.size()]=active; ++queue.size;
 }
 bool RigRuntime::recall(uint16_t source, const MidiEvent& input, Active& active) noexcept {
   auto& queue=(*active_)[source][input.channel-1][input.data1];
@@ -56,10 +58,13 @@ void RigRuntime::setStateVariable(size_t index,uint8_t value) noexcept { if(inde
 uint8_t RigRuntime::normalizedHihatOpenness() const noexcept {
   const auto& config=*profile_.hihatQuantization;
   const int raw=hihatOpenness_.load(std::memory_order_acquire);
-  const int closed=config.inputClosed, opened=config.inputOpen;
-  const int numerator=opened>closed ? raw-closed : closed-raw;
-  const int denominator=opened>closed ? opened-closed : closed-opened;
-  return static_cast<uint8_t>(std::clamp((numerator*127)/denominator,0,127));
+  const int closed=config.inputClosed;
+  const int span=static_cast<int>(config.inputOpen)-closed;
+  // Keep this bit-for-bit equivalent to DdrumBridge::hihatZone.  In
+  // particular, the signed half-span makes both ascending and descending
+  // pedal calibrations round at the same raw CC value as the AVR firmware.
+  const int normalized=span ? ((raw-closed)*127+span/2)/span : 0;
+  return static_cast<uint8_t>(std::clamp(normalized,0,127));
 }
 bool RigRuntime::selectScene(uint16_t scene) noexcept {
   if (scene>=profile_.scenes.size()) return false;
@@ -111,13 +116,18 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
     decoded_.fetch_add(1,std::memory_order_relaxed);
     return 0;
   }
-  if (isNoteOff(input)) { Active active; if(!recall(static_cast<uint16_t>(source),input,active)) { ignore(); return 0; } output[0]={MidiType::NoteOff,active.channel,active.note,0,input.timestampUs}; rendered_.fetch_add(1,std::memory_order_relaxed); return 1; }
+  if (isNoteOff(input)) {
+    Active active; if(!recall(static_cast<uint16_t>(source),input,active)) { ignore(); return 0; }
+    for(uint8_t index=0;index<active.noteCount;++index)
+      output[index]={MidiType::NoteOff,active.channel,active.notes[index],0,input.timestampUs};
+    rendered_.fetch_add(active.noteCount,std::memory_order_relaxed); return active.noteCount;
+  }
   if (input.type==MidiType::PolyAftertouch) {
     const bool declared=std::any_of(profile_.pressureExpressions.begin(),profile_.pressureExpressions.end(),
                                     [source,&input](const RuntimePressureExpression& expression){ return expression.source==static_cast<uint16_t>(source) && input.data1>=expression.inputFirst && input.data1<=expression.inputLast; });
     Active active;
     if(!declared || !peek(static_cast<uint16_t>(source),input,active)) { ignore(); return 0; }
-    output[0]={MidiType::PolyAftertouch,active.channel,active.note,input.data2,input.timestampUs};
+    output[0]={MidiType::PolyAftertouch,active.channel,active.notes[0],input.data2,input.timestampUs};
     decoded_.fetch_add(1,std::memory_order_relaxed); rendered_.fetch_add(1,std::memory_order_relaxed); return 1;
   }
   const RuntimeDecoder* decoder=nullptr;
@@ -137,8 +147,9 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
   const RuntimeRenderer* renderer=nullptr; for(const auto& r:profile_.renderers) if(r.logical==route->logical) { renderer=&r; break; }
   if(!renderer) { ignore(); return 0; }
   size_t count=0;
-  // DrumGizmo's standard MIDI map is note based.  Do not invent a CC or
-  // aftertouch convention for hihat/choke behavior that a kit has not proven.
+  // DrumGizmo's standard map remains note based. Reviewed pressure has
+  // already been handled above through the active-hit ledger; all other raw
+  // CC/aftertouch messages stay fail-closed here.
   if(profile_.rendererTarget==RuntimeRendererTarget::DrumGizmo &&
      (input.type==MidiType::ControlChange || input.type==MidiType::PolyAftertouch)) { ignore(); return 0; }
   if(profile_.rendererTarget==RuntimeRendererTarget::Sd3 && decoder->position && renderer->positionCc<=127) {
@@ -147,6 +158,10 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
   }
   const auto value=input.data2;
   if(input.type==MidiType::ControlChange) {
+    if(decoder->position) {
+      if(count==0) { ignore(); return 0; }
+      rendered_.fetch_add(count,std::memory_order_relaxed); return count;
+    }
     // A source CC can only be emitted when the renderer declares its exact
     // controller in expression-routing/v1.  Falling back to a Note number
     // silently turned CC4 into arbitrary CC values in earlier profiles.
@@ -156,6 +171,14 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
   else if(input.type==MidiType::PolyAftertouch) output[count++]={MidiType::PolyAftertouch,renderer->channel,renderer->note,value,input.timestampUs};
   else {
     RuntimeRenderer rendered=*renderer;
+    if(profile_.rendererTarget==RuntimeRendererTarget::DrumGizmo && decoder->position &&
+       decoder->matcher==PhysicalMatcher::NoteRange && rendered.positionNoteCount>0) {
+      const auto position=static_cast<uint8_t>(((unsigned)(input.data1-decoder->first)*127u)/
+                                               (decoder->last-decoder->first));
+      uint8_t zone=0;
+      while(zone+1<rendered.positionNoteCount && position>rendered.positionUpperBoundaries[zone]) ++zone;
+      rendered.note=rendered.positionNotes[zone];
+    }
     if(profile_.rendererTarget==RuntimeRendererTarget::DrumGizmo && profile_.hihatQuantization &&
        static_cast<uint16_t>(source)==profile_.hihatQuantization->source) {
       for(const auto& zone:profile_.hihatQuantization->zones) {
@@ -166,8 +189,15 @@ size_t RigRuntime::process(std::string_view sourceId, const MidiEvent& input, st
         break;
       }
     }
+    if(profile_.rendererTarget==RuntimeRendererTarget::Sd3) for(uint8_t index=0;index<rendered.fixedControllerCount;++index) {
+      const auto& fixed=rendered.fixedControllers[index];
+      output[count++]={MidiType::ControlChange,rendered.channel,fixed.controller,fixed.value,input.timestampUs};
+    }
     remember(static_cast<uint16_t>(source),input,rendered);
     output[count++]={MidiType::NoteOn,rendered.channel,rendered.note,value,input.timestampUs};
+    if(profile_.rendererTarget==RuntimeRendererTarget::Sd3)
+      for(uint8_t index=0;index<rendered.layerCount;++index)
+        output[count++]={MidiType::NoteOn,rendered.channel,rendered.layers[index],value,input.timestampUs};
   }
   rendered_.fetch_add(count,std::memory_order_relaxed); return count;
 }

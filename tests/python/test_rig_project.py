@@ -148,6 +148,52 @@ class RigProjectTests(unittest.TestCase):
         with self.assertRaisesRegex(RigProjectError, "active_note and correlate"):
             self.load(document)
 
+    def test_allows_distinct_note_specific_aftertouch_but_rejects_a_catch_all_overlap(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        pressure = document["source_decoders"][3]
+        pressure["match"]["note"] = 49
+        document["source_decoders"].append({
+            "match": {"source": "ddti", "type": "poly_aftertouch", "note": 50, "active_note": True},
+            "emit": {"physical": "cymbal.choke", "correlate": "source_channel_note"},
+        })
+        self.load(document)
+
+        document["source_decoders"].append({
+            "match": {"source": "ddti", "type": "poly_aftertouch", "active_note": True},
+            "emit": {"physical": "cymbal.choke", "correlate": "source_channel_note"},
+        })
+        with self.assertRaisesRegex(RigProjectError, "ambiguous poly_aftertouch decoder"):
+            self.load(document)
+
+    def test_planned_pressure_is_valid_but_not_claimed_measured(self) -> None:
+        document = valid_project()
+        document["source_decoders"].append({
+            "match": {"source": "ddti", "type": "note", "note": 49},
+            "emit": {"physical": "cymbal.choke", "expressions": ["velocity"]},
+        })
+        pressure = document["source_decoders"][3]
+        pressure["match"]["note"] = 49
+        pressure["emit"]["expressions"] = ["pressure"]
+        document["expression_routing"] = [{
+            "source": "ddti", "physical": "cymbal.choke", "expression": "pressure",
+            "correlation": "source_channel_note",
+            "targets": {
+                "ddrum4": {"status": "planned", "event": {
+                    "type": "poly_aftertouch", "note_from": "active_rendered_hit",
+                }},
+                "sd3": {"status": "planned", "event": {
+                    "type": "poly_aftertouch", "note_from": "active_rendered_hit",
+                }},
+                "drumgizmo": {"status": "unsupported", "reason": "no choke renderer", "event": {
+                    "type": "unsupported",
+                }},
+            },
+        }]
+        fill_renderers(document)
+        project = self.load(document)
+        self.assertEqual(project.raw["expression_routing"][0]["targets"]["sd3"]["status"], "planned")
+
     def test_rejects_pressure_without_a_primary_hit_from_the_same_source(self) -> None:
         document = valid_project()
         fill_renderers(document)
@@ -180,6 +226,37 @@ class RigProjectTests(unittest.TestCase):
         fill_renderers(document)
         document["source_decoders"][3]["match"].pop("active_note")
         with self.assertRaisesRegex(RigProjectError, "active_note and correlate"):
+            self.load(document)
+
+    def test_drumgizmo_positional_note_range_requires_a_complete_quantizer(self) -> None:
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][1]["emit"]["expressions"] = ["velocity", "position"]
+        for logical in ("tom.metal.head", "tom.electronic.head"):
+            renderer = document["renderers"]["drumgizmo"][logical]
+            other_targets = [target for target in sorted(document["renderers"]["drumgizmo"])
+                             if target != logical][:2]
+            targets = [logical, *other_targets]
+            renderer.update({
+                "position_policy": "note_range_quantized",
+                "position_notes": [document["renderers"]["drumgizmo"][target]["note"]
+                                   for target in targets],
+                "position_targets": targets,
+                "position_upper_boundaries": [47, 95],
+            })
+        self.load(document)
+        document["renderers"]["drumgizmo"]["tom.metal.head"]["position_upper_boundaries"] = [95]
+        with self.assertRaisesRegex(RigProjectError, "position boundaries"):
+            self.load(document)
+        document = valid_project()
+        fill_renderers(document)
+        document["source_decoders"][1]["emit"]["expressions"] = ["velocity", "position"]
+        renderer = document["renderers"]["drumgizmo"]["tom.metal.head"]
+        normal_note = renderer["note"]
+        renderer.update({"position_policy": "note_range_quantized", "position_notes": [normal_note, 65],
+                         "position_targets": ["tom.metal.head", "tom.electronic.head"],
+                         "position_upper_boundaries": [63]})
+        with self.assertRaisesRegex(RigProjectError, "differs from target"):
             self.load(document)
 
     def test_native_controls_are_addressed_unambiguously(self) -> None:

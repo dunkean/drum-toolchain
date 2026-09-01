@@ -110,9 +110,60 @@ class RigCompilerTests(unittest.TestCase):
             expressions = json.loads((output / "expression-capability-report.json").read_text(encoding="utf-8"))
             self.assertEqual(expressions["summary"], {
                 "declared_expressions": 0, "supported_expressions": 0, "firmware_unlowerable_routes": 0,
+                "firmware_unready_routes": 0,
             })
 
-    def test_expression_decoder_keeps_runtime_and_firmware_planned_with_explicit_capabilities(self) -> None:
+    def test_sd3_layers_survive_validation_and_every_user_facing_export(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, output = self._project(root), root / "out"
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["renderers"]["sd3"]["snare.head"]["layers"] = [100, 101]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+            compile_project(project, output)
+
+            runtime = yaml.safe_load((output / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            snare_record = next(row for row in runtime["records"] if row["logical_target"] == "snare.head")
+            self.assertEqual(snare_record["renderers"]["sd3"]["layers"], [100, 101])
+            sd3_map = json.loads((output / "sd3-midimap.json").read_text(encoding="utf-8"))
+            snare_mapping = next(row for row in sd3_map["mappings"] if row["logical_target"] == "snare.head")
+            self.assertEqual(snare_mapping["layers"], [100, 101])
+            virtual = json.loads((output / "virtual-kit-map.json").read_text(encoding="utf-8"))
+            snare_row = next(row for row in virtual["rows"] if row["logical_sound"] == "snare.head")
+            self.assertEqual(snare_row["sd3"]["layers"], [100, 101])
+            self.assertIn("38 + 100 + 101", (output / "sd3-megakit-map.md").read_text(encoding="utf-8"))
+
+    def test_ddti_role_template_includes_the_stable_source_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project, output = self._project(root), root / "out"
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["sources"] = {
+                "ddti": {"endpoint": "fixture", "channel": 2, "primary": "usb", "connection_profile": "LIVE"},
+            }
+            for decoder in document["source_decoders"]:
+                decoder["match"]["source"] = "ddti"
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+            compile_project(project, output)
+
+            template = yaml.safe_load((output / "ddti-role-template.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(template["channel"], 2)
+            self.assertEqual(template["roles"], {"kick": {"head": 36}, "snare": {"head": 38}})
+
+    def test_sd3_layer_cannot_duplicate_its_primary_note(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["renderers"]["sd3"]["snare.head"]["layers"] = [38]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+            with self.assertRaisesRegex(RigCompilerError, "primary note cannot also be an added layer"):
+                validate_project(project)
+
+    def test_explicitly_unsupported_renderer_expression_does_not_block_its_note_only_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             project = self._project(root)
@@ -134,21 +185,54 @@ class RigCompilerTests(unittest.TestCase):
             result = compile_project(project, root / "out")
 
             statuses = {entry["name"]: entry["status"] for entry in result.artifacts["project-report.json"]["artifacts"]}
-            self.assertEqual(statuses["runtime-profile"], "planned")
+            self.assertEqual(statuses["runtime-profile"], "ready")
             self.assertEqual(statuses["firmware-project-mapping"], "planned")
             self.assertEqual(statuses["expression-capability-report"], "planned")
             self.assertEqual(statuses["virtual-kit-map"], "planned")
             report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
-            self.assertEqual(report["expressions"][0]["targets"]["arduino_ddrum4"]["status"], "unsupported")
+            self.assertEqual(report["expressions"][0]["targets"]["arduino_ddrum4"]["status"], "supported")
+            self.assertEqual(report["expressions"][0]["targets"]["arduino_ddrum4"]["declared_status"], "planned")
+            self.assertEqual(report["summary"]["firmware_unready_routes"], 1)
             self.assertEqual(report["expressions"][0]["targets"]["sd3"]["status"], "supported")
             runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
-            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "planned"})
+            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "ready"})
             virtual_kit = json.loads((root / "out" / "virtual-kit-map.json").read_text(encoding="utf-8"))
             expression_row = next(row for row in virtual_kit["rows"] if row["raw_match"]["type"] == "cc")
             self.assertEqual(expression_row["coverage"], "unsupported")
             sd3_map = json.loads((root / "out" / "sd3-midimap.json").read_text(encoding="utf-8"))
             self.assertEqual(sd3_map["status"], "user-confirmed")
             self.assertEqual(sd3_map["mappings"][-1]["event"], {"type": "cc", "channel": 10, "cc": 4, "transform": "passthrough"})
+            self.assertEqual(sd3_map["unsupported_source_expressions"], [])
+            drumgizmo_map = json.loads((root / "out" / "drumgizmo-midimap.json").read_text(encoding="utf-8"))
+            self.assertEqual(drumgizmo_map["status"], "ready")
+            self.assertEqual(len(drumgizmo_map["unsupported_source_expressions"]), 1)
+
+    def test_sd3_positional_cc_is_compiled_without_claiming_other_renderers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "brain", "type": "cc", "cc": 16},
+                "emit": {"physical": "snare.head", "expressions": ["position"], "normalize": "cc7"},
+            })
+            document["renderers"]["sd3"]["snare.head"]["position_cc"] = 16
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "snare.head", "expression": "position", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "unsupported", "reason": "unmeasured quantizer", "event": {"type": "unsupported"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 16, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "note-only kit", "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            compile_project(project, root / "out")
+
+            runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "ready"})
+            sd3_map = json.loads((root / "out" / "sd3-midimap.json").read_text(encoding="utf-8"))
+            self.assertEqual(sd3_map["mappings"][-1]["event"],
+                             {"type": "cc", "channel": 10, "cc": 16, "transform": "passthrough"})
             self.assertEqual(sd3_map["unsupported_source_expressions"], [])
 
     def test_reviewed_drumgizmo_hihat_quantization_is_a_runtime_profile_capability(self) -> None:
@@ -189,23 +273,25 @@ class RigCompilerTests(unittest.TestCase):
                 "match": {"source": "brain", "type": "poly_aftertouch", "active_note": True},
                 "emit": {"physical": "kick.head", "expressions": ["pressure"], "correlate": "source_channel_note"},
             })
+            document["renderers"]["sd3"]["snare.head"]["position_cc"] = 16
             document["expression_routing"] = [{
                 "source": "brain", "physical": "kick.head", "expression": "pressure", "correlation": "source_channel_note",
                 "targets": {
                     "ddrum4": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
                     "sd3": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
-                    "drumgizmo": {"status": "unsupported", "reason": "no measured choke behavior", "event": {"type": "unsupported"}},
+                    "drumgizmo": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
                 },
             }]
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             compile_project(project, root / "out")
 
             runtime = yaml.safe_load((root / "out" / "runtime-profile.yaml").read_text(encoding="utf-8"))
-            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "planned"})
+            self.assertEqual(runtime["target_status"], {"sd3": "ready", "drumgizmo": "ready"})
             report = json.loads((root / "out" / "expression-capability-report.json").read_text(encoding="utf-8"))
             targets = report["expressions"][0]["targets"]
             self.assertEqual(targets["arduino_ddrum4"]["status"], "supported")
             self.assertEqual(targets["sd3"]["status"], "supported")
+            self.assertEqual(targets["drumgizmo"]["status"], "supported")
 
     def test_pressure_with_a_ranged_primary_is_never_advertised_as_firmware_lowerable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -232,6 +318,51 @@ class RigCompilerTests(unittest.TestCase):
             arduino = report["expressions"][0]["targets"]["arduino_ddrum4"]
             self.assertEqual(arduino["status"], "unsupported")
             self.assertIn("exact primary Note", arduino["reason"])
+
+    def test_explicit_pc_only_expression_does_not_block_firmware_capacity_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "brain", "type": "cc", "cc": 16},
+                "emit": {"physical": "snare.head", "expressions": ["position"], "normalize": "cc7"},
+            })
+            document["renderers"]["sd3"]["snare.head"]["position_cc"] = 16
+            document["expression_routing"] = [{
+                "source": "brain", "physical": "snare.head", "expression": "position", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "unsupported", "reason": "DDrum4 path is deliberately note-only",
+                               "event": {"type": "unsupported"}},
+                    "sd3": {"status": "user-confirmed",
+                            "event": {"type": "cc", "channel": 10, "cc": 16, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "fixture is note-only",
+                                  "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            output = root / "out"
+            compile_project(project, output)
+
+            firmware = json.loads((output / "firmware-project-mapping.json").read_text(encoding="utf-8"))
+            self.assertEqual(firmware["lowering_blockers"], [])
+            capability = json.loads((output / "expression-capability-report.json").read_text(encoding="utf-8"))
+            position = capability["expressions"][0]
+            self.assertEqual(position["targets"]["arduino_ddrum4"]["status"], "unsupported")
+            self.assertEqual(capability["summary"]["firmware_unlowerable_routes"], 0)
+
+            header = root / "capacity_mapping.h"
+            generated = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping",
+                 str(output / "firmware-project-mapping.json"), "--capacity-estimate",
+                 "--output-channel", "10", "--output", str(header)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            text = header.read_text(encoding="utf-8")
+            self.assertIn("#ifndef DDRUM_CAPACITY_ESTIMATE_ONLY", text)
+            self.assertIn("must never be used by a flashable firmware environment", text)
+            self.assertNotIn("{10, 16,", text)
 
     def test_live_non_exact_note_route_never_creates_a_flashable_firmware_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -266,6 +397,78 @@ class RigCompilerTests(unittest.TestCase):
                 capture_output=True, text=True, check=False)
             self.assertEqual(generator.returncode, 2)
             self.assertIn("verified live flash plan", generator.stderr)
+
+    def test_live_positional_note_range_expands_to_reviewed_ddrum4_position_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["deployment"] = "live"
+            document["control_bus"] = {"endpoint": "reviewed-control-bus", "channel": 15,
+                                       "status": "user-confirmed"}
+            document["sources"]["ddrum4"] = document["sources"].pop("brain")
+            for decoder in document["source_decoders"]:
+                decoder["match"]["source"] = "ddrum4"
+            document["source_decoders"][1]["match"] = {
+                "source": "ddrum4", "type": "note_range", "note_range": [38, 45],
+            }
+            document["source_decoders"][1]["emit"]["expressions"] = ["velocity", "position"]
+            document["renderers"]["ddrum4"]["snare.head"].update({
+                "position_policy": "note_range_quantized",
+                "position_notes": [38, 39, 40],
+                "position_upper_boundaries": [47, 95],
+            })
+            document["renderers"]["sd3"]["snare.head"]["position_cc"] = 16
+            drumgizmo_renderer = document["renderers"]["drumgizmo"]["snare.head"]
+            drumgizmo_base = drumgizmo_renderer["note"]
+            document["renderers"]["drumgizmo"]["snare.edge"] = {
+                "note": 39, "instrument": "snare", "articulation": "edge",
+            }
+            drumgizmo_renderer.update({
+                "position_policy": "note_range_quantized",
+                "position_notes": [document["renderers"]["drumgizmo"]["kick.hit"]["note"], drumgizmo_base, 39],
+                "position_targets": ["kick.hit", "snare.head", "snare.edge"],
+                "position_upper_boundaries": [47, 95],
+            })
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            output = root / "out"
+
+            compile_project(project, output)
+            firmware = json.loads((output / "firmware-project-mapping.json").read_text(encoding="utf-8"))
+            self.assertEqual((firmware["status"], firmware["hardware_flash"]), ("ready", "ready"))
+            header = root / "generated_mapping.h"
+            result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping",
+                 str(output / "firmware-project-mapping.json"), "--output-channel", "10",
+                 "--output", str(header)], capture_output=True, text=True, check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            generated = header.read_text(encoding="utf-8")
+            # 8 raw positions normalize to 0,18,36 / 54,72,90 / 108,127.
+            for input_note, output_note in zip(range(38, 46), (38, 38, 38, 39, 39, 39, 40, 40), strict=True):
+                self.assertIn(f"{{10, {input_note}, 0, 255, 255, 255, 255, {output_note}, 1, 127, 1, 127}},", generated)
+            runtime = yaml.safe_load((output / "runtime-profile.yaml").read_text(encoding="utf-8"))
+            positional = next(record for record in runtime["records"]
+                              if record["match"]["type"] == "note_range")
+            self.assertEqual(positional["renderers"]["drumgizmo"]["position_notes"],
+                             [document["renderers"]["drumgizmo"]["kick.hit"]["note"], drumgizmo_base, 39])
+            virtual = json.loads((output / "virtual-kit-map.json").read_text(encoding="utf-8"))
+            virtual_position = next(row for row in virtual["rows"]
+                                    if row["raw_match"]["type"] == "note_range")
+            self.assertEqual(virtual_position["drumgizmo"]["position_policy"],
+                             "note_range_quantized")
+            self.assertEqual(virtual_position["drumgizmo"]["position_targets"],
+                             ["kick.hit", "snare.head", "snare.edge"])
+            drumgizmo_map = json.loads((output / "drumgizmo-midimap.json").read_text(encoding="utf-8"))
+            capture_only = [mapping for mapping in drumgizmo_map["mappings"]
+                            if mapping["logical_target"] == "snare.edge"]
+            self.assertEqual(capture_only, [{
+                "id": "position-target.snare.edge", "role": "position_target", "note": 39,
+                "logical_target": "snare.edge", "instrument": "snare", "articulation": "edge",
+                "capture_instrument": "snare", "capture_articulation": "edge",
+            }])
+            self.assertEqual(drumgizmo_note_overrides(output / "drumgizmo-midimap.json")[("snare", "edge")], 39)
 
     def test_live_planned_or_sysex_state_action_never_creates_a_flashable_firmware_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -378,6 +581,18 @@ class RigCompilerTests(unittest.TestCase):
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             with self.assertRaisesRegex(RigCompilerError, "drumgizmo renderer: note 36"):
                 validate_project(project)
+
+    def test_validation_allows_exact_drumgizmo_sound_aliases_on_one_note(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = self._project(root)
+            document = yaml.safe_load(project.read_text(encoding="utf-8"))
+            document["renderers"]["drumgizmo"]["snare.head"] = {
+                "note": 36, "instrument": "kick", "articulation": "hit",
+            }
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+            validate_project(project)
 
     def test_compiler_orders_scene_vp_variants_before_the_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -531,6 +746,68 @@ class RigCompilerTests(unittest.TestCase):
             self.assertIn("const PressureRoute PRESSURE_ROUTES[] PROGMEM", generated)
             self.assertIn("{10, 38},", generated)
             self.assertIn("constexpr size_t PRESSURE_ROUTE_COUNT = 1;", generated)
+            mapping_document = json.loads((output / "firmware-project-mapping.json").read_text(encoding="utf-8"))
+            planned_hihat = json.loads(json.dumps(mapping_document))
+            planned_hihat["hihat_quantization"]["status"] = "planned"
+            planned_path = root / "hostile-planned-hihat.json"
+            planned_path.write_text(json.dumps(planned_hihat), encoding="utf-8")
+            planned_result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(planned_path),
+                 "--output-channel", "10", "--output", str(root / "hostile-planned-hihat.h")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(planned_result.returncode, 2)
+            self.assertIn("must be measured or user-confirmed", planned_result.stderr)
+
+            planned_pressure = json.loads(json.dumps(mapping_document))
+            pressure_target = next(item for item in planned_pressure["expression_routing"]
+                                   if item["expression"] == "pressure")["targets"]["ddrum4"]
+            pressure_target["status"] = "planned"
+            pressure_path = root / "hostile-planned-pressure.json"
+            pressure_path.write_text(json.dumps(planned_pressure), encoding="utf-8")
+            pressure_result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(pressure_path),
+                 "--output-channel", "10", "--output", str(root / "hostile-planned-pressure.h")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(pressure_result.returncode, 2)
+            self.assertIn("pressure route is not a reviewed", pressure_result.stderr)
+            capacity_result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(pressure_path),
+                 "--capacity-estimate", "--output-channel", "10",
+                 "--output", str(root / "planned-pressure-capacity.h")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(capacity_result.returncode, 0, capacity_result.stderr)
+            capacity_header = (root / "planned-pressure-capacity.h").read_text(encoding="utf-8")
+            self.assertIn("DDRUM_CAPACITY_ESTIMATE_ONLY", capacity_header)
+            self.assertIn("constexpr size_t PRESSURE_ROUTE_COUNT = 1;", capacity_header)
+
+            boundary_127 = json.loads(json.dumps(mapping_document))
+            boundary_127["hihat_quantization"]["articulations"][0]["upper_boundaries"][-1] = 127
+            boundary_path = root / "hostile-hihat-boundary.json"
+            boundary_path.write_text(json.dumps(boundary_127), encoding="utf-8")
+            boundary_result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(boundary_path),
+                 "--output-channel", "10", "--output", str(root / "hostile-hihat-boundary.h")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(boundary_result.returncode, 2)
+            self.assertIn("must be an integer from 0 to 126", boundary_result.stderr)
+
+            unreviewed_action = json.loads(json.dumps(mapping_document))
+            unreviewed_action["ddrum_state_actions"] = {
+                "metal": [{"type": "program_change", "status": "unknown", "channel": 10, "program": 0}],
+            }
+            action_path = root / "hostile-unreviewed-action.json"
+            action_path.write_text(json.dumps(unreviewed_action), encoding="utf-8")
+            action_result = subprocess.run(
+                [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping", str(action_path),
+                 "--output-channel", "10", "--output", str(root / "hostile-unreviewed-action.h")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(action_result.returncode, 2)
+            self.assertIn("measured or user-confirmed DDrum state actions only", action_result.stderr)
             wrong_channel = subprocess.run(
                 [sys.executable, str(FIRMWARE_GENERATOR), "--project-mapping",
                  str(output / "firmware-project-mapping.json"), "--output-channel", "11",

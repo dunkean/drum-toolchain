@@ -1,0 +1,27 @@
+format: rig-runtime-profile/v1
+status: ready
+target_status: {sd3: ready, drumgizmo: ready}
+state:
+  scenes: [metal]
+  defaults: {scene: metal}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+policies: {echo: measured_only}
+records:
+  - scene: metal
+    source: {id: ddrum4, endpoint: test, channel: 12, primary: din}
+    match: {source: ddrum4, type: note_range, note_range: [8, 15]}
+    emit: {physical: snare2.head, expressions: [velocity, position]}
+    physical: snare2.head
+    logical_target: snare2.metalcore
+    renderers:
+      sd3: {note: 33, channel: 10, position_cc: 16}
+      drumgizmo:
+        note: 33
+        channel: 10
+        instrument: snare2
+        articulation: metalcore
+        position_policy: note_range_quantized
+        position_notes: [32, 33, 34]
+        position_targets: [snare2.metalcore_center, snare2.metalcore, snare2.metalcore_edge]
+        position_upper_boundaries: [47, 95]

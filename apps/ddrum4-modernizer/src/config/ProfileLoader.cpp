@@ -163,8 +163,9 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
     else { const char* key=decoder.matcher==PhysicalMatcher::ControlChange?"cc":"note"; decoder.first=midi(match,key); decoder.last=decoder.first; }
     if(decoder.first!=255 && decoder.last<decoder.first) invalid("runtime note range is descending");
     if(emit["expressions"]) for(const auto& expression:emit["expressions"]) { const auto value=expression.as<std::string>(); decoder.velocity|=value=="velocity"; decoder.position|=value=="position"; }
-    if(decoder.position && (decoder.matcher!=PhysicalMatcher::NoteRange || decoder.first==decoder.last))
-      invalid("runtime positional decoder requires a non-empty measured note range");
+    if(decoder.position && decoder.matcher!=PhysicalMatcher::ControlChange &&
+       (decoder.matcher!=PhysicalMatcher::NoteRange || decoder.first==decoder.last))
+      invalid("runtime positional decoder requires a measured CC or non-empty note range");
     bool decoderExists=false; for(const auto& existing:result.decoders) if(existing.source==decoder.source&&existing.matcher==decoder.matcher&&existing.first==decoder.first&&existing.last==decoder.last&&existing.physical==decoder.physical) decoderExists=true;
     if(!decoderExists) result.decoders.push_back(std::move(decoder));
     const auto scene=sceneIndex(result,record["scene"].as<std::string>()); const auto physical=record["physical"].as<std::string>(); const auto logical=record["logical_target"].as<std::string>();
@@ -177,9 +178,68 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
       if(!routeExists) result.routes.push_back(std::move(route));
     }
     const auto targetRenderer=record["renderers"][rendererName]; if(!targetRenderer["note"]&&!targetRenderer["cc"]) invalid(std::string("runtime ")+rendererName+" renderer needs note or cc"); RuntimeRenderer renderer; renderer.logical=logical; renderer.note=targetRenderer["note"]?midi(targetRenderer,"note"):0; renderer.channel=channel(targetRenderer,"channel",10); if(targetRenderer["position_cc"]) renderer.positionCc=midi(targetRenderer,"position_cc"); if(targetRenderer["cc"]) renderer.controller=midi(targetRenderer,"cc");
+    if(targetRenderer["position_policy"] || targetRenderer["position_notes"] ||
+       targetRenderer["position_targets"] || targetRenderer["position_upper_boundaries"]) {
+      if(target!=RuntimeRendererTarget::DrumGizmo || !targetRenderer["position_policy"] ||
+         targetRenderer["position_policy"].as<std::string>()!="note_range_quantized" ||
+         !targetRenderer["position_notes"] || !targetRenderer["position_targets"] ||
+         !targetRenderer["position_upper_boundaries"])
+        invalid("runtime positional-note renderer is limited to DrumGizmo note_range_quantized");
+      const auto notes=targetRenderer["position_notes"];
+      const auto targets=targetRenderer["position_targets"];
+      const auto boundaries=targetRenderer["position_upper_boundaries"];
+      if(!notes.IsSequence() || !targets.IsSequence() || !boundaries.IsSequence() || notes.size()<2 ||
+         notes.size()>renderer.positionNotes.size() || targets.size()!=notes.size() ||
+         boundaries.size()+1!=notes.size())
+        invalid("runtime DrumGizmo positional-note grid is invalid");
+      renderer.positionNoteCount=static_cast<uint8_t>(notes.size());
+      bool includesNormal=false, includesNormalTarget=false;
+      for(size_t index=0;index<notes.size();++index) {
+        renderer.positionNotes[index]=midiValue(notes[index]);
+        renderer.positionTargets[index]=targets[index].as<std::string>();
+        if(renderer.positionTargets[index].empty()) invalid("runtime DrumGizmo position target is empty");
+        includesNormal|=renderer.positionNotes[index]==renderer.note;
+        includesNormalTarget|=renderer.positionTargets[index]==renderer.logical;
+        for(size_t prior=0;prior<index;++prior) {
+          if(renderer.positionNotes[prior]==renderer.positionNotes[index]) invalid("runtime DrumGizmo position note is duplicated");
+          if(renderer.positionTargets[prior]==renderer.positionTargets[index]) invalid("runtime DrumGizmo position target is duplicated");
+        }
+      }
+      if(!includesNormal) invalid("runtime DrumGizmo normal note must belong to its position notes");
+      if(!includesNormalTarget) invalid("runtime DrumGizmo normal logical sound must belong to its position targets");
+      for(size_t index=0;index<boundaries.size();++index) {
+        renderer.positionUpperBoundaries[index]=midiValue(boundaries[index]);
+        if(renderer.positionUpperBoundaries[index]>=127 ||
+           (index&&renderer.positionUpperBoundaries[index]<=renderer.positionUpperBoundaries[index-1]))
+          invalid("runtime DrumGizmo position boundaries are invalid");
+      }
+    }
+    if(targetRenderer["layers"]) {
+      if(target!=RuntimeRendererTarget::Sd3 || !targetRenderer["layers"].IsSequence() ||
+         targetRenderer["layers"].size()==0 || targetRenderer["layers"].size()>renderer.layers.size())
+        invalid("runtime layers are limited to four SD3 notes");
+      for(const auto& layerNode:targetRenderer["layers"]) {
+        const auto layer=midiValue(layerNode);
+        if(layer==renderer.note) invalid("runtime SD3 layer duplicates the primary note");
+        for(uint8_t index=0;index<renderer.layerCount;++index)
+          if(renderer.layers[index]==layer) invalid("runtime SD3 layer is duplicated");
+        renderer.layers[renderer.layerCount++]=layer;
+      }
+    }
+    if(targetRenderer["controllers"]) {
+      if(target!=RuntimeRendererTarget::Sd3 || !targetRenderer["controllers"].IsSequence() || targetRenderer["controllers"].size()>renderer.fixedControllers.size()) invalid("runtime fixed controllers are limited to two SD3 CC/value pairs");
+      for(const auto& pair:targetRenderer["controllers"]) {
+        if(!pair.IsSequence() || pair.size()!=2) invalid("runtime fixed controller needs a CC/value pair");
+        const RuntimeFixedController fixed{midiValue(pair[0]),midiValue(pair[1])};
+        for(uint8_t index=0;index<renderer.fixedControllerCount;++index) if(renderer.fixedControllers[index].controller==fixed.controller) invalid("runtime fixed controller is duplicated");
+        if(renderer.controller==fixed.controller) invalid("runtime fixed controller conflicts with the live expression CC");
+        renderer.fixedControllers[renderer.fixedControllerCount++]=fixed;
+      }
+    }
     if(matcherName=="cc" || matcherName=="poly_aftertouch") {
       if(matcherName=="poly_aftertouch") {
-        if(target!=RuntimeRendererTarget::Sd3) invalid("runtime pressure expression is unsupported for the selected renderer");
+        if(target!=RuntimeRendererTarget::Sd3 && target!=RuntimeRendererTarget::DrumGizmo)
+          invalid("runtime pressure expression is unsupported for the selected renderer");
         bool accepted=false;
         const auto expressions=emit["expressions"];
         if(expressions && root["expression_routing"]) for(const auto& expression:expressions) {
@@ -190,7 +250,7 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
                candidate["physical"].as<std::string>()!=physical || candidate["expression"].as<std::string>()!="pressure") continue;
             if(!candidate["correlation"] || candidate["correlation"].as<std::string>()!="source_channel_note")
               invalid("runtime pressure expression requires correlation: source_channel_note");
-            const auto expressionTarget=candidate["targets"] ? candidate["targets"]["sd3"] : YAML::Node{};
+            const auto expressionTarget=candidate["targets"] ? candidate["targets"][rendererName] : YAML::Node{};
             const auto event=expressionTarget ? expressionTarget["event"] : YAML::Node{};
             if(!expressionTarget||!event||!expressionTarget["status"]||!event["type"]||!event["note_from"])
               invalid("runtime pressure expression route is incomplete");
@@ -230,13 +290,14 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
       bool accepted=false;
       const auto expressions=emit["expressions"];
       if(expressions && root["expression_routing"]) for(const auto& expression:expressions) {
-        if(expression.as<std::string>()!="openness") continue;
+        const auto expressionName=expression.as<std::string>();
+        if(expressionName!="openness" && expressionName!="position") continue;
         for(const auto& candidate:root["expression_routing"]) {
           if(!candidate["source"]||!candidate["physical"]||!candidate["expression"]||
              candidate["source"].as<std::string>()!=record["source"]["id"].as<std::string>() ||
-             candidate["physical"].as<std::string>()!=physical || candidate["expression"].as<std::string>()!="openness") continue;
+             candidate["physical"].as<std::string>()!=physical || candidate["expression"].as<std::string>()!=expressionName) continue;
           if(!candidate["correlation"] || candidate["correlation"].as<std::string>()!="none")
-            invalid("runtime openness expression route requires correlation: none");
+            invalid("runtime CC expression route requires correlation: none");
           const auto expressionTarget=candidate["targets"] ? candidate["targets"][rendererName] : YAML::Node{};
           const auto event=expressionTarget ? expressionTarget["event"] : YAML::Node{};
           if(!expressionTarget||!event||!expressionTarget["status"]||!event["type"])
@@ -247,7 +308,9 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
           if(target==RuntimeRendererTarget::Sd3) {
             if(!event["transform"]||!event["channel"]||!event["cc"] || event["type"].as<std::string>()!="cc" || event["transform"].as<std::string>()!="passthrough")
               invalid("runtime expression route is not a reviewed passthrough CC");
-            if(renderer.channel!=channel(event,"channel",10)||renderer.controller!=midi(event,"cc"))
+            const auto destination=midi(event,"cc");
+            if(renderer.channel!=channel(event,"channel",10) ||
+               (expressionName=="position" ? renderer.positionCc!=destination : renderer.controller!=destination))
               invalid("runtime expression route differs from its SD3 renderer address");
           } else {
             if(event["type"].as<std::string>()!="quantized_note" || !event["input_closed"] || !event["input_open"] || !event["articulations"])
@@ -279,7 +342,12 @@ RuntimeProfile loadRuntimeProfile(const std::filesystem::path& path, RuntimeRend
       if(!accepted) invalid("runtime expression decoder has no measured expression-routing/v1 target");
       }
     }
-    bool renderExists=false; for(const auto& item:result.renderers) if(item.logical==renderer.logical) { renderExists=true; if(item.note!=renderer.note||item.channel!=renderer.channel||item.positionCc!=renderer.positionCc||item.controller!=renderer.controller) invalid(std::string("logical sound has inconsistent ")+rendererName+" renderers"); } if(!renderExists) result.renderers.push_back(std::move(renderer));
+    bool renderExists=false; for(const auto& item:result.renderers) if(item.logical==renderer.logical) { renderExists=true; bool fixedSame=item.fixedControllerCount==renderer.fixedControllerCount; for(uint8_t index=0;fixedSame&&index<item.fixedControllerCount;++index) fixedSame=item.fixedControllers[index].controller==renderer.fixedControllers[index].controller&&item.fixedControllers[index].value==renderer.fixedControllers[index].value; bool layersSame=item.layerCount==renderer.layerCount; for(uint8_t index=0;layersSame&&index<item.layerCount;++index) layersSame=item.layers[index]==renderer.layers[index]; bool positionsSame=item.positionNoteCount==renderer.positionNoteCount; for(uint8_t index=0;positionsSame&&index<item.positionNoteCount;++index) positionsSame=item.positionNotes[index]==renderer.positionNotes[index]&&item.positionTargets[index]==renderer.positionTargets[index]&&(index+1==item.positionNoteCount||item.positionUpperBoundaries[index]==renderer.positionUpperBoundaries[index]); if(item.note!=renderer.note||item.channel!=renderer.channel||item.positionCc!=renderer.positionCc||item.controller!=renderer.controller||!fixedSame||!layersSame||!positionsSame) invalid(std::string("logical sound has inconsistent ")+rendererName+" renderers"); } if(!renderExists) result.renderers.push_back(std::move(renderer));
+  }
+  for(const auto& renderer:result.renderers) for(uint8_t index=0;index<renderer.positionNoteCount;++index) {
+    const auto target=std::find_if(result.renderers.begin(),result.renderers.end(),[&](const RuntimeRenderer& candidate){return candidate.logical==renderer.positionTargets[index];});
+    if(target!=result.renderers.end() && target->note!=renderer.positionNotes[index])
+      invalid("runtime DrumGizmo position target note disagrees with its renderer");
   }
   if(root["native_control_map"]) for(const auto& item:root["native_control_map"]) {
     const auto name=item.first.as<std::string>(); const auto native=item.second;
@@ -307,6 +375,17 @@ void validateRuntimeProfile(const RuntimeProfile& profile) {
   std::set<std::pair<std::string,uint8_t>> endpointChannels;
   for(const auto& source:profile.sources) { if(source.id.empty()||source.endpoint.empty()) invalid("runtime source id and endpoint may not be empty"); if(!endpointChannels.insert({source.endpoint,source.channel}).second) invalid("runtime sources sharing an endpoint must use distinct channels"); }
   for(const auto& decoder:profile.decoders) if(decoder.source>=profile.sources.size()||decoder.physical.empty()) invalid("runtime decoder is invalid");
+  for(const auto& renderer:profile.renderers) {
+    if(renderer.logical.empty() || renderer.fixedControllerCount>renderer.fixedControllers.size() || renderer.layerCount>renderer.layers.size()) invalid("runtime renderer is invalid");
+    for(uint8_t left=0;left<renderer.layerCount;++left) {
+      if(renderer.layers[left]==renderer.note) invalid("runtime SD3 layer duplicates the primary note");
+      for(uint8_t right=left+1;right<renderer.layerCount;++right) if(renderer.layers[left]==renderer.layers[right]) invalid("runtime SD3 layer is duplicated");
+    }
+    for(uint8_t left=0;left<renderer.fixedControllerCount;++left) {
+      if(renderer.fixedControllers[left].controller==renderer.controller) invalid("runtime fixed controller conflicts with live expression CC");
+      for(uint8_t right=left+1;right<renderer.fixedControllerCount;++right) if(renderer.fixedControllers[left].controller==renderer.fixedControllers[right].controller) invalid("runtime fixed controller is duplicated");
+    }
+  }
   if(profile.hihatQuantization) {
     const auto& quantization=*profile.hihatQuantization;
     if(quantization.source>=profile.sources.size() || quantization.zones.empty()) invalid("runtime DrumGizmo hi-hat quantization is invalid");

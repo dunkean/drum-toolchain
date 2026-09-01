@@ -1,13 +1,13 @@
 # ddrum4 Converter
 
-Routeur MIDI temps réel ddrum4 → SD3/DrumGizmo, avec position de snare, CC, trois kits virtuels et Program Change local.
+Routeur MIDI temps réel ddrum4 → SD3/DrumGizmo, avec position de snare, CC,
+scènes/palettes virtuelles et Program Change local.
 
 ## Démarrage Windows
 
 ```powershell
-cmake -S . -B build -G Ninja
-cmake --build build --target ddrum4_converter
-./build/ddrum4_converter_artefacts/Debug/'ddrum4 Converter.exe'
+cmd /d /c scripts\build-modernizer-desktop.cmd
+./build/modernizer-desktop-msvc/ddrum4_converter_artefacts/Release/'ddrum4 Converter.exe'
 ```
 
 Le routeur charge `config/ddrum4-template.yaml` à côté de l'exécutable (ou depuis le dépôt en développement). L'onglet **Mapping** permet de modifier ce YAML et de l'appliquer : le routage est arrêté, le profil est validé, puis il peut être redémarré. Les erreurs de schéma, chevauchements de notes, valeurs CC et bindings PC sont refusés avant toute ouverture MIDI.
@@ -33,7 +33,11 @@ arrêté avec une erreur lisible.
 ./build/ddrum4ctl programs config/ddrum4-template.yaml
 ./build/ddrum4ctl list config/ddrum4-template.yaml
 ./build/ddrum4ctl benchmark config/ddrum4-template.yaml
+./build/ddrum4ctl validate-runtime ../../build/metalcore-r15-chain-simulator/runtime-profile.yaml sd3
 ```
+
+Le dernier contrôle charge exactement le format compilé utilisé en live et
+valide le renderer `sd3` (ou `drumgizmo`) sans ouvrir de port MIDI.
 
 `PC 0`, `PC 1` et `PC 2` sélectionnent respectivement `Core`, `Metal` et `Electro`, sans relayer le Program Change vers SD3.
 

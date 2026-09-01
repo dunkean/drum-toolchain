@@ -6,8 +6,20 @@
 
 using namespace ddrum4;
 int main(int argc, char** argv) {
-  if (argc < 3) { std::cerr << "Usage: ddrum4ctl <validate|programs|list|benchmark> <profile.yaml>\n"; return 2; }
+  if (argc < 3) { std::cerr << "Usage: ddrum4ctl <validate|validate-runtime|programs|list|benchmark> <profile.yaml> [sd3|drumgizmo]\n"; return 2; }
   try {
+    if (std::string_view(argv[1]) == "validate-runtime") {
+      RuntimeRendererTarget target=RuntimeRendererTarget::Sd3;
+      if(argc>=4) {
+        const std::string_view renderer=argv[3];
+        if(renderer=="drumgizmo") target=RuntimeRendererTarget::DrumGizmo;
+        else if(renderer!="sd3") { std::cerr << "Renderer must be sd3 or drumgizmo\n"; return 2; }
+      }
+      const auto runtime=loadRuntimeProfile(argv[2],target);
+      std::cout << "OK runtime " << runtime.sourceSha256 << " — " << runtime.routes.size()
+                << " routes, " << runtime.renderers.size() << " renderers\n";
+      return 0;
+    }
     const auto profile = loadProfile(argv[2]);
     if (std::string_view(argv[1]) == "validate") { std::cout << "OK " << profile.name << " — " << profile.kits.size() << " virtual kits\n"; return 0; }
     if (std::string_view(argv[1]) == "programs") { for (const auto& b : profile.programs) std::cout << "PC " << int(b.program) << " -> " << profile.kits[b.kitIndex].label << "\n"; return 0; }

@@ -1,6 +1,6 @@
 format: rig-runtime-profile/v1
 status: ready
-target_status: {sd3: ready, drumgizmo: planned}
+target_status: {sd3: ready, drumgizmo: ready}
 state:
   scenes: [metal]
   defaults: {scene: metal}
@@ -15,7 +15,7 @@ expression_routing:
     targets:
       ddrum4: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
       sd3: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
-      drumgizmo: {status: unsupported, reason: fixture has no measured DrumGizmo choke behavior, event: {type: unsupported}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
 records:
   # Kept before the hit decoder deliberately: the loader must resolve its
   # primary raw note from the complete compiled artifact, not YAML ordering.

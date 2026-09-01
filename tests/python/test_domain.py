@@ -13,7 +13,7 @@ class DomainTests(unittest.TestCase):
     def test_physical_kit_records_pad_owner_without_a_midi_address(self) -> None:
         kit = PhysicalKit.load(ROOT / "profiles/physical/greg-hybrid-kit.yaml")
         snare = kit.instrument("snare_main")
-        self.assertEqual(snare.zones, ("head", "rim"))
+        self.assertEqual(snare.zones, ("head", "rimshot", "cross_stick"))
         self.assertIn("positional_sensing", snare.capabilities)
         self.assertEqual(snare.source_owner, "edrumin")
 
@@ -45,9 +45,17 @@ class DomainTests(unittest.TestCase):
         project_snare_notes = {
             row["match"]["note"]
             for row in project["source_decoders"]
-            if row["match"]["source"] == "edrumin" and row["emit"]["physical"].startswith("snare1.")
+            if row["match"]["source"] == "edrumin"
+            and row["match"]["type"] == "note"
+            and row["emit"]["physical"].startswith("snare1.")
         }
         self.assertEqual(project_snare_notes, {0, 1, 2})
+        project_snare_position = next(
+            row for row in project["source_decoders"]
+            if row["match"] == {"source": "edrumin", "type": "cc", "cc": 16}
+        )
+        self.assertEqual(project_snare_position["emit"],
+                         {"physical": "snare1.head", "expressions": ["position"], "normalize": "cc7"})
 
     def test_schema_validation_rejects_invalid_midi_channel(self) -> None:
         document = {"profile": "invalid", "status": "template", "midi": {"output_channel": 17}, "module": {"memory_blocks": 1}, "notes": []}

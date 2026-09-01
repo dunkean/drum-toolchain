@@ -1,5 +1,5 @@
-# Canonical no-pad project for installed r15. SIM addresses prove routing only;
-# they are never hardware settings and cannot be promoted to a live deployment.
+# Canonical no-pad project for installed r15. Only the endpoint names are SIM.
+# Channels and raw note/controller addresses are the prescribed module contract.
 schema_version: 1
 kind: rig-project
 project: metalcore-r15-topology-simulator
@@ -7,11 +7,11 @@ rig: profiles/physical/greg-hybrid-kit.yaml
 physical_bindings:
   kick.hit: {instrument: kick_main, zone: head}
   snare1.head: {instrument: snare_main, zone: head}
-  snare1.rimshot: {instrument: snare_main, zone: rim}
-  snare1.cross: {instrument: snare_main, zone: rim}
+  snare1.rimshot: {instrument: snare_main, zone: rimshot}
+  snare1.cross: {instrument: snare_main, zone: cross_stick}
   snare2.head: {instrument: snare_secondary, zone: head}
-  snare2.rimshot: {instrument: snare_secondary, zone: rim}
-  snare2.cross: {instrument: snare_secondary, zone: rim}
+  snare2.rimshot: {instrument: snare_secondary, zone: rimshot}
+  snare2.cross: {instrument: snare_secondary, zone: cross_stick}
   tom1.hit: {instrument: tom_1, zone: head}
   tom2.hit: {instrument: tom_2, zone: head}
   tom3.hit: {instrument: tom_3, zone: head}
@@ -47,10 +47,13 @@ connection_profiles:
   DIN_ONLY: {deduplicate_din_copies: false, usb_sources: false, din_sources: true}
 
 # Ownership: DDrum4 = kick/toms/Snare2+Rim2/chinas/aux HH; eDRUMin = Snare1,
-# continuous HH and ride; DDTi = crashes, splashes and stack.  Notes are SIM.
+# continuous HH and ride; DDTi = crashes, splashes and stack. Raw notes below
+# are written to/selected on the modules and must not be replaced by discovery.
 source_decoders:
   - {match: {source: ddrum4, type: note, note: 0}, emit: {physical: kick.hit, expressions: [velocity]}}
-  - {match: {source: ddrum4, type: note, note: 8}, emit: {physical: snare2.head, expressions: [velocity]}}
+  # NOTE P=8 on the DDrum4 input preserves the physical hit position as the
+  # contiguous raw block 8..15. Renderers may keep, quantize, or ignore it.
+  - {match: {source: ddrum4, type: note_range, note_range: [8, 15]}, emit: {physical: snare2.head, expressions: [velocity, position]}}
   - {match: {source: ddrum4, type: note, note: 16}, emit: {physical: snare2.rimshot, expressions: [velocity]}}
   - {match: {source: ddrum4, type: note, note: 17}, emit: {physical: snare2.cross, expressions: [velocity]}}
   - {match: {source: ddrum4, type: note, note: 24}, emit: {physical: tom1.hit, expressions: [velocity]}}
@@ -71,6 +74,7 @@ source_decoders:
   - {match: {source: edrumin, type: note, note: 7}, emit: {physical: ride.bow, expressions: [velocity]}}
   - {match: {source: edrumin, type: note, note: 8}, emit: {physical: ride.bell, expressions: [velocity]}}
   - {match: {source: edrumin, type: cc, cc: 4}, emit: {physical: hh.bow, expressions: [openness], normalize: cc7}}
+  - {match: {source: edrumin, type: cc, cc: 16}, emit: {physical: snare1.head, expressions: [position], normalize: cc7}}
   - {match: {source: ddti, type: note, note: 16}, emit: {physical: crash1.bow, expressions: [velocity]}}
   - {match: {source: ddti, type: note, note: 17}, emit: {physical: crash1.edge, expressions: [velocity]}}
   - {match: {source: ddti, type: note, note: 18}, emit: {physical: crash2.bow, expressions: [velocity]}}
@@ -79,6 +83,23 @@ source_decoders:
   - {match: {source: ddti, type: note, note: 21}, emit: {physical: splash1.hit, expressions: [velocity]}}
   - {match: {source: ddti, type: note, note: 22}, emit: {physical: splash2.hit, expressions: [velocity]}}
   - {match: {source: ddti, type: note, note: 23}, emit: {physical: stack.hit, expressions: [velocity]}}
+  # Chokes are correlated to the exact raw hit note. These are simulation
+  # addresses only: the live campaign must observe hit -> aftertouch for each
+  # articulation before an operator may confirm the renderer behavior.
+  - {match: {source: edrumin, type: poly_aftertouch, note: 7, active_note: true}, emit: {physical: ride.bow, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: edrumin, type: poly_aftertouch, note: 8, active_note: true}, emit: {physical: ride.bell, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 16, active_note: true}, emit: {physical: crash1.bow, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 17, active_note: true}, emit: {physical: crash1.edge, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 18, active_note: true}, emit: {physical: crash2.bow, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 19, active_note: true}, emit: {physical: crash2.edge, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 20, active_note: true}, emit: {physical: crash3.edge, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 21, active_note: true}, emit: {physical: splash1.hit, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 22, active_note: true}, emit: {physical: splash2.hit, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddti, type: poly_aftertouch, note: 23, active_note: true}, emit: {physical: stack.hit, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddrum4, type: poly_aftertouch, note: 56, active_note: true}, emit: {physical: china1.edge, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddrum4, type: poly_aftertouch, note: 57, active_note: true}, emit: {physical: china1.bell, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddrum4, type: poly_aftertouch, note: 64, active_note: true}, emit: {physical: china2.edge, expressions: [pressure], correlate: source_channel_note}}
+  - {match: {source: ddrum4, type: poly_aftertouch, note: 65, active_note: true}, emit: {physical: china2.bell, expressions: [pressure], correlate: source_channel_note}}
 expression_routing:
   - source: edrumin
     physical: hh.bow
@@ -87,7 +108,17 @@ expression_routing:
     targets:
       # Output mapping only: the eDRUMin raw notes remain 3/4.  CC4 must be
       # measured (closed/open polarity + thresholds) before this is flashable.
-      ddrum4: {status: planned, event: {type: quantized_note_p, note_from: active_rendered_hit, articulations: [{physical: hh.bow, notes: [72, 73, 74, 75, 76]}, {physical: hh.edge, notes: [40, 41, 42, 43]}]}}
+      ddrum4:
+        status: planned
+        reason: "Proposed CC4 polarity and zones are implemented but remain non-flashable until measured on the physical eDRUMin pedal"
+        event:
+          type: quantized_note_p
+          note_from: active_rendered_hit
+          input_closed: 127
+          input_open: 0
+          articulations:
+            - {physical: hh.bow, notes: [72, 73, 74, 75, 76], upper_boundaries: [15, 47, 79, 111]}
+            - {physical: hh.edge, notes: [40, 41, 42, 43], upper_boundaries: [31, 63, 95]}
       sd3: {status: user-confirmed, event: {type: cc, channel: 10, cc: 4, transform: passthrough}}
       drumgizmo:
         status: planned
@@ -98,12 +129,146 @@ expression_routing:
           input_open: 0
           articulations:
             - {physical: hh.bow, notes: [112, 113, 114, 115, 116], upper_boundaries: [15, 47, 79, 111]}
-            - {physical: hh.edge, notes: [117, 118, 119, 120], upper_boundaries: [21, 63, 106]}
+            - {physical: hh.edge, notes: [117, 118, 121, 119, 120], upper_boundaries: [21, 52, 74, 106]}
+  - source: edrumin
+    physical: snare1.head
+    expression: position
+    correlation: none
+    targets:
+      ddrum4:
+        status: unsupported
+        reason: "Center/mid/edge CC16 thresholds need physical measurement and an explicit Arduino quantizer"
+        event: {type: unsupported}
+      sd3:
+        status: user-confirmed
+        event: {type: cc, channel: 10, cc: 16, transform: passthrough}
+      drumgizmo:
+        status: unsupported
+        reason: "The current exported kit is note-only for snare position until a measured quantizer is added"
+        event: {type: unsupported}
+  -
+    source: edrumin
+    physical: ride.bow
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: edrumin
+    physical: ride.bell
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: crash1.bow
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: crash1.edge
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: crash2.bow
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: crash2.edge
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: crash3.edge
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: splash1.hit
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: splash2.hit
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddti
+    physical: stack.hit
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddrum4
+    physical: china1.edge
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddrum4
+    physical: china1.bell
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddrum4
+    physical: china2.edge
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+  - source: ddrum4
+    physical: china2.bell
+    expression: pressure
+    correlation: source_channel_note
+    targets:
+      ddrum4: {status: planned, reason: "Raw source choke and active-hit renderer behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      sd3: {status: planned, reason: "Raw source choke and SD3 active-hit behavior both require explicit review", event: {type: poly_aftertouch, note_from: active_rendered_hit}}
+      drumgizmo: {status: user-confirmed, event: {type: poly_aftertouch, note_from: active_rendered_hit}}
 physical_events: [kick.hit, tom1.hit, tom2.hit, tom3.hit, snare2.head, snare2.rimshot, snare2.cross, snare1.head, snare1.rimshot, snare1.cross, hh.bow, hh.edge, hh.pedal_close, hh.pedal_splash, ride.bow, ride.bell, crash1.bow, crash1.edge, crash2.bow, crash2.edge, crash3.edge, splash1.hit, splash2.hit, china1.edge, china1.bell, china2.edge, china2.bell, perc.hit, stack.hit]
 state:
   scenes: [metalcore, sleep_token, deftones, dnb, industrial, electro]
   variables: [vp1_snare1, vp2_flex, vp3_percussion_family, vp4_percussion_variant]
   defaults: {scene: metalcore, vp1_snare1: 1, vp2_flex: 1, vp3_percussion_family: 1, vp4_percussion_variant: 1}
+  value_labels:
+    vp1_snare1: {"1": Metalcore, "2": Deftones, "3": Sleep Token, "4": Industrial, "5": Electro}
+    vp2_flex: {"1": Acoustic tom 4, "2": Metalcore snare 2, "3": Deftones snare 2, "4": Sleep Token snare 2, "5": Electro snare 2, "6": Sleep Token tom 4}
+    vp3_percussion_family: {"1": Acoustic stack, "2": Hybrid stack, "3": Glitch stack, "4": Metallic hit, "5": Clap stack, "6": Progressive 20-17-13 Custom Stack, "7": Forced half-open HH edge, "8": Forced closed HH edge}
+    vp4_percussion_variant: {"1": Utility, "2": Cowbell, "3": Woodblock, "4": Click, "5": Clap}
 logical_control_protocol:
   scene: {channels: [14, 15], type: program_change}
   vp1_snare1: {channels: [14, 15], type: cc, cc: 20}
@@ -117,11 +282,11 @@ logical_routes:
     tom2.hit: tom2.acoustic
     tom3.hit: tom3.acoustic
     snare2.head: [{logical_target: snare2.metalcore, when: {vp2_flex: 2}}, {logical_target: snare2.deftones, when: {vp2_flex: 3}}, {logical_target: snare2.sleep, when: {vp2_flex: 4}}, {logical_target: snare2.electro, when: {vp2_flex: 5}}, {logical_target: tom4.sleep, when: {vp2_flex: 6}}, {logical_target: tom4.acoustic}]
-    snare2.rimshot: rim2.rimshot
-    snare2.cross: rim2.cross
+    snare2.rimshot: [{logical_target: rim2.rimshot, when: {vp2_flex: 3}}, {logical_target: rim_sleep.rimshot, when: {vp2_flex: 4}}, {logical_target: rim1.rimshot}]
+    snare2.cross: [{logical_target: rim2.cross, when: {vp2_flex: 3}}, {logical_target: rim_sleep.cross, when: {vp2_flex: 4}}, {logical_target: rim1.cross}]
     snare1.head: [{logical_target: snare1.deftones, when: {vp1_snare1: 2}}, {logical_target: snare1.sleep, when: {vp1_snare1: 3}}, {logical_target: snare1.industrial, when: {vp1_snare1: 4}}, {logical_target: snare1.electro, when: {vp1_snare1: 5}}, {logical_target: snare1.metalcore}]
-    snare1.rimshot: rim1.rimshot
-    snare1.cross: rim1.cross
+    snare1.rimshot: [{logical_target: rim2.rimshot, when: {vp1_snare1: 2}}, {logical_target: rim_sleep.rimshot, when: {vp1_snare1: 3}}, {logical_target: rim1.rimshot}]
+    snare1.cross: [{logical_target: rim2.cross, when: {vp1_snare1: 2}}, {logical_target: rim_sleep.cross, when: {vp1_snare1: 3}}, {logical_target: rim1.cross}]
     hh.bow: hh.bow
     hh.edge: hh.edge
     hh.pedal_close: hh.pedal_close
@@ -140,12 +305,12 @@ logical_routes:
     china2.edge: china2.edge
     china2.bell: china2.bell
     perc.hit: [{logical_target: perc.cowbell, when: {vp4_percussion_variant: 2}}, {logical_target: perc.woodblock, when: {vp4_percussion_variant: 3}}, {logical_target: perc.click, when: {vp4_percussion_variant: 4}}, {logical_target: perc.clap, when: {vp4_percussion_variant: 5}}, {logical_target: perc.utility}]
-    stack.hit: [{logical_target: stack.glitch, when: {vp3_percussion_family: 3}}, {logical_target: stack.metallic, when: {vp3_percussion_family: 4}}, {logical_target: stack.clap, when: {vp3_percussion_family: 5}}, {logical_target: stack.acoustic}]
-  sleep_token: {<<: *acoustic, kick.hit: kick.sleep, snare1.head: snare1.sleep, snare2.head: [{logical_target: tom4.sleep, when: {vp2_flex: 6}}, {logical_target: snare2.sleep}], tom1.hit: tom1.sleep, tom2.hit: tom2.sleep, tom3.hit: tom3.sleep, splash2.hit: hh.electronic_open}
-  deftones: {<<: *acoustic, snare1.head: snare1.deftones, snare2.head: snare2.deftones}
-  dnb: {<<: *acoustic, kick.hit: kick.dnb, snare1.head: snare1.dnb, snare2.head: snare2.electro, tom1.hit: tom1.electronic, tom2.hit: tom2.electronic, tom3.hit: tom3.electronic, splash1.hit: hh.electronic_closed, splash2.hit: hh.electronic_open, stack.hit: stack.glitch, perc.hit: perc.click}
-  industrial: {<<: *acoustic, kick.hit: kick.industrial, snare1.head: snare1.industrial, snare2.head: snare2.electro, tom1.hit: tom1.electronic, tom2.hit: tom2.electronic, tom3.hit: tom3.electronic, stack.hit: stack.metallic, perc.hit: perc.metallic}
-  electro: {<<: *acoustic, kick.hit: kick.trap, snare1.head: snare1.electro, snare2.head: snare2.electro, tom1.hit: tom1.electronic, tom2.hit: tom2.electronic, tom3.hit: tom3.electronic, splash1.hit: hh.electronic_closed, splash2.hit: hh.electronic_open, stack.hit: stack.clap, perc.hit: perc.clap}
+    stack.hit: [{logical_target: stack.progressive_custom, when: {vp3_percussion_family: 6}}, {logical_target: hh.edge_half, when: {vp3_percussion_family: 7}}, {logical_target: hh.edge_closed, when: {vp3_percussion_family: 8}}, {logical_target: stack.glitch, when: {vp3_percussion_family: 3}}, {logical_target: stack.metallic, when: {vp3_percussion_family: 4}}, {logical_target: stack.clap, when: {vp3_percussion_family: 5}}, {logical_target: stack.acoustic}]
+  sleep_token: {<<: *acoustic, kick.hit: kick.sleep, snare1.head: snare1.sleep, snare1.rimshot: rim_sleep.rimshot, snare1.cross: rim_sleep.cross, snare2.head: [{logical_target: tom4.sleep, when: {vp2_flex: 6}}, {logical_target: snare2.sleep}], snare2.rimshot: rim_sleep.rimshot, snare2.cross: rim_sleep.cross, tom1.hit: tom1.sleep, tom2.hit: tom2.sleep, tom3.hit: tom3.sleep, splash2.hit: hh.electronic_open}
+  deftones: {<<: *acoustic, snare1.head: snare1.deftones, snare1.rimshot: rim2.rimshot, snare1.cross: rim2.cross, snare2.head: snare2.deftones, snare2.rimshot: rim2.rimshot, snare2.cross: rim2.cross}
+  dnb: {<<: *acoustic, kick.hit: kick.dnb, snare1.head: snare1.dnb, snare2.head: snare2.electro, tom1.hit: tom1.electronic, tom2.hit: tom2.electronic, tom3.hit: tom3.electronic, splash1.hit: hh.electronic_closed, splash2.hit: hh.electronic_open, stack.hit: [{logical_target: stack.progressive_custom, when: {vp3_percussion_family: 6}}, {logical_target: hh.edge_half, when: {vp3_percussion_family: 7}}, {logical_target: hh.edge_closed, when: {vp3_percussion_family: 8}}, {logical_target: stack.glitch}], perc.hit: perc.click}
+  industrial: {<<: *acoustic, kick.hit: kick.industrial, snare1.head: snare1.industrial, snare2.head: snare2.electro, tom1.hit: tom1.electronic, tom2.hit: tom2.electronic, tom3.hit: tom3.electronic, stack.hit: [{logical_target: stack.progressive_custom, when: {vp3_percussion_family: 6}}, {logical_target: hh.edge_half, when: {vp3_percussion_family: 7}}, {logical_target: hh.edge_closed, when: {vp3_percussion_family: 8}}, {logical_target: stack.metallic}], perc.hit: perc.metallic}
+  electro: {<<: *acoustic, kick.hit: kick.trap, snare1.head: snare1.electro, snare2.head: snare2.electro, tom1.hit: tom1.electronic, tom2.hit: tom2.electronic, tom3.hit: tom3.electronic, splash1.hit: hh.electronic_closed, splash2.hit: hh.electronic_open, stack.hit: [{logical_target: stack.progressive_custom, when: {vp3_percussion_family: 6}}, {logical_target: hh.edge_half, when: {vp3_percussion_family: 7}}, {logical_target: hh.edge_closed, when: {vp3_percussion_family: 8}}, {logical_target: stack.clap}], perc.hit: perc.clap}
 
 # r15 renderer addresses are only the resident NOTE P blocks (0..79).  Native
 # variations/Programs beyond metalcore stay planned until configured/observed.
@@ -153,8 +318,10 @@ renderers:
   ddrum4:
     kick.acoustic: {note: 0}
     kick.sleep: {note: 0}
-    kick.dnb: {note: 2}
-    kick.industrial: {note: 3}
+    # The installed compact bank keeps one electronic-tom kick replacement at
+    # KICK_981 position 5. Electronic scenes share that resident sample.
+    kick.dnb: {note: 4}
+    kick.industrial: {note: 4}
     kick.trap: {note: 4}
     snare1.metalcore: {note: 8}
     snare1.deftones: {note: 8}
@@ -162,74 +329,93 @@ renderers:
     snare1.industrial: {note: 38}
     snare1.dnb: {note: 38}
     snare1.electro: {note: 38}
-    snare2.metalcore: {note: 33}
-    snare2.deftones: {note: 33}
-    snare2.sleep: {note: 33}
+    snare2.metalcore: {note: 8, position_policy: note_range_quantized, position_notes: [8, 11, 12], position_upper_boundaries: [47, 95]}
+    snare2.deftones: {note: 8, position_policy: note_range_quantized, position_notes: [8, 11, 12], position_upper_boundaries: [47, 95]}
+    snare2.sleep: {note: 8, position_policy: note_range_quantized, position_notes: [8, 11, 12], position_upper_boundaries: [47, 95]}
     snare2.electro: {note: 38}
     rim1.rimshot: {note: 16}
     rim1.cross: {note: 18}
     rim2.rimshot: {note: 19}
     rim2.cross: {note: 21}
+    rim_sleep.rimshot: {note: 19}
+    rim_sleep.cross: {note: 21}
     tom1.acoustic: {note: 24}
     tom2.acoustic: {note: 25}
     tom3.acoustic: {note: 26}
     tom1.sleep: {note: 24}
     tom2.sleep: {note: 25}
     tom3.sleep: {note: 26}
-    tom4.sleep: {note: 32}
+    tom4.sleep: {note: 27}
     tom1.electronic: {note: 24}
     tom2.electronic: {note: 25}
     tom3.electronic: {note: 26}
-    tom4.acoustic: {note: 32}
+    tom4.acoustic: {note: 27}
     hh.bow: {note: 72, position_policy: cc4_quantized}
     hh.edge: {note: 40, position_policy: cc4_quantized}
     hh.pedal_close: {note: 44}
     hh.pedal_splash: {note: 45}
-    hh.electronic_closed: {note: 50}
-    hh.electronic_open: {note: 51}
+    hh.electronic_closed: {note: 40}
+    hh.electronic_open: {note: 43}
     ride.bow: {note: 66}
     ride.bell: {note: 67}
     crash1.bow: {note: 56}
-    crash1.edge: {note: 57}
-    crash2.bow: {note: 64}
-    crash2.edge: {note: 65}
-    crash3.edge: {note: 61}
+    # r15 deliberately contains one resident crash sample. Bow/edge and the
+    # three physical crashes share it; pitch variants are palette state, not
+    # additional NOTE P positions or duplicated audio.
+    crash1.edge: {note: 56}
+    crash2.bow: {note: 56}
+    crash2.edge: {note: 56}
+    crash3.edge: {note: 56}
     splash1.acoustic: {note: 58}
     splash2.acoustic: {note: 58}
     china1.edge: {note: 59}
-    china1.bell: {note: 60}
+    china1.bell: {note: 59}
     china2.edge: {note: 59}
-    china2.bell: {note: 60}
-    perc.utility: {note: 48}
+    china2.bell: {note: 59}
+    perc.utility: {note: 54}
     perc.cowbell: {note: 54}
     perc.woodblock: {note: 55}
-    perc.click: {note: 52}
-    perc.clap: {note: 49}
-    perc.metallic: {note: 53}
-    stack.acoustic: {note: 48}
+    perc.click: {note: 55}
+    perc.clap: {note: 54}
+    perc.metallic: {note: 55}
+    # The physical stack was budgeted as an open HH trigger in DDrum4. The
+    # dedicated Progressive stack remains available in SD3/DrumGizmo only.
+    stack.acoustic: {note: 43}
+    # The installed r15 bank has no second resident stack sample. Preserve a
+    # playable fallback until a future bank explicitly budgets that sample.
+    stack.progressive_custom: {note: 43}
+    hh.edge_half: {note: 42}
+    hh.edge_closed: {note: 40}
     stack.glitch: {note: 55}
-    stack.metallic: {note: 53}
-    stack.clap: {note: 49}
+    stack.metallic: {note: 55}
+    stack.clap: {note: 54}
   sd3: &sd3
     kick.acoustic: {note: 24, channel: 10}
     kick.sleep: {note: 25, channel: 10}
     kick.dnb: {note: 26, channel: 10}
     kick.industrial: {note: 27, channel: 10}
     kick.trap: {note: 28, channel: 10}
-    snare1.metalcore: {note: 32, channel: 10}
-    snare1.deftones: {note: 37, channel: 10}
-    snare1.sleep: {note: 42, channel: 10}
-    snare1.industrial: {note: 55, channel: 10}
-    snare1.dnb: {note: 47, channel: 10}
-    snare1.electro: {note: 48, channel: 10}
-    snare2.metalcore: {note: 33, channel: 10}
-    snare2.deftones: {note: 38, channel: 10}
-    snare2.sleep: {note: 43, channel: 10}
-    snare2.electro: {note: 49, channel: 10}
+    snare1.metalcore: {note: 32, channel: 10, position_cc: 16}
+    # The v23 closed-loop calibration established these phase-safe composite
+    # centres. Notes 100/101/103 are trimmed standalone SD3 layer instruments.
+    snare1.deftones: {note: 37, layers: [100, 101], channel: 10, position_cc: 16}
+    snare1.sleep: {note: 42, layers: [103], channel: 10, position_cc: 16}
+    snare1.industrial: {note: 55, channel: 10, position_cc: 16}
+    snare1.dnb: {note: 47, channel: 10, position_cc: 16}
+    snare1.electro: {note: 48, channel: 10, position_cc: 16}
+    snare2.metalcore: {note: 33, channel: 10, position_cc: 16}
+    snare2.deftones: {note: 38, channel: 10, position_cc: 16}
+    snare2.sleep: {note: 43, channel: 10, position_cc: 16}
+    snare2.electro: {note: 49, channel: 10, position_cc: 16}
+    snare1.metalcore_edge: {note: 34, channel: 10}
+    snare1.deftones_edge: {note: 39, channel: 10}
+    snare1.sleep_edge: {note: 44, channel: 10}
     rim1.rimshot: {note: 35, channel: 10}
     rim1.cross: {note: 36, channel: 10}
     rim2.rimshot: {note: 40, channel: 10}
     rim2.cross: {note: 41, channel: 10}
+    rim_sleep.rimshot: {note: 45, channel: 10}
+    rim_sleep.cross: {note: 46, channel: 10}
     tom1.acoustic: {note: 56, channel: 10}
     tom2.acoustic: {note: 57, channel: 10}
     tom3.acoustic: {note: 58, channel: 10}
@@ -267,13 +453,37 @@ renderers:
     perc.clap: {note: 50, channel: 10}
     perc.metallic: {note: 88, channel: 10}
     stack.acoustic: {note: 85, channel: 10}
+    stack.progressive_custom: {note: 86, channel: 10}
+    # These are deliberate fixed states for hits on the Stack/Spock pad. The
+    # live eDRUMin hi-hat continues to pass its own continuous CC4 unchanged.
+    hh.edge_half: {note: 65, channel: 10, controllers: [[4, 64]]}
+    hh.edge_closed: {note: 65, channel: 10, controllers: [[4, 127]]}
     stack.glitch: {note: 89, channel: 10}
     stack.metallic: {note: 88, channel: 10}
     stack.clap: {note: 99, channel: 10}
+    snare_layer.deftones_sd02: {note: 100, channel: 10}
+    snare_layer.deftones_sd30: {note: 101, channel: 10}
+    snare_layer.sleep_snare8: {note: 102, channel: 10}
+    snare_layer.sleep_snare7: {note: 103, channel: 10}
   drumgizmo:
-    <<: {kick.acoustic: {note: 24, channel: 10, instrument: kick, articulation: acoustic}, kick.sleep: {note: 25, channel: 10, instrument: kick, articulation: sleep}, kick.dnb: {note: 26, channel: 10, instrument: kick, articulation: dnb}, kick.industrial: {note: 27, channel: 10, instrument: kick, articulation: industrial}, kick.trap: {note: 28, channel: 10, instrument: kick, articulation: trap}, snare1.metalcore: {note: 32, channel: 10, instrument: snare1, articulation: metalcore}, snare1.deftones: {note: 37, channel: 10, instrument: snare1, articulation: deftones}, snare1.sleep: {note: 42, channel: 10, instrument: snare1, articulation: sleep}, snare1.electro: {note: 48, channel: 10, instrument: snare1, articulation: electro}, snare1.dnb: {note: 47, channel: 10, instrument: snare1, articulation: dnb}, snare2.metalcore: {note: 33, channel: 10, instrument: snare2, articulation: metalcore}, snare2.deftones: {note: 38, channel: 10, instrument: snare2, articulation: deftones}, snare2.sleep: {note: 43, channel: 10, instrument: snare2, articulation: sleep}, snare2.electro: {note: 49, channel: 10, instrument: snare2, articulation: electro}, rim1.rimshot: {note: 35, channel: 10, instrument: rim1, articulation: rimshot}, rim1.cross: {note: 36, channel: 10, instrument: rim1, articulation: cross}, rim2.rimshot: {note: 40, channel: 10, instrument: rim2, articulation: rimshot}, rim2.cross: {note: 41, channel: 10, instrument: rim2, articulation: cross}, tom1.acoustic: {note: 56, channel: 10, instrument: tom1, articulation: acoustic}, tom2.acoustic: {note: 57, channel: 10, instrument: tom2, articulation: acoustic}, tom3.acoustic: {note: 58, channel: 10, instrument: tom3, articulation: acoustic}, tom1.sleep: {note: 60, channel: 10, instrument: tom1, articulation: sleep}, tom2.sleep: {note: 61, channel: 10, instrument: tom2, articulation: sleep}, tom3.sleep: {note: 62, channel: 10, instrument: tom3, articulation: sleep}, tom1.electronic: {note: 52, channel: 10, instrument: tom1, articulation: electronic}, tom2.electronic: {note: 53, channel: 10, instrument: tom2, articulation: electronic}, tom3.electronic: {note: 54, channel: 10, instrument: tom3, articulation: electronic}, tom4.acoustic: {note: 59, channel: 10, instrument: tom4, articulation: acoustic}, hh.bow: {note: 64, channel: 10, instrument: hihat, articulation: bow}, hh.edge: {note: 65, channel: 10, instrument: hihat, articulation: edge}, hh.pedal_close: {note: 66, channel: 10, instrument: hihat, articulation: pedal_close}, hh.pedal_splash: {note: 67, channel: 10, instrument: hihat, articulation: pedal_splash}, hh.electronic_closed: {note: 68, channel: 10, instrument: hihat, articulation: electronic_closed}, hh.electronic_open: {note: 69, channel: 10, instrument: hihat, articulation: electronic_open}, ride.bow: {note: 83, channel: 10, instrument: ride, articulation: bow}, ride.bell: {note: 84, channel: 10, instrument: ride, articulation: bell}, crash1.bow: {note: 72, channel: 10, instrument: crash1, articulation: bow}, crash1.edge: {note: 73, channel: 10, instrument: crash1, articulation: edge}, crash2.bow: {note: 74, channel: 10, instrument: crash2, articulation: bow}, crash2.edge: {note: 75, channel: 10, instrument: crash2, articulation: edge}, crash3.edge: {note: 76, channel: 10, instrument: crash3, articulation: edge}, splash1.acoustic: {note: 77, channel: 10, instrument: splash1, articulation: hit}, splash2.acoustic: {note: 78, channel: 10, instrument: splash2, articulation: hit}, china1.edge: {note: 79, channel: 10, instrument: china1, articulation: edge}, china1.bell: {note: 80, channel: 10, instrument: china1, articulation: bell}, china2.edge: {note: 81, channel: 10, instrument: china2, articulation: edge}, china2.bell: {note: 82, channel: 10, instrument: china2, articulation: bell}, perc.utility: {note: 92, channel: 10, instrument: perc, articulation: utility}, perc.cowbell: {note: 93, channel: 10, instrument: perc, articulation: cowbell}, perc.woodblock: {note: 94, channel: 10, instrument: perc, articulation: woodblock}, perc.click: {note: 51, channel: 10, instrument: perc, articulation: click}, perc.clap: {note: 50, channel: 10, instrument: perc, articulation: clap}, perc.metallic: {note: 88, channel: 10, instrument: perc, articulation: metallic}, stack.acoustic: {note: 85, channel: 10, instrument: stack, articulation: acoustic}, stack.glitch: {note: 89, channel: 10, instrument: stack, articulation: glitch}, stack.metallic: {note: 90, channel: 10, instrument: stack, articulation: metallic}, stack.clap: {note: 99, channel: 10, instrument: stack, articulation: clap}}
+    <<: {kick.acoustic: {note: 24, channel: 10, instrument: kick, articulation: acoustic}, kick.sleep: {note: 25, channel: 10, instrument: kick, articulation: sleep}, kick.dnb: {note: 26, channel: 10, instrument: kick, articulation: dnb}, kick.industrial: {note: 27, channel: 10, instrument: kick, articulation: industrial}, kick.trap: {note: 28, channel: 10, instrument: kick, articulation: trap}, snare1.metalcore: {note: 32, channel: 10, instrument: snare1, articulation: metalcore}, snare1.deftones: {note: 37, channel: 10, instrument: snare1, articulation: deftones}, snare1.sleep: {note: 42, channel: 10, instrument: snare1, articulation: sleep}, snare1.electro: {note: 48, channel: 10, instrument: snare1, articulation: electro}, snare1.dnb: {note: 47, channel: 10, instrument: snare1, articulation: dnb}, snare2.metalcore: {note: 32, channel: 10, instrument: snare1, articulation: metalcore, position_policy: note_range_quantized, position_notes: [32, 33, 34], position_upper_boundaries: [47, 95]}, snare2.deftones: {note: 37, channel: 10, instrument: snare1, articulation: deftones, position_policy: note_range_quantized, position_notes: [37, 38, 39], position_upper_boundaries: [47, 95]}, snare2.sleep: {note: 42, channel: 10, instrument: snare1, articulation: sleep, position_policy: note_range_quantized, position_notes: [42, 43, 44], position_upper_boundaries: [47, 95]}, snare2.electro: {note: 49, channel: 10, instrument: snare2, articulation: electro}, rim1.rimshot: {note: 35, channel: 10, instrument: rim1, articulation: rimshot}, rim1.cross: {note: 36, channel: 10, instrument: rim1, articulation: cross}, rim2.rimshot: {note: 40, channel: 10, instrument: rim2, articulation: rimshot}, rim2.cross: {note: 41, channel: 10, instrument: rim2, articulation: cross}, tom1.acoustic: {note: 56, channel: 10, instrument: tom1, articulation: acoustic}, tom2.acoustic: {note: 57, channel: 10, instrument: tom2, articulation: acoustic}, tom3.acoustic: {note: 58, channel: 10, instrument: tom3, articulation: acoustic}, tom1.sleep: {note: 60, channel: 10, instrument: tom1, articulation: sleep}, tom2.sleep: {note: 61, channel: 10, instrument: tom2, articulation: sleep}, tom3.sleep: {note: 62, channel: 10, instrument: tom3, articulation: sleep}, tom1.electronic: {note: 52, channel: 10, instrument: tom1, articulation: electronic}, tom2.electronic: {note: 53, channel: 10, instrument: tom2, articulation: electronic}, tom3.electronic: {note: 54, channel: 10, instrument: tom3, articulation: electronic}, tom4.acoustic: {note: 59, channel: 10, instrument: tom4, articulation: acoustic}, hh.bow: {note: 112, channel: 10, instrument: hh, articulation: bow_closed}, hh.edge: {note: 117, channel: 10, instrument: hh, articulation: edge_closed}, hh.pedal_close: {note: 66, channel: 10, instrument: hihat, articulation: pedal_close}, hh.pedal_splash: {note: 67, channel: 10, instrument: hihat, articulation: pedal_splash}, hh.electronic_closed: {note: 68, channel: 10, instrument: hihat, articulation: electronic_closed}, hh.electronic_open: {note: 69, channel: 10, instrument: hihat, articulation: electronic_open}, ride.bow: {note: 83, channel: 10, instrument: ride, articulation: bow}, ride.bell: {note: 84, channel: 10, instrument: ride, articulation: bell}, crash1.bow: {note: 72, channel: 10, instrument: crash1, articulation: bow}, crash1.edge: {note: 73, channel: 10, instrument: crash1, articulation: edge}, crash2.bow: {note: 74, channel: 10, instrument: crash2, articulation: bow}, crash2.edge: {note: 75, channel: 10, instrument: crash2, articulation: edge}, crash3.edge: {note: 76, channel: 10, instrument: crash3, articulation: edge}, splash1.acoustic: {note: 77, channel: 10, instrument: splash1, articulation: hit}, splash2.acoustic: {note: 78, channel: 10, instrument: splash2, articulation: hit}, china1.edge: {note: 79, channel: 10, instrument: china1, articulation: edge}, china1.bell: {note: 80, channel: 10, instrument: china1, articulation: bell}, china2.edge: {note: 81, channel: 10, instrument: china2, articulation: edge}, china2.bell: {note: 82, channel: 10, instrument: china2, articulation: bell}, perc.utility: {note: 92, channel: 10, instrument: perc, articulation: utility}, perc.cowbell: {note: 93, channel: 10, instrument: perc, articulation: cowbell}, perc.woodblock: {note: 94, channel: 10, instrument: perc, articulation: woodblock}, perc.click: {note: 51, channel: 10, instrument: perc, articulation: click}, perc.clap: {note: 50, channel: 10, instrument: perc, articulation: clap}, perc.metallic: {note: 88, channel: 10, instrument: perc, articulation: metallic}, stack.acoustic: {note: 85, channel: 10, instrument: stack, articulation: acoustic}, stack.progressive_custom: {note: 86, channel: 10, instrument: stack, articulation: progressive_custom}, hh.edge_half: {note: 121, channel: 10, instrument: hh, articulation: edge_half}, hh.edge_closed: {note: 117, channel: 10, instrument: hh, articulation: edge_closed}, stack.glitch: {note: 89, channel: 10, instrument: stack, articulation: glitch}, stack.metallic: {note: 90, channel: 10, instrument: stack, articulation: metallic}, stack.clap: {note: 99, channel: 10, instrument: stack, articulation: clap}}
+    # Keep each capture's canonical mid note as the ordinary export identity;
+    # the runtime selects the adjacent Center/Mid/Edge notes only when the raw
+    # DDrum4 NOTE P range carries an actual position.
+    snare2.metalcore: {note: 33, channel: 10, instrument: snare2, articulation: metalcore, position_policy: note_range_quantized, position_notes: [32, 33, 34], position_targets: [snare1.metalcore, snare2.metalcore, snare1.metalcore_edge], position_upper_boundaries: [47, 95]}
+    snare2.deftones: {note: 38, channel: 10, instrument: snare2, articulation: deftones, position_policy: note_range_quantized, position_notes: [37, 38, 39], position_targets: [snare1.deftones, snare2.deftones, snare1.deftones_edge], position_upper_boundaries: [47, 95]}
+    snare2.sleep: {note: 43, channel: 10, instrument: snare2, articulation: sleep, position_policy: note_range_quantized, position_notes: [42, 43, 44], position_targets: [snare1.sleep, snare2.sleep, snare1.sleep_edge], position_upper_boundaries: [47, 95]}
     snare1.industrial: {note: 55, channel: 10, instrument: snare1, articulation: industrial}
     snare1.electro: {note: 48, channel: 10, instrument: snare1, articulation: electro}
+    snare1.metalcore_edge: {note: 34, channel: 10, instrument: snare1, articulation: metalcore_edge}
+    snare1.deftones_edge: {note: 39, channel: 10, instrument: snare1, articulation: deftones_edge}
+    snare1.sleep_edge: {note: 44, channel: 10, instrument: snare1, articulation: sleep_edge}
+    rim_sleep.rimshot: {note: 45, channel: 10, instrument: rim, articulation: sleep_rimshot}
+    rim_sleep.cross: {note: 46, channel: 10, instrument: rim, articulation: sleep_side_stick}
+    snare_layer.deftones_sd02: {note: 100, channel: 10, instrument: snare_layer, articulation: deftones_sd02}
+    snare_layer.deftones_sd30: {note: 101, channel: 10, instrument: snare_layer, articulation: deftones_sd30}
+    snare_layer.sleep_snare8: {note: 102, channel: 10, instrument: snare_layer, articulation: sleep_snare8}
+    snare_layer.sleep_snare7: {note: 103, channel: 10, instrument: snare_layer, articulation: sleep_snare7}
     tom4.sleep: {note: 63, channel: 10, instrument: tom4, articulation: sleep}
 # The installed r15 bank is one persistent renderer palette. Logical scenes
 # select resident Sound variations through output notes; they do not change the

@@ -18,18 +18,18 @@ records:
     emit: {physical: snare.head, expressions: [velocity]}
     physical: snare.head
     logical_target: snare.electronic
-    renderers: {sd3: {note: 40, channel: 10}, drumgizmo: {note: 50, channel: 10, instrument: snare, articulation: electronic}}
+    renderers: {sd3: {note: 40, channel: 10, controllers: [[4, 64]]}, drumgizmo: {note: 50, channel: 10, instrument: snare, articulation: electronic}}
   - scene: metal
     source: {id: edrumin, endpoint: test, channel: 1, primary: usb, deduplicate_din_copies: true}
     match: {source: edrumin, type: note, note: 40}
     emit: {physical: snare.head, expressions: [velocity]}
     physical: snare.head
     logical_target: snare.metal
-    renderers: {sd3: {note: 38, channel: 10}, drumgizmo: {note: 48, channel: 10, instrument: snare, articulation: metal}}
+    renderers: {sd3: {note: 38, layers: [100, 101], channel: 10}, drumgizmo: {note: 48, channel: 10, instrument: snare, articulation: metal}}
   - scene: electronic
     source: {id: edrumin, endpoint: test, channel: 1, primary: usb, deduplicate_din_copies: true}
     match: {source: edrumin, type: note, note: 40}
     emit: {physical: snare.head, expressions: [velocity]}
     physical: snare.head
     logical_target: snare.electronic
-    renderers: {sd3: {note: 40, channel: 10}, drumgizmo: {note: 50, channel: 10, instrument: snare, articulation: electronic}}
+    renderers: {sd3: {note: 40, channel: 10, controllers: [[4, 64]]}, drumgizmo: {note: 50, channel: 10, instrument: snare, articulation: electronic}}

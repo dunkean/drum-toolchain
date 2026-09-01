@@ -1,8 +1,8 @@
 kit: greg-hybrid-kit
 instruments:
   - {id: kick_main, kind: kick, source_owner: ddrum4, zones: [head]}
-  - {id: snare_main, kind: snare, source_owner: edrumin, zones: [head, rim], capabilities: [positional_sensing]}
-  - {id: snare_secondary, kind: snare, source_owner: ddrum4, zones: [head, rim]}
+  - {id: snare_main, kind: snare, source_owner: edrumin, zones: [head, rimshot, cross_stick], capabilities: [positional_sensing]}
+  - {id: snare_secondary, kind: snare, source_owner: ddrum4, zones: [head, rimshot, cross_stick], capabilities: [positional_sensing]}
   - {id: tom_1, kind: tom, source_owner: ddrum4, zones: [head]}
   - {id: tom_2, kind: tom, source_owner: ddrum4, zones: [head]}
   - {id: tom_3, kind: tom, source_owner: ddrum4, zones: [head]}

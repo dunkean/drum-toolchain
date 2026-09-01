@@ -162,6 +162,20 @@ def _provenance(source_sha256: str) -> dict[str, str]:
     return {"compiler_version": COMPILER_VERSION, "source_format": PROJECT_FORMAT, "source_sha256": source_sha256}
 
 
+def _source_contract_sha256(document: dict[str, Any]) -> str:
+    """Fingerprint only module-owned raw MIDI addresses, never host endpoints."""
+    contract = {
+        "sources": {
+            identifier: {"channel": source["channel"]}
+            for identifier, source in sorted(document["sources"].items())
+        },
+        "source_decoders": document["source_decoders"],
+        "native_control_map": document.get("native_control_map", {}),
+    }
+    canonical = json.dumps(contract, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
 def _has_unresolved_values(value: Any) -> bool:
     """Return whether a project still contains unsafe measured-value placeholders."""
     if isinstance(value, str):
@@ -178,15 +192,35 @@ def _firmware_lowering_reason(document: dict[str, Any], record: dict[str, Any]) 
 
     Keep this intentionally as narrow as ``project_mapping_header``: any
     change here must be accompanied by generator support and a golden test.
-    An exact raw Note is the only source decoder that currently becomes a
-    generated ``StateRoute``.
+    Exact Notes and explicitly positional Note ranges become generated
+    ``StateRoute`` rows. Ranges are expanded at build time so the AVR runtime
+    stays bounded and allocation-free.
     """
     matcher = record["match"].get("type")
     if matcher == "note":
         return None
+    if matcher == "note_range":
+        expressions = record.get("emit", {}).get("expressions", ())
+        if "position" not in expressions:
+            return "firmware note_range lowering requires an explicit position expression"
+        renderer = record.get("renderers", {}).get("ddrum4", {})
+        policy = renderer.get("position_policy")
+        if policy not in {None, "note_range_quantized"}:
+            return f"firmware positional Note range does not support renderer policy {policy!r}"
+        return None
     expression = _expression_route(document, record)
+    # An expression may intentionally exist only on the PC renderers.  An
+    # explicit unsupported DDrum4 target means "consume no firmware table
+    # entry", not "the whole live mapping is impossible to lower".  Keeping
+    # this opt-out explicit prevents an undeclared controller from being
+    # silently discarded while allowing, for example, eDRUMin CC16 position
+    # to reach SD3 without blocking the Arduino's note-only DDrum4 path.
+    if expression is not None:
+        ddrum_target = expression["targets"]["ddrum4"]
+        if (ddrum_target.get("status") == "unsupported" and
+                ddrum_target.get("event", {}).get("type") == "unsupported"):
+            return None
     if (matcher == "poly_aftertouch" and expression is not None and expression.get("expression") == "pressure"
-            and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
             and expression["targets"]["ddrum4"].get("event", {}).get("type") == "poly_aftertouch"
             and expression["targets"]["ddrum4"].get("event", {}).get("note_from") == "active_rendered_hit"):
         source, physical = record["source"]["id"], record["physical"]
@@ -199,12 +233,53 @@ def _firmware_lowering_reason(document: dict[str, Any], record: dict[str, Any]) 
             return None
         return "firmware pressure requires an exact primary Note decoder for its correlated physical event"
     if (matcher == "cc" and expression is not None and expression.get("expression") == "openness"
-            and expression["targets"]["ddrum4"].get("status") in {"measured", "user-confirmed"}
             and expression["targets"]["ddrum4"].get("event", {}).get("type") == "quantized_note_p"):
         return None
     if matcher != "note":
         return f"firmware-project mapping lowers exact Note decoders only (got {matcher!r})"
     return None
+
+
+def _firmware_expression_readiness_blockers(document: dict[str, Any],
+                                            routes: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Return implemented expression routes that still need physical review.
+
+    Capability and readiness are deliberately separate. A planned CC4 to
+    Note-P route is a supported Uno feature and belongs in the generated plan,
+    but it must not make a live mapping flashable until its pedal endpoints and
+    zone thresholds are measured or explicitly confirmed.
+    """
+    blockers: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    expression_routes = document.get("expression_routing", ())
+    for record in routes:
+        if record["match"].get("type") not in {"cc", "poly_aftertouch"}:
+            continue
+        expression = _expression_route(document, record)
+        if expression is None or _firmware_lowering_reason(document, record) is not None:
+            continue
+        key = (expression["source"], expression["physical"], expression["expression"])
+        if key in seen:
+            continue
+        seen.add(key)
+        target = expression["targets"]["ddrum4"]
+        if (target.get("status") == "unsupported" and
+                target.get("event", {}).get("type") == "unsupported"):
+            continue
+        if target.get("status") in {"measured", "user-confirmed"}:
+            continue
+        try:
+            index = expression_routes.index(expression)
+        except ValueError:
+            index = len(blockers)
+        blockers.append({
+            "id": f"expression_routing[{index}].targets.ddrum4",
+            "reason": (
+                f"implemented {expression['expression']} route is {target.get('status')!r}; "
+                "measure or explicitly confirm its physical endpoints and zone thresholds"
+            ),
+        })
+    return blockers
 
 
 def _firmware_action_lowering_blockers(document: dict[str, Any]) -> list[dict[str, str]]:
@@ -231,7 +306,12 @@ def _firmware_action_lowering_blockers(document: dict[str, Any]) -> list[dict[st
 
 def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str, Any]],
                                  bank_facts: Any = None) -> dict[str, Any] | None:
-    """Lower one reviewed openness CC route into the bounded Uno contract."""
+    """Lower one complete openness CC route into the bounded Uno contract.
+
+    Planned values are emitted so the UI, simulator, and generated artifact can
+    expose the exact future firmware behavior. The independent readiness gate
+    keeps such a contract non-flashable until it is reviewed.
+    """
     bank_blocks: list[range] = []
     if bank_facts is not None:
         try:
@@ -249,13 +329,14 @@ def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str
         if expression is None or expression.get("expression") != "openness":
             continue
         target = expression["targets"]["ddrum4"]
-        if target.get("status") not in {"measured", "user-confirmed"}:
-            continue
         event = target.get("event", {})
         if event.get("type") != "quantized_note_p":
             continue
+        closed, opened = event.get("input_closed"), event.get("input_open")
         articulations = event.get("articulations")
-        if not isinstance(articulations, list):
+        if (not isinstance(closed, int) or not isinstance(opened, int) or
+                not 0 <= closed <= 127 or not 0 <= opened <= 127 or closed == opened or
+                not isinstance(articulations, list) or not articulations):
             continue
         # A simulator profile may deliberately model the route without an
         # installed bank.  Do not lower it to firmware in that case: a live
@@ -267,8 +348,15 @@ def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str
             return None
         for articulation in articulations:
             physical, notes = articulation.get("physical"), articulation.get("notes")
-            if not isinstance(physical, str) or not isinstance(notes, list) or not notes:
-                raise RigCompilerError("reviewed DDrum4 hi-hat quantization has an invalid articulation")
+            boundaries = articulation.get("upper_boundaries")
+            if (not isinstance(physical, str) or not isinstance(notes, list) or not notes or
+                    not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1 or
+                    not all(isinstance(note, int) and 0 <= note <= 127 for note in notes) or
+                    not all(isinstance(boundary, int) and 0 <= boundary < 127 for boundary in boundaries) or
+                    any(right <= left for left, right in zip(boundaries, boundaries[1:]))):
+                if target.get("status") in {"measured", "user-confirmed"}:
+                    raise RigCompilerError("reviewed DDrum4 hi-hat quantization has an invalid articulation")
+                return None
             matching = [item for item in routes if item["match"].get("type") == "note" and
                         item["source"]["id"] == record["source"]["id"] and item["physical"] == physical]
             if not matching:
@@ -281,11 +369,13 @@ def _firmware_hihat_quantization(document: dict[str, Any], routes: list[dict[str
             if bank_facts is not None and not any(all(note in block for note in notes) for block in bank_blocks):
                 raise RigCompilerError(f"reviewed DDrum4 hi-hat quantization for {physical!r} spans multiple DDrum4 Sound/Note-P blocks")
         return {
+            "status": target.get("status"),
+            **({"reason": target["reason"]} if target.get("reason") else {}),
             "source": record["source"]["id"],
             "source_channel": record["source"]["channel"],
             "input_cc": record["match"]["cc"],
-            "input_closed": event.get("input_closed"),
-            "input_open": event.get("input_open"),
+            "input_closed": closed,
+            "input_open": opened,
             "articulations": articulations,
         }
     return None
@@ -307,6 +397,20 @@ def _expression_route(document: dict[str, Any], record: dict[str, Any]) -> dict[
 def _runtime_expression_reason(document: dict[str, Any], record: dict[str, Any], target: str) -> str | None:
     """Return why a raw expression cannot be loaded for one PC renderer."""
     matcher = record["match"].get("type")
+    if matcher == "note_range" and "position" in record.get("emit", {}).get("expressions", ()):
+        if target == "drumgizmo":
+            renderer = record.get("renderers", {}).get("drumgizmo", {})
+            if (renderer.get("position_policy") == "note_range_quantized"
+                    and renderer.get("position_notes")
+                    and renderer.get("position_upper_boundaries")):
+                return None
+            return "positional Note range has no declared DrumGizmo quantizer"
+        if target == "sd3" and record.get("renderers", {}).get("sd3", {}).get("position_cc") is None:
+            # A positional physical surface may deliberately become a
+            # non-positional logical sound (for example Tom4). The hit stays
+            # valid; only the optional position expression is dropped.
+            return None
+        return None
     if matcher not in {"cc", "poly_aftertouch"}:
         return None
     route = _expression_route(document, record)
@@ -317,13 +421,19 @@ def _runtime_expression_reason(document: dict[str, Any], record: dict[str, Any],
         return f"expression target is {target_config['status']!r}"
     event = target_config["event"]
     if matcher == "poly_aftertouch" and route["expression"] == "pressure":
-        if target != "sd3":
-            return "this runtime has no measured pressure route for the selected renderer"
+        if target not in {"sd3", "drumgizmo"}:
+            return "this runtime has no reviewed pressure route for the selected renderer"
         if event.get("type") != "poly_aftertouch" or event.get("note_from") != "active_rendered_hit":
             return "pressure target is not active-hit poly-aftertouch"
         return None
+    if matcher == "cc" and route["expression"] == "position":
+        if target != "sd3":
+            return "this runtime implements positional CC passthrough only for SD3"
+        if event.get("type") != "cc" or event.get("transform") != "passthrough":
+            return "position target is not a passthrough CC event"
+        return None
     if matcher != "cc" or route["expression"] != "openness":
-        return "this runtime implements only CC openness and active-hit pressure expression routes"
+        return "this runtime implements CC openness/position and active-hit pressure expression routes"
     if target == "sd3":
         if event.get("type") != "cc" or event.get("transform") != "passthrough":
             return "expression target is not a passthrough CC event"
@@ -335,6 +445,33 @@ def _runtime_expression_reason(document: dict[str, Any], record: dict[str, Any],
     else:
         return "unknown runtime renderer"
     return None
+
+
+def _runtime_expression_readiness_reason(
+    document: dict[str, Any], record: dict[str, Any], target: str,
+) -> str | None:
+    """Return only expression failures that prevent the selected renderer.
+
+    An explicitly unsupported renderer capability remains visible in the
+    capability report, but does not make an otherwise complete note-only
+    renderer unusable. Positional Note ranges are likewise a supported hit
+    path for DrumGizmo even though their continuous position is intentionally
+    dropped.
+    """
+    reason = _runtime_expression_reason(document, record, target)
+    if reason is None:
+        return None
+    matcher = record["match"].get("type")
+    if (target == "drumgizmo" and matcher == "note_range"
+            and "position" in record.get("emit", {}).get("expressions", ())):
+        return None
+    declared = _expression_route(document, record)
+    if declared is not None:
+        target_config = declared["targets"][target]
+        if (target_config.get("status") == "unsupported"
+                and target_config.get("event", {}).get("type") == "unsupported"):
+            return None
+    return reason
 
 
 def _expression_capability_report(document: dict[str, Any], routes: list[dict[str, Any]],
@@ -358,6 +495,11 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
             declared_name = "ddrum4" if name == "arduino_ddrum4" else name
             target = dict(declared["targets"][declared_name])
             if name == "arduino_ddrum4":
+                if (target.get("status") == "unsupported" and
+                        target.get("event", {}).get("type") == "unsupported"):
+                    return {"status": "unsupported",
+                            "reason": target.get("reason", "explicitly unsupported on the DDrum4 target"),
+                            "declared": target}
                 reason = _firmware_lowering_reason(document, record)
                 return ({"status": "unsupported", "reason": reason, "declared": target}
                         if reason is not None else {"status": "supported", "event": target["event"],
@@ -382,11 +524,14 @@ def _expression_capability_report(document: dict[str, Any], routes: list[dict[st
         "raw_match": record["match"], "status": "unsupported",
         "reason": _firmware_lowering_reason(document, record),
     } for record in non_exact]
+    firmware_unready_rows = _firmware_expression_readiness_blockers(document, routes)
     return {**provenance, "format": "expression-capability-report/v1",
-            "status": "ready" if not firmware_rows else "planned", "hardware_io": "disabled",
+            "status": "ready" if not firmware_rows and not firmware_unready_rows else "planned", "hardware_io": "disabled",
             "summary": {"declared_expressions": len(rows), "supported_expressions": sum(row["status"] == "supported" for row in rows),
-                        "firmware_unlowerable_routes": len(firmware_rows)},
-            "expressions": rows, "firmware_unlowerable_routes": firmware_rows}
+                        "firmware_unlowerable_routes": len(firmware_rows),
+                        "firmware_unready_routes": len(firmware_unready_rows)},
+            "expressions": rows, "firmware_unlowerable_routes": firmware_rows,
+            "firmware_unready_routes": firmware_unready_rows}
 
 
 def validate_project(path: Path) -> Compilation:
@@ -411,6 +556,7 @@ def validate_project(path: Path) -> Compilation:
 def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any]],
                bank_facts: Any = None) -> dict[str, Any]:
     provenance = _provenance(digest)
+    source_contract_sha256 = _source_contract_sha256(document)
     if document.get("ddti_base_dump"):
         # The input is identified, not parsed, copied, or claimed usable.
         provenance["base_dump"] = document["ddti_base_dump"]
@@ -421,38 +567,40 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         for row in expression_report["firmware_unlowerable_routes"]
     ]
     firmware_lowering_blockers.extend(_firmware_action_lowering_blockers(document))
-    firmware_unlowerable = bool(firmware_lowering_blockers)
+    firmware_readiness_blockers = list(expression_report["firmware_unready_routes"])
+    firmware_blocked = bool(firmware_lowering_blockers or firmware_readiness_blockers)
     runtime_expressions_unlowered = any(
-        _runtime_expression_reason(document, record, target) is not None
+        _runtime_expression_readiness_reason(document, record, target) is not None
         for target in ("sd3", "drumgizmo") for record in routes
-        if record["match"].get("type") in {"cc", "poly_aftertouch"}
+        if record["match"].get("type") in {"note_range", "cc", "poly_aftertouch"}
     )
     runtime_target_status = {
-        target: ("planned" if unresolved or any(_runtime_expression_reason(document, record, target) is not None
-                                                   for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"})
+        target: ("planned" if unresolved or any(_runtime_expression_readiness_reason(document, record, target) is not None
+                                                   for record in routes if record["match"].get("type") in {"note_range", "cc", "poly_aftertouch"})
                  else "ready")
         for target in ("sd3", "drumgizmo")
     }
     sd3_expressions_unlowered = any(
-        _runtime_expression_reason(document, record, "sd3") is not None
-        for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"}
+        _runtime_expression_readiness_reason(document, record, "sd3") is not None
+        for record in routes if record["match"].get("type") in {"note_range", "cc", "poly_aftertouch"}
     )
     drumgizmo_expressions_unlowered = any(
-        _runtime_expression_reason(document, record, "drumgizmo") is not None
-        for record in routes if record["match"].get("type") in {"cc", "poly_aftertouch"}
+        _runtime_expression_readiness_reason(document, record, "drumgizmo") is not None
+        for record in routes if record["match"].get("type") in {"note_range", "cc", "poly_aftertouch"}
     )
     deployment = document.get("deployment", "simulation")
-    live_ready = deployment == "live" and not unresolved and not firmware_unlowerable
+    validation_stage = document.get("validation_stage", "not-declared")
+    live_ready = deployment == "live" and not unresolved and not firmware_blocked
     control_bus = document.get("control_bus")
     logical_control_live = bool(live_ready and isinstance(control_bus, dict)
                                 and control_bus.get("status") == "user-confirmed")
     report_status = {
         "runtime-profile": "planned" if unresolved or runtime_expressions_unlowered else "ready", "ddrum4-routing-plan": "planned",
-        "ddrum4-routing-contract": "planned", "firmware-project-mapping": "ready" if live_ready else ("planned" if unresolved or firmware_unlowerable else ("simulation-only" if deployment == "simulation" else "planned")),
+        "ddrum4-routing-contract": "planned", "firmware-project-mapping": "ready" if live_ready else ("planned" if unresolved or firmware_blocked else ("simulation-only" if deployment == "simulation" else "planned")),
         "sd3-midimap": "user-confirmed" if not sd3_expressions_unlowered else "planned",
         "drumgizmo-midimap": "planned" if unresolved or drumgizmo_expressions_unlowered else "ready",
         "sd3-megakit-map": "user-confirmed" if not sd3_expressions_unlowered else "planned",
-        "ddrum4-bank-plan": "planned", "virtual-kit-map": "planned" if unresolved or firmware_unlowerable or runtime_expressions_unlowered else "ready",
+        "ddrum4-bank-plan": "planned", "virtual-kit-map": "planned" if unresolved or firmware_blocked or runtime_expressions_unlowered else "ready",
         "expression-capability-report": expression_report["status"],
         "ddti-preset": "planned" if document.get("ddti_base_dump") else "unresolved",
         "ddti-role-template": "simulation-only" if deployment == "simulation" else "ready",
@@ -461,6 +609,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     report = {**provenance, "format": "rig-project-report/v1", "project": document.get("project", "unnamed-rig"),
               "artifacts": [{"name": key, "status": value} for key, value in report_status.items()],
               "route_count": len(routes), "deployment": deployment,
+              "validation_stage": validation_stage,
               "unresolved_measurements": unresolved, "hardware_io": "disabled"}
     # Keep the complete validated declarative model in the runtime artifact.
     # ``records`` remains a compatibility/index view, never the sole source of
@@ -468,6 +617,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     # source decoder metadata without loss.
     runtime = {**provenance, "format": "rig-runtime-profile/v1", "status": report_status["runtime-profile"],
                "project": document.get("project", "unnamed-rig"), "deployment": deployment,
+               "validation_stage": validation_stage,
                "target_status": runtime_target_status,
                "rig": document["rig"], "physical_bindings": document.get("physical_bindings", {}),
                "state": document["state"], "logical_control_protocol": document["logical_control_protocol"],
@@ -485,8 +635,10 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     contract = {**provenance, "format": "ddrum4-routing-contract/v1", "status": "planned", "routing_plan": "ddrum4-routing-plan.json", "records": routes}
     firmware = {
         **provenance,
+        "source_contract_sha256": source_contract_sha256,
         "format": "ddrum4-firmware-project-mapping-plan/v1",
         "status": report_status["firmware-project-mapping"], "deployment": deployment,
+        "validation_stage": validation_stage,
         "state": document["state"],
         "ddrum4_output_channel": document["ddrum4_output_channel"],
         "logical_control_protocol": document["logical_control_protocol"],
@@ -495,6 +647,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "expression_routing": document.get("expression_routing", []),
         "records": routes,
         "lowering_blockers": firmware_lowering_blockers,
+        "readiness_blockers": firmware_readiness_blockers,
         "hardware_flash": "ready" if live_ready else "disabled",
     }
     hihat_quantization = _firmware_hihat_quantization(document, routes, bank_facts)
@@ -519,6 +672,10 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
                 continue
             render = route["renderers"][renderer]
             mapping = {"id": route["id"], "note": render["note"], "logical_target": route["logical_target"]}
+            if renderer == "sd3" and render.get("layers"):
+                mapping["layers"] = render["layers"]
+            if renderer == "sd3" and render.get("controllers"):
+                mapping["controllers"] = render["controllers"]
             if renderer == "drumgizmo":
                 logical_instrument, logical_articulation = route["logical_target"].rsplit(".", 1)
                 mapping.update({
@@ -527,8 +684,59 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
                     "capture_articulation": logical_articulation,
                 })
             mappings.append(mapping)
+        if renderer == "drumgizmo":
+            # A positional note grid may deliberately address capture-only
+            # articulations (for example the edge zones used by Snare 2).
+            # Publish those identities in the compiler-owned note map even
+            # though they have no direct physical route of their own.
+            target_notes: dict[str, int] = {}
+            note_targets: dict[int, str] = {}
+            for mapping in mappings:
+                logical_target = mapping["logical_target"]
+                note = mapping["note"]
+                target_notes.setdefault(logical_target, note)
+                note_targets.setdefault(note, logical_target)
+            for route in routes:
+                positional = route["renderers"][renderer]
+                if positional.get("position_policy") != "note_range_quantized":
+                    continue
+                for logical_target, note in zip(
+                    positional["position_targets"], positional["position_notes"], strict=True
+                ):
+                    existing_note = target_notes.get(logical_target)
+                    if existing_note is not None:
+                        if existing_note != note:
+                            raise RigCompilerError(
+                                f"DrumGizmo position target {logical_target!r} maps to both notes "
+                                f"{existing_note} and {note}"
+                            )
+                        continue
+                    existing_target = note_targets.get(note)
+                    if existing_target is not None and existing_target != logical_target:
+                        raise RigCompilerError(
+                            f"DrumGizmo position note {note} maps to both "
+                            f"{existing_target!r} and {logical_target!r}"
+                        )
+                    target_renderer = document["renderers"][renderer][logical_target]
+                    capture_instrument, capture_articulation = logical_target.rsplit(".", 1)
+                    mappings.append({
+                        "id": f"position-target.{logical_target}",
+                        "role": "position_target",
+                        "note": note,
+                        "logical_target": logical_target,
+                        "instrument": target_renderer["instrument"],
+                        "articulation": target_renderer["articulation"],
+                        "capture_instrument": capture_instrument,
+                        "capture_articulation": capture_articulation,
+                    })
+                    target_notes[logical_target] = note
+                    note_targets[note] = logical_target
+        readiness_blocked = any(
+            _runtime_expression_readiness_reason(document, route, target) is not None
+            for route in routes if route["match"].get("type") in {"note_range", "cc", "poly_aftertouch"}
+        )
         return {**provenance, "format": "drum-note-map/v1", "target": target,
-                "status": "planned" if unsupported_source_expressions else (report_status["sd3-midimap"] if target == "sd3" else report_status["drumgizmo-midimap"]),
+                "status": "planned" if readiness_blocked else (report_status["sd3-midimap"] if target == "sd3" else report_status["drumgizmo-midimap"]),
                 "source_renderer": renderer, "mappings": mappings,
                 "unsupported_source_expressions": unsupported_source_expressions}
     bank = {**provenance, "format": "ddrum4-bank-plan/v1", "status": "planned", "records": routes,
@@ -546,6 +754,7 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
     virtual_kit = _virtual_kit_map(provenance, document, routes, report_status["virtual-kit-map"], bank_facts)
     source_note_contract = {
         **provenance,
+        "source_contract_sha256": source_contract_sha256,
         "format": "rig-source-note-contract/v1",
         "project": document.get("project", "unnamed-rig"),
         "deployment": deployment,
@@ -602,8 +811,10 @@ def _artifacts(document: dict[str, Any], digest: str, routes: list[dict[str, Any
         "name": f"{document.get('project', 'rig')} stable source notes",
         "status": report_status["ddti-role-template"],
         "source_sha256": digest,
+        "source_contract_sha256": source_contract_sha256,
         "hardware_io": "disabled",
-        "rule": "This template changes only stable DDTi raw-note fields. Scene/VP remapping remains in Arduino/PC renderers.",
+        **({"channel": document["sources"]["ddti"]["channel"]} if "ddti" in document["sources"] else {}),
+        "rule": "This template changes only stable DDTi raw channel/note fields. Scene/VP remapping remains in Arduino/PC renderers.",
         "roles": ddti_roles,
         "staging_requirements": [
             "Use an explicit ddti-input-layout/v1 with real Input/Tip/Ring assignments.",
@@ -690,9 +901,16 @@ def _virtual_kit_map(provenance: dict[str, str], document: dict[str, Any], route
             "source": route["source"]["id"], "raw_match": route["match"], "physical": route["physical"],
             "logical_sound": route["logical_target"],
             "ddrum4": ddrum_target,
-            "sd3": {"channel": sd3.get("channel", 10), "note": sd3["note"]},
+            "sd3": {"channel": sd3.get("channel", 10), "note": sd3["note"],
+                    **({"layers": sd3["layers"]} if sd3.get("layers") else {}),
+                    **({"controllers": sd3["controllers"]} if sd3.get("controllers") else {})},
             "drumgizmo": {"channel": gizmo.get("channel", 10), "note": gizmo["note"],
-                           "instrument": gizmo["instrument"], "articulation": gizmo["articulation"]},
+                           "instrument": gizmo["instrument"], "articulation": gizmo["articulation"],
+                           **({"position_policy": gizmo["position_policy"],
+                               "position_notes": gizmo["position_notes"],
+                               "position_targets": gizmo["position_targets"],
+                               "position_upper_boundaries": gizmo["position_upper_boundaries"]}
+                              if gizmo.get("position_policy") == "note_range_quantized" else {})},
             "coverage": coverage,
         }
         physical_binding = document.get("physical_bindings", {}).get(route["physical"])
@@ -717,7 +935,12 @@ def _megakit_markdown(document: dict[str, Any], digest: str, routes: list[dict[s
                          and _runtime_expression_reason(document, route, "sd3") is None]
     unsupported = [route for route in routes if route["match"].get("type") in {"cc", "poly_aftertouch"}
                    and _runtime_expression_reason(document, route, "sd3") is not None]
-    lines.extend(f"| {r['id']} | {r['renderers']['sd3']['note']} | {r['logical_target']} |" for r in supported)
+    lines.extend(
+        f"| {r['id']} | "
+        + " + ".join(str(note) for note in [r["renderers"]["sd3"]["note"], *r["renderers"]["sd3"].get("layers", [])])
+        + f" | {r['logical_target']} |"
+        for r in supported
+    )
     if expression_routes:
         lines.extend(["", "## Active source expressions", "", "| Route | Raw matcher | SD3 event |", "| --- | --- | --- |"])
         lines.extend(f"| {route['id']} | {route['match'].get('type')} | configured expression route |" for route in expression_routes)

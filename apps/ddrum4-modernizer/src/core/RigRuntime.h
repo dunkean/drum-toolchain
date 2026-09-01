@@ -22,7 +22,15 @@ struct RuntimeDecoder {
   uint16_t source{}; PhysicalMatcher matcher{}; uint8_t first{}; uint8_t last{};
   std::string physical; bool velocity{}; bool position{};
 };
-struct RuntimeRenderer { std::string logical; uint8_t note{}; uint8_t channel{10}; uint8_t positionCc{255}; uint8_t controller{255}; };
+struct RuntimeFixedController { uint8_t controller{}; uint8_t value{}; };
+struct RuntimeRenderer {
+  std::string logical; uint8_t note{}; uint8_t channel{10}; uint8_t positionCc{255}; uint8_t controller{255};
+  std::array<RuntimeFixedController, 2> fixedControllers{}; uint8_t fixedControllerCount{};
+  std::array<uint8_t, 4> layers{}; uint8_t layerCount{};
+  std::array<uint8_t, 8> positionNotes{}; std::array<uint8_t, 7> positionUpperBoundaries{};
+  std::array<std::string, 8> positionTargets{};
+  uint8_t positionNoteCount{};
+};
 // DrumGizmo has no common continuous-hi-hat MIDI contract.  When a capture
 // proves discrete notes for each openness position, keep that conversion in
 // the profile instead of mutating the stable eDRUMin source notes.
@@ -61,7 +69,8 @@ struct RuntimeHealth { uint64_t received{}; uint64_t decoded{}; uint64_t rendere
 
 class RigRuntime {
  public:
-  static constexpr size_t maxOutputEvents = 3;
+  // Worst case: position CC, two fixed CCs, primary note and four layers.
+  static constexpr size_t maxOutputEvents = 8;
   explicit RigRuntime(const RuntimeProfile& profile);
   size_t process(std::string_view sourceId, const MidiEvent& input,
                  std::array<MidiEvent, maxOutputEvents>& output) noexcept;
@@ -77,7 +86,7 @@ class RigRuntime {
   uint8_t variable(size_t index) const noexcept;
  private:
   struct Seen { uint16_t source{0xffff}; MidiType type{}; uint8_t channel{}; uint8_t data1{}; uint8_t data2{}; uint64_t timestamp{}; bool valid{}; };
-  struct Active { uint8_t channel{}; uint8_t note{}; };
+  struct Active { uint8_t channel{}; std::array<uint8_t, 5> notes{}; uint8_t noteCount{}; };
   struct ActiveQueue { std::array<Active, 16> entries{}; uint8_t head{}; uint8_t size{}; uint16_t discardedOffs{}; };
   const RuntimeProfile& profile_; std::atomic<uint64_t> state_{};
   std::atomic<uint8_t> hihatOpenness_{};

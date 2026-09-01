@@ -1,0 +1,29 @@
+format: rig-runtime-profile/v1
+status: ready
+target_status: {sd3: ready, drumgizmo: planned}
+state:
+  scenes: [metal]
+  defaults: {scene: metal}
+logical_control_protocol:
+  scene: {channels: [14, 15], type: program_change}
+policies: {echo: measured_only}
+expression_routing:
+  - source: edrumin
+    physical: snare.head
+    expression: position
+    correlation: none
+    targets:
+      ddrum4: {status: unsupported, reason: unmeasured quantizer, event: {type: unsupported}}
+      sd3: {status: user-confirmed, event: {type: cc, channel: 10, cc: 16, transform: passthrough}}
+      drumgizmo: {status: unsupported, reason: note-only kit, event: {type: unsupported}}
+records:
+  - scene: metal
+    state_predicates: {}
+    source: {id: edrumin, endpoint: test, channel: 1, primary: usb}
+    match: {source: edrumin, type: cc, cc: 16}
+    emit: {physical: snare.head, expressions: [position], normalize: cc7}
+    physical: snare.head
+    logical_target: snare.head
+    renderers:
+      sd3: {note: 38, channel: 10, position_cc: 16}
+      drumgizmo: {note: 38, channel: 10, instrument: snare, articulation: head}
