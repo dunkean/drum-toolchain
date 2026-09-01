@@ -118,6 +118,34 @@ def capture_note(*, midi_port: str, audio_input: str, note: int, velocity: int, 
     return output
 
 
+def capture_chord(*, midi_port: str, audio_input: str, notes: tuple[int, ...], velocity: int,
+                  output: Path, channel: int = 1,
+                  controllers: tuple[tuple[int, int], ...] = (),
+                  duration: float = 3.0, gate: float = 0.1, preroll: float = 0.1,
+                  sample_rate: int = 44100, channels: int = 1) -> Path:
+    """Record one simultaneous, velocity-matched MIDI chord."""
+    if not notes or len(set(notes)) != len(notes) or any(not 0 <= note <= 127 for note in notes):
+        raise ValueError("notes must be a non-empty tuple of unique MIDI notes in 0..127")
+    if not 1 <= velocity <= 127 or not 1 <= channel <= 16:
+        raise ValueError("velocity must be 1..127 and channel 1..16")
+    if duration <= 0 or gate < 0 or preroll < 0 or not 1 <= channels <= 4:
+        raise ValueError("invalid capture duration, gate, preroll or channel count")
+    if any(not 0 <= control <= 127 or not 0 <= value <= 127 for control, value in controllers):
+        raise ValueError("controller numbers and values must be in 0..127")
+    if output.exists():
+        raise FileExistsError(f"raw capture already exists and will not be overwritten: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    frames = round((duration + preroll) * sample_rate)
+    if not audio_input.startswith("loopback:"):
+        raise ValueError("composite capture currently requires an explicit loopback: audio endpoint")
+    return _capture_loopback_chord(
+        midi_port=midi_port, query=audio_input.split(":", 1)[1], notes=notes,
+        velocity=velocity, output=output, channel=channel,
+        controllers=controllers, frames=frames, duration=duration, gate=gate,
+        preroll=preroll, sample_rate=sample_rate, channels=channels,
+    )
+
+
 def _emit_note(
     midi_port: str, note: int, velocity: int, channel: int,
     controllers: tuple[tuple[int, int], ...], gate: float, duration: float,
@@ -130,6 +158,22 @@ def _emit_note(
         port.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
         time.sleep(min(gate, duration))
         port.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
+
+
+def _emit_chord(
+    midi_port: str, notes: tuple[int, ...], velocity: int, channel: int,
+    controllers: tuple[tuple[int, int], ...], gate: float, duration: float,
+) -> None:
+    with mido.open_output(midi_port) as port:
+        for control, value in controllers:
+            port.send(mido.Message("control_change", channel=channel - 1, control=control, value=value))
+        if controllers:
+            time.sleep(0.01)
+        for note in notes:
+            port.send(mido.Message("note_on", channel=channel - 1, note=note, velocity=velocity))
+        time.sleep(min(gate, duration))
+        for note in reversed(notes):
+            port.send(mido.Message("note_off", channel=channel - 1, note=note, velocity=0))
 
 
 def _capture_loopback(
@@ -196,13 +240,78 @@ def _capture_loopback(
     return output
 
 
+def _capture_loopback_chord(
+    *, midi_port: str, query: str, notes: tuple[int, ...], velocity: int, output: Path,
+    channel: int, controllers: tuple[tuple[int, int], ...], frames: int,
+    duration: float, gate: float, preroll: float, sample_rate: int, channels: int,
+) -> Path:
+    """Capture a simultaneous MIDI chord through a Windows WASAPI loopback."""
+    import soundcard as sc
+
+    matches = [
+        microphone for microphone in sc.all_microphones(include_loopback=True)
+        if microphone.isloopback and query.lower() in microphone.name.lower()
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"expected one loopback device containing {query!r}, found {[item.name for item in matches]}")
+    trigger_error: list[BaseException] = []
+    recorder_ready = threading.Event()
+    recorder_cancelled = threading.Event()
+
+    def trigger() -> None:
+        try:
+            recorder_ready.wait()
+            if recorder_cancelled.is_set():
+                return
+            time.sleep(preroll)
+            _emit_chord(midi_port, notes, velocity, channel, controllers, gate, duration)
+        except BaseException as error:
+            trigger_error.append(error)
+
+    worker = threading.Thread(target=trigger, name="drum-sampler-midi-chord-trigger")
+    worker.start()
+    try:
+        with warnings.catch_warnings(record=True) as capture_warnings:
+            warnings.simplefilter("always", sc.SoundcardRuntimeWarning)
+            with matches[0].recorder(
+                samplerate=sample_rate,
+                channels=list(range(channels)),
+                blocksize=WASAPI_LOOPBACK_BLOCKSIZE,
+            ) as recorder:
+                recorder_ready.set()
+                recording = recorder.record(numframes=frames)
+    except BaseException:
+        recorder_cancelled.set()
+        recorder_ready.set()
+        raise
+    finally:
+        worker.join()
+    if trigger_error:
+        raise RuntimeError("MIDI chord trigger failed during loopback capture") from trigger_error[0]
+    discontinuities = [
+        item for item in capture_warnings
+        if issubclass(item.category, sc.SoundcardRuntimeWarning)
+    ]
+    if discontinuities:
+        details = "; ".join(str(item.message) for item in discontinuities)
+        raise RuntimeError(
+            f"WASAPI loopback reported {len(discontinuities)} audio discontinuity warning(s); "
+            f"the raw chord take was rejected ({details})"
+        )
+    _write_raw_master(output, sample_rate, recording)
+    return output
+
+
 def _write_raw_master(output: Path, sample_rate: int, samples: np.ndarray) -> None:
     """Write an unprocessed capture in a float32 WAV container.
 
     This preserves the precision supplied by the capture backend. The actual
     converter resolution remains determined by the connected interface.
     """
-    wavfile.write(output, sample_rate, np.asarray(samples, dtype=np.float32))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_suffix(output.suffix + ".partial")
+    wavfile.write(partial, sample_rate, np.asarray(samples, dtype=np.float32))
+    partial.replace(output)
 
 
 def _float_to_pcm(samples: np.ndarray) -> np.ndarray:

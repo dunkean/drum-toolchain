@@ -3,9 +3,12 @@
 schema_version: 1
 kind: sd3-megakit-plan
 id: greg_hybrid_r15_megakit
-sd3p_output: "captures/sd3/Greg_Hybrid_r15_MegaKit_v2.sd3p"
+sd3p_output: "captures/sd3/Greg_Hybrid_r15_MegaKit_v23_approved.sd3p"
+sd3p_sha256: "ecc54520557bdbc970051e7a391b6b7da611955bfe62132f00b9ee87c1474a20"
+deterministic_build_sha256: "b1c2d31176e18b6ec242bc2f33aa800427b810880feba8d8ac6a7d062bdb50be"
+approval_note: "SD3-normalized save approved by the user after the complete v23 calibration and composite-snare audition. The deterministic recipe build has identical logical note ownership; this immutable copy prevents further SD3 UI autosaves from changing capture identity."
 build_recipe: "profiles/sd3/metalcore-r15-megakit-build.yaml"
-status: generated-local-validation-required
+status: captured-and-internally-validated
 base_preset:
   source: "captures/sd3/Kit_metalcore_4_capture.sd3p"
   library: Modern Metal EZX
@@ -17,7 +20,7 @@ sources:
   electronic_edge: {product: "Electronic Edge EZX", role: "DnB, industrial and electronic drums"}
   hip_hop: {product: "Hip Hop EZX", role: "808, clap and compact electronic percussion"}
   metal_foundry: {product: "Metal Foundry SDX", role: "optional heavier acoustic alternate"}
-  progressive_foundry: {product: "Progressive Foundry SDX", role: "Sleep Token snare"}
+  progressive_foundry: {product: "Progressive Foundry SDX", role: "Sleep Token snare and 20-inch/17-inch/13-inch Custom Stack"}
 mixer:
   buses:
     - {id: kit_close, sd3_bus: "0..3", purpose: "Modern Metal close microphones and acoustic groups"}
@@ -36,22 +39,53 @@ mixer:
     - "Route every capture through print with fixed gain; disable master limiting and global reverb while capturing."
     - "Keep CC4 on channel 10 for hi-hat bow/edge; do not replace it with discrete raw source notes."
     - "One MegaKit contains all rows below; scenes/palettes select notes externally and never load another SD3 kit."
+drumgizmo_composites:
+  - target: snare1.deftones
+    sources: [snare1.deftones, snare_layer.deftones_sd02, snare_layer.deftones_sd30]
+    rule: "Match velocity and round-robin index; trigger all source notes simultaneously and capture one coherent attack without post normalization."
+  - target: snare1.sleep
+    sources: [snare1.sleep, snare_layer.sleep_snare7]
+    rule: "Match velocity and round-robin index and capture the simultaneous chord; Snare8 remains independently captured but is excluded because the closed-loop probe measured attack cancellation."
+drumgizmo_instrument_groups:
+  # DrumGizmo groups are bidirectional chokes: every new physical hi-hat hit
+  # fades the previous member. This prevents captured open tails from stacking
+  # and gives pedal-close/pedal-splash the same playable role as the SD3 CC4 hat.
+  hihat:
+    - hh.bow_closed
+    - hh.bow_quarter
+    - hh.bow_half
+    - hh.bow_three_quarter
+    - hh.bow_open
+    - hh.edge_closed
+    - hh.edge_third
+    - hh.edge_half
+    - hh.edge_two_thirds
+    - hh.edge_open
+    - hh.pedal_close
+    - hh.pedal_splash
+    - hh.electronic_closed
+    - hh.electronic_open
 articulations:
   - {logical: kick.acoustic, note: 24, source: modern_metal, capture: true, velocities: dense7, rr: 4}
   - {logical: kick.sleep, note: 25, source: death_darkness, selection: "KD03 Felt", capture: true, velocities: dense7, rr: 3}
   - {logical: kick.dnb, note: 26, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: kick.industrial, note: 27, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
   - {logical: kick.trap, note: 28, source: electronic_edge, selection: "KD3_16", capture: true, velocities: dense5, rr: 2}
-  - {logical: snare1.metalcore, note: 32, source: modern_metal, capture: true, velocities: dense7, rr: 4}
-  - {logical: snare2.metalcore, note: 33, source: modern_metal, capture: true, velocities: dense7, rr: 3}
-  - {logical: rim1.rimshot, note: 35, source: modern_metal, capture: true, velocities: dense5, rr: 3}
-  - {logical: rim1.cross, note: 36, source: modern_metal, capture: true, velocities: dense4, rr: 2}
-  - {logical: snare1.deftones, note: 37, source: death_darkness, selection: "Djentle Beast snare", capture: true, velocities: dense7, rr: 3}
-  - {logical: snare2.deftones, note: 38, source: death_darkness, selection: "Djentle Beast snare alternate articulation", capture: true, velocities: dense7, rr: 3}
-  - {logical: rim2.rimshot, note: 40, source: death_darkness, capture: true, velocities: dense5, rr: 3}
-  - {logical: rim2.cross, note: 41, source: death_darkness, capture: true, velocities: dense4, rr: 2}
-  - {logical: snare1.sleep, note: 42, source: progressive_foundry, selection: "Snare7 center", capture: true, velocities: dense7, rr: 3}
-  - {logical: snare2.sleep, note: 43, source: progressive_foundry, selection: "Snare7 alternate", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare1.metalcore, note: 32, source: modern_metal, articulation: center, selection: snareR, capture: true, velocities: dense7, rr: 4}
+  - {logical: snare2.metalcore, note: 33, source: modern_metal, articulation: mid, selection: snareFO, capture: true, velocities: dense7, rr: 3}
+  - {logical: snare1.metalcore_edge, note: 34, source: modern_metal, articulation: edge, selection: snareRO, capture: true, velocities: dense7, rr: 3}
+  - {logical: rim1.rimshot, note: 35, source: modern_metal, articulation: rimshot, selection: snareFX, capture: true, velocities: dense5, rr: 3}
+  - {logical: rim1.cross, note: 36, source: modern_metal, articulation: side_stick, selection: snareSL, capture: true, velocities: dense4, rr: 2}
+  - {logical: snare1.deftones, note: 37, source: death_darkness, articulation: center, selection: "SD11_01 Center base; SD02/SD30 are separate verified composite layers", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare2.deftones, note: 38, source: death_darkness, articulation: mid, selection: "SD11_01 snareFO", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare1.deftones_edge, note: 39, source: death_darkness, articulation: edge, selection: "SD11_01 snareRO", capture: true, velocities: dense7, rr: 3}
+  - {logical: rim2.rimshot, note: 40, source: death_darkness, articulation: rimshot, selection: "SD11_01 snareFX", capture: true, velocities: dense5, rr: 3}
+  - {logical: rim2.cross, note: 41, source: death_darkness, articulation: side_stick, selection: "SD11_01 snareSL", capture: true, velocities: dense4, rr: 2}
+  - {logical: snare1.sleep, note: 42, source: progressive_foundry, articulation: center, selection: "SD01_01 Center base; Snare8/Snare7 are separate verified composite layers", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare2.sleep, note: 43, source: progressive_foundry, articulation: mid, selection: "SD01_01 snareFO", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare1.sleep_edge, note: 44, source: progressive_foundry, articulation: edge, selection: "SD01_01 snareRO", capture: true, velocities: dense7, rr: 3}
+  - {logical: rim_sleep.rimshot, note: 45, source: progressive_foundry, articulation: rimshot, selection: "SD01_01 snareFX", capture: true, velocities: dense5, rr: 3}
+  - {logical: rim_sleep.cross, note: 46, source: progressive_foundry, articulation: side_stick, selection: "SD01_01 snareSL", capture: true, velocities: dense4, rr: 2}
   - {logical: snare1.dnb, note: 47, source: electronic_edge, selection: "SD1_34 routed to DnB Snares", capture: true, velocities: dense5, rr: 2}
   - {logical: snare1.electro, note: 48, source: electronic_edge, selection: "SD2_35 routed to Electro Drums", capture: true, velocities: dense5, rr: 2}
   - {logical: snare2.electro, note: 49, source: electronic_edge, capture: true, velocities: dense5, rr: 2}
@@ -92,6 +126,7 @@ articulations:
     capture_variants:
       - {articulation: edge_closed, controllers: [[4, 127]], drumgizmo_note: 117}
       - {articulation: edge_third, controllers: [[4, 85]], drumgizmo_note: 118}
+      - {articulation: edge_half, controllers: [[4, 64]], drumgizmo_note: 121}
       - {articulation: edge_two_thirds, controllers: [[4, 42]], drumgizmo_note: 119}
       - {articulation: edge_open, controllers: [[4, 0]], drumgizmo_note: 120}
   - {logical: hh.pedal_close, note: 66, source: modern_metal, capture: true, velocities: dense4, rr: 2}
@@ -112,6 +147,7 @@ articulations:
   - {logical: ride.bow, note: 83, source: modern_metal, capture: true, velocities: dense5, rr: 3}
   - {logical: ride.bell, note: 84, source: modern_metal, capture: true, velocities: dense4, rr: 3}
   - {logical: stack.acoustic, note: 85, source: modern_metal, capture: true, velocities: dense4, rr: 2}
+  - {logical: stack.progressive_custom, note: 86, source: progressive_foundry, selection: "20-inch/17-inch/13-inch Custom Stack (Spock, Crash4-5)", capture: true, velocities: dense4, rr: 2}
   - {logical: perc.metallic, note: 88, source: hip_hop, selection: "Anvil", capture: true, velocities: dense4, rr: 1}
   - {logical: stack.glitch, note: 89, source: electronic_edge, capture: true, velocities: dense4, rr: 1}
   - {logical: perc.utility, note: 92, source: hip_hop, selection: "cowbell", capture: true, velocities: dense4, rr: 1}
@@ -119,18 +155,18 @@ articulations:
   - {logical: perc.woodblock, note: 93, source: hip_hop, capture: true, velocities: dense4, rr: 1}
   - {logical: stack.metallic, note: 88, source: hip_hop, selection: "same SD3 note/sample as perc.metallic", capture: false, shared_with: perc.metallic}
   - {logical: stack.clap, note: 99, source: hip_hop, capture: false, shared_with: perc.clap}
+  - {logical: snare_layer.deftones_sd02, note: 100, source: death_darkness, articulation: center_layer, selection: "SD02 standalone layer", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare_layer.deftones_sd30, note: 101, source: death_darkness, articulation: center_layer, selection: "SD30 standalone layer", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare_layer.sleep_snare8, note: 102, source: progressive_foundry, articulation: center_layer, selection: "Snare8 standalone layer", capture: true, velocities: dense7, rr: 3}
+  - {logical: snare_layer.sleep_snare7, note: 103, source: progressive_foundry, articulation: center_layer, selection: "Snare7 standalone layer", capture: true, velocities: dense7, rr: 3}
 velocity_sets:
   dense7: [24, 40, 56, 72, 88, 104, 120]
   dense5: [24, 48, 72, 96, 120]
   dense4: [40, 64, 88, 112]
-positional_reserve:
-  - {logical: snare1.metalcore_edge, note: 34, source: modern_metal, status: not-routed-until-pad-measurement}
-  - {logical: snare1.deftones_edge, note: 39, source: death_darkness, status: not-routed-until-pad-measurement}
-  - {logical: snare1.sleep_edge, note: 44, source: progressive_foundry, status: not-routed-until-pad-measurement}
 scenes:
   metalcore: {base: modern_metal, palettes: [vp1_snare1, vp2_flex, vp3_percussion_family, vp4_percussion_variant]}
-  sleep_token: {base: progressive_foundry, overrides: [kick.sleep, snare1.sleep, snare2.sleep, tom1.sleep, tom2.sleep, tom3.sleep, tom4.sleep]}
-  deftones: {base: modern_metal, overrides: [snare1.deftones, snare2.deftones]}
+  sleep_token: {base: progressive_foundry, overrides: [kick.sleep, snare1.sleep, snare2.sleep, snare1.sleep_edge, rim_sleep.rimshot, rim_sleep.cross, tom1.sleep, tom2.sleep, tom3.sleep, tom4.sleep, stack.progressive_custom]}
+  deftones: {base: modern_metal, overrides: [snare1.deftones, snare2.deftones, snare1.deftones_edge, rim2.rimshot, rim2.cross]}
   dnb: {base: electronic_edge, overrides: [kick.dnb, snare1.dnb, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, hh.electronic_closed, hh.electronic_open, stack.glitch, perc.click]}
   industrial: {base: electronic_edge, overrides: [kick.industrial, snare1.industrial, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, stack.metallic, perc.metallic]}
   electro: {base: hip_hop, overrides: [kick.trap, snare1.electro, snare2.electro, tom1.electronic, tom2.electronic, tom3.electronic, hh.electronic_closed, hh.electronic_open, stack.clap, perc.clap]}

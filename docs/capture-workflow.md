@@ -9,20 +9,22 @@ an additional 16-bit quantisation step in the capture tool. Generate compact
 DDrum4 and initial DrumGizmo files as separate, reproducible derivatives from
 these masters.
 
-## Observed audio devices — 2026-08-09
+## Observed audio devices — verified 2026-08-28
 
-The UMC404HD exposes physical inputs `IN 1-2`, `IN 3-4`, and `IN 1-4`, plus
-their output pairs. It does **not** expose an identifiable UMC loopback input.
-Therefore a capture session must not name an UMC input as an SD3 loopback while
-SD3 continues to play only on UMC OUT 1/2.
+The active Windows shared-audio route exposes `loopback:OUT 3-4`. It has been
+proved end to end by sending the campaign MIDI through `out_ClyphX 6`, playing
+the fingerprinted MegaKit in SD3, recording stereo at 48 kHz, and analysing
+the resulting WAV files. This endpoint is the authoritative SD3 calibration
+and capture route on the current workstation. Physical UMC inputs remain for
+external-module captures only and must never be substituted for this loopback.
 
 Current safe routes:
 
 | Source | MIDI trigger | Audio capture | Status |
 | --- | --- | --- | --- |
 | DDrum4 / external module | Explicit physical MIDI output | UMC `IN 1-2` | Wiring exists for DDrum4; backup remains required before transfer tests. |
-| SD3 / VST | `out_APC`, `out_ClyphX`, or `out_WORLDE` | Host/DAW internal recording | Preferred if it preserves the existing monitoring path. |
-| SD3 / VST | Same virtual MIDI output | UMC `IN 3-4` from a physical OUT 1/2 patch | Fallback; monitor on a different pair and prove no feedback. |
+| SD3 standalone | `out_ClyphX 6` | `loopback:OUT 3-4` | Current closed-loop route; proven at 48 kHz. |
+| SD3 / VST in a DAW | Explicit virtual MIDI output | Host/DAW internal recording | Alternative only after a new bounded proof and recorded endpoint identity. |
 
 ## Before a dense capture
 
@@ -46,12 +48,35 @@ mandatory.
 For the current local MegaKit revision, the guarded wrapper is:
 
 ```powershell
-.\scripts\calibrate-greg-hybrid-v3.ps1 -Mode Targeted -ConfirmCapture -ConfirmPresetLoaded
-.\scripts\calibrate-greg-hybrid-v3.ps1 -Mode Full -ConfirmCapture -ConfirmPresetLoaded
+.\scripts\calibrate-greg-hybrid.ps1 -Mode Targeted -ConfirmCapture -ConfirmPresetLoaded -ConfirmMegaKitMidiMap
+.\scripts\calibrate-greg-hybrid.ps1 -Mode Full -ConfirmCapture -ConfirmPresetLoaded -ConfirmMegaKitMidiMap
 ```
 
-The targeted command writes `calibration-targeted-v3.json`; only the full
+The targeted command writes a revision-specific targeted report; only the full
 command writes the canonical `calibration.json` consumed by the campaign gate.
+On Windows, the guarded wrapper also verifies the running SD3 window title and
+refuses capture when SD3 restored another preset revision at startup.
+The `-ConfirmMegaKitMidiMap` gate additionally records the operator check that
+`Kit_Metalcore_MidiMapping_Capture_V1` is active, not the portable standard-kit
+map which intentionally redirects the custom note namespace.
+
+The current wrapper targets MegaKit v23 and a fingerprinted 939-take campaign.
+Its calibration report uses family-relative level gates: silence, clipping,
+insufficient headroom, or a `level-fail` result prevents the full capture.
+The complete v23 calibration passed all 70 declared articulations with no
+technical silence, clipping, or relative-level outlier. The user approved the
+musical balance on 2026-08-29 and authorized the resumable 939-take production
+capture from the immutable approved preset snapshot.
+
+The Control Center applies the same safety boundary. Before calibration or a
+full capture it reads the visible SD3 window title directly, requires it to
+contain the exact campaign preset name, and asks for confirmation of the MIDI
+map recorded in `campaign.json`. A full capture accepts only a complete
+`sd3-calibration-report/v2` for the current session and preset: targeted
+probes, legacy v1 reports, missing family groups, technical failures, or level
+outliers cannot unlock it. The campaign dashboard exposes each comparable
+family's quietest/loudest peak, span, and outliers instead of reducing the
+decision to a single status line.
 
 Run a ten-minute stereo proof session with one articulation and at least three
 velocities. Confirm that:
@@ -61,11 +86,66 @@ velocities. Confirm that:
 3. SD3 round-robin variation changes across repeated hits, where supplied;
 4. monitoring does not feed the capture input back into itself.
 
+The automatic report aligns and normalizes the first 250 ms of every accepted
+take, quantizes that transient, and fingerprints it. Two repetitions declared
+as round robins with the same transient fingerprint fail the campaign gate;
+the report lists the exact articulation and velocity cell instead of silently
+shipping a non-variation.
+
+Both quality reports are immutable provenance gates. The full report records
+the SHA-256 of `library.json` and `capture-session.json`; the composite report
+records the session and MegaKit-plan hashes plus the measured SHA-256 of every
+composite WAV. Control Center and the direct `export-drumgizmo` CLI both
+recompute these identities immediately before export. `campaign.json` also
+freezes the SHA-256 of the exact session note/channel/controller grid, so a
+same-size session edited after campaign creation cannot be recalibrated into a
+different kit by accident. A partial library, a
+changed raw/composite WAV, a stale session/plan, or a changed approved SD3
+preset therefore blocks XML generation instead of producing a structurally
+valid but musically incomplete kit.
+
 The sampler always requires `--confirm-capture`, writes only missing raw take
 names, and records the source/licensing declaration in its neutral library.
 It also enforces the session's explicit `cooldown_ms` between newly captured
 takes, so dense VST or module sessions do not depend on an undocumented
 one-off delay. Already-complete takes remain skipped and do not add a delay.
+
+The two layered snare centers are a separate fidelity gate for DrumGizmo.
+After the 939 individual takes and their strict 48 kHz/stereo quality report,
+`capture-composites` triggers each approved SD3 layer as one simultaneous MIDI
+chord: notes 37+100+101 for the Deftones center and 42+103 for the Sleep Token
+center. It records 42 additional coherent takes (seven velocities, three
+round robins, two centers). This direct capture is authoritative for the
+DrumGizmo center attacks; summing separately recorded WAV files is only an
+offline diagnostic fallback because independent capture-onset jitter can
+misalign their transients. A dedicated `composite-quality.json` must accept
+all 42 files before the Control Center enables export.
+
+If only non-audio metadata in the MegaKit YAML changes after capture (for
+example the approval status or a new renderer capability), re-attest the
+existing composites with `drum-sampler audit-composites`. This command opens
+no MIDI or audio device: it rebuilds the expected composite grid from the
+current plan, re-measures every WAV and writes a new bound quality report. A
+changed chord definition, missing file, duplicate round robin or altered WAV
+still fails. `capture-composites` remains the only command that sends MIDI and
+records audio.
+
+After export, **Validate exported DrumGizmo files** parses every XML document,
+checks every MIDI/instrument/WAV-channel reference and writes a SHA-256 manifest
+for the complete self-contained kit. This internal pass does not require a
+DrumGizmo installation. **Probe installed DrumGizmo host** is deliberately a
+separate gate: it records the executable version/backend when the target host
+is available and does not turn a missing Windows executable into a false
+failure of the generated kit.
+
+For the r5 package this external gate is complete. Run
+`scripts/smoke-drumgizmo-wsl.ps1`: it invokes `dgvalidator --pedantic`, then
+loads the full kit in DrumGizmo with streaming enabled, synthetic `test` input,
+`dummy` output and a bounded 48,000-frame run. It then renders the same crash
+twice through the `midifile`/`wavfile` engines, with Poly Aftertouch 0 and 127,
+and requires at least 12 dB of measured tail attenuation. The r5 proof measured
+23.69 dB. The resulting JSON proves clean load, choke and exit without opening
+MIDI, ALSA or JACK hardware.
 
 ## Current flagship cymbal sequence
 

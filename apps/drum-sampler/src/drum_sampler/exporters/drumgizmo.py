@@ -35,7 +35,10 @@ def _write_xml(path: Path, element: ET.Element) -> None:
 
 
 def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directory: Path, title: str | None = None,
-                     copy_audio: bool = True, midi_notes: dict[tuple[str, str], int] | None = None) -> DrumGizmoExport:
+                     copy_audio: bool = True, midi_notes: dict[tuple[str, str], int] | None = None,
+                     instrument_groups: dict[tuple[str, str], str] | None = None,
+                     metadata_version: str = "1.0.0", metadata_author: str = "drum-toolchain",
+                     metadata_email: str = "noreply@drum-toolchain.invalid") -> DrumGizmoExport:
     """Write a self-contained DrumGizmo 2.0 kit from captured WAV takes.
 
     No audio is altered. In copy mode files are copied to the generated kit,
@@ -43,6 +46,8 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
     """
     if not 1 <= len(library.channel_layout) <= 4:
         raise ValueError("DrumGizmo export requires one to four named channel-layout entries")
+    if not all(value.strip() for value in (metadata_version, metadata_author, metadata_email)):
+        raise ValueError("DrumGizmo metadata version, author, and email must be non-empty")
     captured = tuple(take for take in library.takes if take.status == "captured")
     if not captured:
         raise ValueError("DrumGizmo export requires at least one captured take")
@@ -53,9 +58,15 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
     for take in captured:
         groups.setdefault((take.instrument, take.articulation), []).append(take)
     midi_notes = midi_notes or {}
+    instrument_groups = instrument_groups or {}
     unknown_overrides = set(midi_notes) - set(groups)
     if unknown_overrides:
         raise ValueError(f"MIDI-note overrides reference unknown articulations: {sorted(unknown_overrides)}")
+    unknown_group_members = set(instrument_groups) - set(groups)
+    if unknown_group_members:
+        raise ValueError(f"instrument groups reference unknown articulations: {sorted(unknown_group_members)}")
+    if any(not isinstance(group, str) or not group.strip() for group in instrument_groups.values()):
+        raise ValueError("DrumGizmo instrument group names must be non-empty strings")
     note_groups: dict[int, tuple[str, str]] = {}
     for key, takes in groups.items():
         notes = {take.note for take in takes}
@@ -115,13 +126,23 @@ def export_drumgizmo(library: SampleLibrary, *, audio_root: Path, output_directo
     ET.SubElement(metadata, "title").text = title
     ET.SubElement(metadata, "description").text = f"Generated from neutral sample library {library.identifier}"
     ET.SubElement(metadata, "license").text = "See neutral sample-library take metadata"
+    # dgvalidator treats these three DrumGizmo 2.0 metadata fields as required.
+    # The reserved .invalid address is intentionally non-routable: generated
+    # local kits must not invent a maintainer's personal contact details.
+    ET.SubElement(metadata, "author").text = metadata_author
+    ET.SubElement(metadata, "email").text = metadata_email
+    ET.SubElement(metadata, "version").text = metadata_version
     channels = ET.SubElement(kit, "channels")
     for channel in library.channel_layout:
         ET.SubElement(channels, "channel", {"name": channel})
     kit_instruments = ET.SubElement(kit, "instruments")
     for (instrument, articulation), _takes in sorted(groups.items()):
         name = _identifier(f"{instrument}__{articulation}")
-        element = ET.SubElement(kit_instruments, "instrument", {"name": name, "file": (Path("instruments") / f"{name}.xml").as_posix()})
+        attributes = {"name": name, "file": (Path("instruments") / f"{name}.xml").as_posix()}
+        group = instrument_groups.get((instrument, articulation))
+        if group is not None:
+            attributes["group"] = group.strip()
+        element = ET.SubElement(kit_instruments, "instrument", attributes)
         for channel in library.channel_layout:
             ET.SubElement(element, "channelmap", {"in": channel, "out": channel, "main": "true"})
     drumkit_path = output_directory / "drumkit.xml"

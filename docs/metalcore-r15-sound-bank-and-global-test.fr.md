@@ -4,7 +4,7 @@
 > référence de la banque installée, mais les exemples MIDI CH10/CH11 et le
 > firmware de diagnostic décrits ici ne sont plus le contrat du rig global.
 > Utiliser [Greg Hybrid r15 — configuration matérielle et MIDI](greg-hybrid-r15-hardware-setup.md)
-> pour les canaux CH12/CH2/CH3, les notes, CC4, Programs/Palettes et le gate de
+> pour les canaux CH12/CH2/CH3, les notes, CC4/CC16, Programs/Palettes et le gate de
 > flash actuels.
 
 Version du document : 2026-08-26
@@ -31,7 +31,7 @@ différentes :
 | Mapping Arduino global | **non prêt** : le firmware courant ne contient que deux routes de diagnostic C12/17–18 |
 | DDTi | canal et notes cibles définis ci-dessous; configuration réelle à relever/appliquer |
 | eDRUMin | canal et notes cibles définis ci-dessous; configuration réelle à relever/appliquer |
-| Hi-hat continu CC4 → positions DDrum4 | **non implémenté** dans le firmware courant |
+| Hi-hat continu CC4 → positions DDrum4 | moteur implémenté, activation bloquée jusqu'aux mesures physiques |
 
 Il ne faut donc pas flasher le `generated_mapping.h` actuel pour un essai
 global : il ne jouerait pas le kit. Il sert uniquement au précédent diagnostic
@@ -428,10 +428,9 @@ manuellement depuis le module.
 | hi-hat chick | 44 | note 44 |
 | hi-hat foot splash | 21 | note 45 |
 
-Le positional sensing de snare ne peut pas encore choisir center/mid/edge avec
-le firmware courant. Pour le premier test, fixer head vers center (note 8) et
-rim vers rimshot (note 16). La conversion de position vers 8/11/12 est une
-extension de mapping à valider ensuite.
+Le contrat global récent reçoit la position Snare1 sur CC16 et la transmet à
+SD3. Le firmware DDrum4 de cette archive ne choisit pas encore center/mid/edge :
+la conversion vers 8/11/12 dépend toujours de seuils physiques à mesurer.
 
 ## 9. Contrat du bridge Arduino
 
@@ -534,8 +533,9 @@ source, pas masquée au hasard dans la banque.
 - Les variations nommées Sleep/Deftones des fûts ne changent pas toutes l'audio
   à elles seules; plusieurs sont des presets de réglage à mémoriser dans des
   kits utilisateurs distincts.
-- Le hi-hat continu et le positional sensing ne sont pas encore compilés dans
-  le firmware embarqué courant.
+- Le moteur hi-hat continu est compilé mais reste non flashable avant mesure.
+  Le positional sensing CC16 est opérationnel vers SD3 seulement ; sa
+  quantification DDrum4/DrumGizmo reste volontairement désactivée.
 
 ## 12. Références
 

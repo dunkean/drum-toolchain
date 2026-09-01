@@ -332,7 +332,11 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             self.assertTrue(export.midimap.is_file())
             self.assertEqual(len(export.instruments), 2)
             self.assertEqual(len(export.copied_audio), 2)
-            self.assertIn('samplerate="44100"', export.drumkit.read_text(encoding="utf-8"))
+            drumkit_text = export.drumkit.read_text(encoding="utf-8")
+            self.assertIn('samplerate="44100"', drumkit_text)
+            self.assertIn("<author>drum-toolchain</author>", drumkit_text)
+            self.assertIn("<email>noreply@drum-toolchain.invalid</email>", drumkit_text)
+            self.assertIn("<version>1.0.0</version>", drumkit_text)
             self.assertIn('note="38"', export.midimap.read_text(encoding="utf-8"))
 
     def test_drumgizmo_export_allows_target_note_overrides_for_merged_sources(self) -> None:
@@ -353,10 +357,13 @@ class SamplerBankAndMidiLabTests(unittest.TestCase):
             export = export_drumgizmo(
                 library, audio_root=root, output_directory=root / "kit",
                 midi_notes={("hi_hat", "closed"): 42, ("hi_hat", "open"): 46},
+                instrument_groups={("hi_hat", "closed"): "hihat", ("hi_hat", "open"): "hihat"},
             )
             map_text = export.midimap.read_text(encoding="utf-8")
             self.assertIn('note="42" instr="hi_hat__closed"', map_text)
             self.assertIn('note="46" instr="hi_hat__open"', map_text)
+            drumkit_text = export.drumkit.read_text(encoding="utf-8")
+            self.assertEqual(drumkit_text.count('group="hihat"'), 2)
 
     def test_safe_cli_entry_points_create_and_inspect_metadata(self) -> None:
         root = Path(__file__).resolve().parents[2]

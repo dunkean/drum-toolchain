@@ -118,6 +118,40 @@ class CaptureQualityTests(unittest.TestCase):
         self.assertIn("relative-level-outlier", rows["quiet"]["findings"])
         self.assertEqual(report["summary"]["status"], "technical-fail")
 
+    def test_calibration_relative_level_gate_compares_musical_families_only(self) -> None:
+        session = CaptureSessionPlan(
+            "virtual-midi", "loopback:output", ("left", "right"),
+            (
+                CaptureRequest("kick", "acoustic", 24, (110,), 1),
+                CaptureRequest("kick", "electronic", 25, (110,), 1),
+                CaptureRequest("hh", "bow_closed", 64, (110,), 1),
+                CaptureRequest("snare1", "metalcore", 32, (110,), 1),
+                CaptureRequest("snare_layer", "sleep_snare7", 103, (110,), 1),
+            ),
+        )
+        levels = {24: 0.5, 25: 0.05, 64: 0.005, 32: 0.5, 103: 0.05}
+
+        def fake_capture(**kwargs: object) -> Path:
+            output, note = kwargs["output"], kwargs["note"]
+            assert isinstance(output, Path) and isinstance(note, int)
+            wavfile.write(output, 44100, np.full((256, 2), levels[note], dtype=np.float32))
+            return output
+
+        with tempfile.TemporaryDirectory() as temporary, patch("drum_sampler.calibration.time.sleep"):
+            report = calibrate_session(
+                session, Path(temporary), session_sha256="a" * 64,
+                preset_path=Path("MegaKit.sd3p"), preset_sha256="b" * 64,
+                preset_loaded_confirmed=True, capture=fake_capture,
+            )
+
+        rows = {f"{row['instrument']}.{row['articulation']}": row for row in report["rows"]}
+        self.assertIn("relative-level-outlier", rows["kick.electronic"]["findings"])
+        self.assertNotIn("relative-level-outlier", rows["hh.bow_closed"]["findings"])
+        self.assertNotIn("relative-level-outlier", rows["snare_layer.sleep_snare7"]["findings"])
+        self.assertEqual(report["summary"]["level_groups"]["snare.layer"]["articulations"], 1)
+        self.assertAlmostEqual(report["summary"]["level_groups"]["kick"]["peak_span_db"], 20.0, places=6)
+        self.assertEqual(report["summary"]["status"], "level-fail")
+
     def test_calibration_can_probe_exact_articulations_then_reuse_them_in_full_run(self) -> None:
         session = CaptureSessionPlan(
             "virtual-midi", "loopback:output", ("left", "right"),
@@ -211,11 +245,40 @@ class CaptureQualityTests(unittest.TestCase):
             self.assertIn("clipped", assess_wav(clipped)["findings"])
             self.assertTrue(silent.is_file())
 
+    def test_assess_rejects_wrong_master_rate_and_channel_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "wrong-master.wav"
+            wavfile.write(source, 44100, np.full(4410, 0.25, dtype=np.float32))
+
+            report = assess_wav(source, CaptureQualityPolicy(
+                expected_sample_rate=48000, expected_channels=2,
+            ))
+
+            self.assertEqual(report["automatic_status"], "rejected")
+            self.assertEqual(report["findings"], ["wrong_sample_rate", "wrong_channel_count"])
+
     def test_audit_marks_missing_raw(self) -> None:
         session = CaptureSessionPlan("midi", "audio", ("left",), (CaptureRequest("kick", "head", 36, (100,), 1),))
         library = library_from_plan("fixture", session.channels, session.takes())
         report = audit_library(library, Path("does-not-exist"), CaptureQualityPolicy())
         self.assertEqual(report["summary"]["missing"], 1)
+
+    def test_audit_rejects_byte_identical_round_robin_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = CaptureSessionPlan(
+                "midi", "audio", ("left",),
+                (CaptureRequest("snare", "center", 38, (100,), 2),),
+            )
+            library = library_from_plan("fixture", session.channels, session.takes())
+            samples = np.linspace(-0.2, 0.2, 4410, dtype=np.float32)
+            for take in library.takes:
+                wavfile.write(root / take.raw_file, 44100, samples)
+
+            report = audit_library(library, root, CaptureQualityPolicy())
+
+            self.assertEqual(report["summary"]["round_robin_duplicate_cells"], 1)
+            self.assertEqual(report["round_robin_duplicates"][0]["unique_audio_fingerprints"], 1)
 
     def test_assess_accepts_a_short_hit_in_a_long_raw_window(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

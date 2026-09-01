@@ -27,6 +27,30 @@ def _safe_level(value: object) -> float | None:
     return converted if isfinite(converted) else None
 
 
+def _level_group(instrument: str, articulation: str) -> str:
+    """Return the musical family used for closed-loop relative-level gates."""
+    # Standalone layer triggers are deliberately quieter because they are
+    # summed with a primary snare at runtime. Comparing them with rimshots
+    # would incorrectly reject a phase-safe, headroom-preserving stack.
+    if instrument == "snare_layer":
+        return "snare.layer"
+    if instrument.startswith("snare"):
+        return "snare"
+    if instrument.startswith("rim"):
+        return f"rim.{articulation}"
+    if instrument.startswith("tom"):
+        return f"tom.{articulation}"
+    if instrument == "hh":
+        return f"hh.{articulation.split('_', 1)[0]}"
+    if instrument.startswith("crash"):
+        return "crash"
+    if instrument.startswith("splash"):
+        return "splash"
+    if instrument.startswith("china"):
+        return "china"
+    return instrument
+
+
 def calibrate_session(
     session: CaptureSessionPlan,
     output_directory: Path,
@@ -39,7 +63,7 @@ def calibrate_session(
     duration_seconds: float = 1.5,
     silence_peak_dbfs: float = -60.0,
     minimum_headroom_db: float = 0.5,
-    relative_outlier_db: float = 18.0,
+    relative_outlier_db: float = 12.0,
     only: tuple[str, ...] = (),
     capture: CaptureFunction = capture_note,
     progress: ProgressFunction | None = None,
@@ -121,6 +145,7 @@ def calibrate_session(
         row: dict[str, object] = {
             "instrument": request.instrument,
             "articulation": request.articulation,
+            "level_group": _level_group(request.instrument, request.articulation),
             "note": request.note,
             "channel": request.channel,
             "controllers": [list(pair) for pair in request.controllers],
@@ -140,18 +165,37 @@ def calibrate_session(
     valid_peaks = [float(row["peak_dbfs"]) for row in rows if row["peak_dbfs"] is not None]
     loudest = max(valid_peaks) if valid_peaks else None
     relative_outliers: list[str] = []
-    if loudest is not None:
-        for row in rows:
-            peak = row["peak_dbfs"]
-            if isinstance(peak, float) and peak < loudest - relative_outlier_db:
-                relative_outliers.append(f"{row['instrument']}.{row['articulation']}")
-                row["findings"].append("relative-level-outlier")  # type: ignore[union-attr]
+    level_groups: dict[str, dict[str, object]] = {}
+    for group in sorted({str(row["level_group"]) for row in rows}):
+        group_rows = [row for row in rows if row["level_group"] == group]
+        group_peaks = [float(row["peak_dbfs"]) for row in group_rows if row["peak_dbfs"] is not None]
+        group_loudest = max(group_peaks) if group_peaks else None
+        group_quietest = min(group_peaks) if group_peaks else None
+        group_outliers: list[str] = []
+        if group_loudest is not None:
+            for row in group_rows:
+                peak = row["peak_dbfs"]
+                if isinstance(peak, float) and peak < group_loudest - relative_outlier_db:
+                    identifier = f"{row['instrument']}.{row['articulation']}"
+                    relative_outliers.append(identifier)
+                    group_outliers.append(identifier)
+                    row["findings"].append("relative-level-outlier")  # type: ignore[union-attr]
+        level_groups[group] = {
+            "articulations": len(group_rows),
+            "loudest_peak_dbfs": group_loudest,
+            "quietest_peak_dbfs": group_quietest,
+            "peak_span_db": (
+                group_loudest - group_quietest
+                if group_loudest is not None and group_quietest is not None else None
+            ),
+            "outliers": group_outliers,
+        }
     technical_failures = sum(
         any(finding in {"silent", "clipped", "insufficient-headroom"} for finding in row["findings"])
         for row in rows
     )
     return {
-        "format": "sd3-calibration-report/v1",
+        "format": "sd3-calibration-report/v2",
         "session_sha256": session_sha256,
         "preset": {
             "path": str(preset_path),
@@ -178,10 +222,15 @@ def calibrate_session(
             "reused": len(rows) - captured_count,
             "technical_failures": technical_failures,
             "relative_level_outliers": relative_outliers,
+            "level_groups": level_groups,
             "loudest_peak_dbfs": loudest,
             "quietest_peak_dbfs": min(valid_peaks) if valid_peaks else None,
             "peak_span_db": (loudest - min(valid_peaks)) if loudest is not None else None,
-            "status": "technical-fail" if technical_failures else "technical-pass-user-mix-review-required",
+            "status": (
+                "technical-fail" if technical_failures else
+                "level-fail" if relative_outliers else
+                "technical-pass-user-mix-review-required"
+            ),
         },
     }
 

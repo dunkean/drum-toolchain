@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 import subprocess
+import time
 from typing import Any
 import xml.etree.ElementTree as ElementTree
 
+import numpy as np
 from scipy.io import wavfile
 import yaml
 
-from .audio import QualityProfile, process_wav
+from .audio import QualityProfile, analyze_wav, capture_chord, process_wav
 from .library import SampleLibrary, SampleTake, merge_libraries
+from .quality import CaptureQualityPolicy, assess_wav
+from .session import CaptureSessionPlan
 
 
 def validate_drumgizmo_kit(kit_directory: Path) -> dict[str, int]:
@@ -29,6 +34,10 @@ def validate_drumgizmo_kit(kit_directory: Path) -> dict[str, int]:
     drumkit = ElementTree.parse(drumkit_path).getroot()
     if drumkit.tag != "drumkit" or drumkit.get("version") is None:
         raise ValueError("DrumGizmo drumkit.xml needs a drumkit root with version")
+    metadata = drumkit.find("metadata")
+    required_metadata = ("author", "email", "version")
+    if metadata is None or any(not (metadata.findtext(name) or "").strip() for name in required_metadata):
+        raise ValueError("DrumGizmo metadata needs non-empty author, email, and version fields")
     try:
         if int(drumkit.get("samplerate", "0")) <= 0:
             raise ValueError
@@ -176,6 +185,28 @@ def drumgizmo_capture_note_overrides(path: Path) -> tuple[dict[tuple[str, str], 
     return result, replaced
 
 
+def drumgizmo_instrument_groups(path: Path) -> dict[tuple[str, str], str]:
+    """Read explicit DrumGizmo choke groups from an SD3 MegaKit plan."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("kind") != "sd3-megakit-plan":
+        raise ValueError("expected an sd3-megakit-plan")
+    groups = document.get("drumgizmo_instrument_groups", {})
+    if not isinstance(groups, dict):
+        raise ValueError("drumgizmo_instrument_groups must be a mapping")
+    result: dict[tuple[str, str], str] = {}
+    for group, members in groups.items():
+        if not isinstance(group, str) or not group.strip() or not isinstance(members, list) or not members:
+            raise ValueError("each DrumGizmo instrument group needs a non-empty name and member list")
+        for logical in members:
+            if not isinstance(logical, str) or "." not in logical:
+                raise ValueError(f"invalid DrumGizmo group member: {logical!r}")
+            key = tuple(logical.rsplit(".", 1))
+            if key in result:
+                raise ValueError(f"DrumGizmo articulation belongs to multiple groups: {logical}")
+            result[key] = group.strip()
+    return result
+
+
 def resolved_drumgizmo_note_overrides(note_map: Path | None, megakit_plan: Path | None = None) -> dict[tuple[str, str], int]:
     """Merge the compiled logical map with capture-only zone replacements."""
     overrides = drumgizmo_note_overrides(note_map) if note_map is not None else {}
@@ -185,8 +216,14 @@ def resolved_drumgizmo_note_overrides(note_map: Path | None, megakit_plan: Path 
     for key in replaced:
         overrides.pop(key, None)
     collisions = set(overrides) & set(capture_overrides)
-    if collisions:
-        raise ValueError(f"DrumGizmo capture zones collide with renderer mappings: {sorted(collisions)}")
+    conflicting = {key for key in collisions if overrides[key] != capture_overrides[key]}
+    if conflicting:
+        raise ValueError(f"DrumGizmo capture zones collide with renderer mappings: {sorted(conflicting)}")
+    # A forced logical route may deliberately address an exact captured hi-hat
+    # zone (for example edge_half). Let the capture-owned entry win when both
+    # contracts name the same articulation and the same note.
+    for key in collisions:
+        overrides.pop(key)
     used_notes = {note: key for key, note in overrides.items()}
     for key, note in capture_overrides.items():
         if note in used_notes:
@@ -230,6 +267,351 @@ def expand_shared_variations(library: SampleLibrary, plan_path: Path) -> SampleL
         ) for take in source_takes)
         existing.add(target)
     return SampleLibrary(library.identifier, library.channel_layout, tuple(takes))
+
+
+def _wav_as_float(samples: np.ndarray) -> np.ndarray:
+    """Convert readable WAV PCM to float without changing channel geometry."""
+    if np.issubdtype(samples.dtype, np.floating):
+        return samples.astype(np.float32, copy=False)
+    if np.issubdtype(samples.dtype, np.signedinteger):
+        scale = float(max(abs(np.iinfo(samples.dtype).min), np.iinfo(samples.dtype).max))
+        return samples.astype(np.float32) / scale
+    if np.issubdtype(samples.dtype, np.unsignedinteger):
+        info = np.iinfo(samples.dtype)
+        midpoint = (info.max + 1) / 2.0
+        return (samples.astype(np.float32) - midpoint) / midpoint
+    raise ValueError(f"unsupported WAV sample type for layer composition: {samples.dtype}")
+
+
+def compose_drumgizmo_layers(library: SampleLibrary, *, audio_root: Path,
+                             output_root: Path, plan_path: Path) -> SampleLibrary:
+    """Render phase-approved SD3 note stacks into immutable DrumGizmo WAVs.
+
+    SD3 can emit several simultaneous notes for one logical articulation,
+    whereas a portable DrumGizmo midimap resolves one note to one instrument.
+    The plan therefore declares exact source articulations. Matching
+    velocity/RR cells are summed with no normalization so the exported attack
+    and balance remain identical to the approved SD3 chord.
+    """
+    document = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("kind") != "sd3-megakit-plan":
+        raise ValueError("expected an sd3-megakit-plan")
+    specifications = document.get("drumgizmo_composites", [])
+    if not isinstance(specifications, list):
+        raise ValueError("drumgizmo_composites must be a list")
+    if not specifications:
+        return library
+    indexed: dict[tuple[str, str, int, int], SampleTake] = {}
+    for take in library.takes:
+        key = (take.instrument, take.articulation, take.velocity, take.repetition)
+        if key in indexed:
+            raise ValueError(f"duplicate capture cell prevents layer composition: {key}")
+        indexed[key] = take
+    replacements: dict[tuple[str, str, int, int], SampleTake] = {}
+    declared_targets: set[tuple[str, str]] = set()
+    output_root.mkdir(parents=True, exist_ok=True)
+    for specification in specifications:
+        if not isinstance(specification, dict):
+            raise ValueError("each DrumGizmo composite must be an object")
+        target_value, source_values = specification.get("target"), specification.get("sources")
+        if (not isinstance(target_value, str) or target_value.count(".") != 1 or
+                not isinstance(source_values, list) or len(source_values) < 2 or
+                not all(isinstance(value, str) and value.count(".") == 1 for value in source_values)):
+            raise ValueError("DrumGizmo composite needs target and at least two instrument.articulation sources")
+        target = tuple(target_value.split(".", 1))
+        sources = [tuple(value.split(".", 1)) for value in source_values]
+        if sources[0] != target or target in declared_targets or len(set(sources)) != len(sources):
+            raise ValueError("DrumGizmo composite target must be its first unique source and may be declared once")
+        declared_targets.add(target)
+        target_takes = [take for take in library.takes if (take.instrument, take.articulation) == target]
+        if not target_takes:
+            raise ValueError(f"DrumGizmo composite target has no captured takes: {target_value}")
+        for target_take in target_takes:
+            source_takes: list[SampleTake] = []
+            arrays: list[np.ndarray] = []
+            sample_rate: int | None = None
+            shape: tuple[int, ...] | None = None
+            for source in sources:
+                cell = (*source, target_take.velocity, target_take.repetition)
+                take = indexed.get(cell)
+                if take is None or take.status != "captured":
+                    raise ValueError(f"DrumGizmo composite source cell is missing or uncaptured: {cell}")
+                path = Path(take.prepared_file or take.raw_file)
+                source_path = path if path.is_absolute() else audio_root / path
+                if not source_path.is_file():
+                    raise FileNotFoundError(f"DrumGizmo composite source WAV is missing: {source_path}")
+                rate, samples = wavfile.read(source_path)
+                converted = _wav_as_float(samples)
+                if sample_rate is None:
+                    sample_rate, shape = int(rate), converted.shape
+                elif rate != sample_rate or converted.shape != shape:
+                    raise ValueError(f"DrumGizmo composite sources differ in rate or shape for {target_value}")
+                source_takes.append(take)
+                arrays.append(converted)
+            mixed = np.sum(np.stack(arrays, axis=0), axis=0, dtype=np.float64).astype(np.float32)
+            peak = float(np.max(np.abs(mixed))) if mixed.size else 0.0
+            if not np.isfinite(mixed).all() or peak >= 1.0:
+                raise ValueError(
+                    f"DrumGizmo composite {target_value} v{target_take.velocity} rr{target_take.repetition} "
+                    f"would clip (peak={peak:.6f}); adjust the approved SD3 layer balance instead of normalizing"
+                )
+            destination = output_root / (
+                f"{target_take.instrument}__{target_take.articulation}__v{target_take.velocity:03d}"
+                f"__rr{target_take.repetition:02d}_composite.wav"
+            )
+            if destination.exists():
+                existing_rate, existing = wavfile.read(destination)
+                if existing_rate != sample_rate or not np.array_equal(_wav_as_float(existing), mixed):
+                    raise FileExistsError(f"refusing to overwrite a different DrumGizmo composite: {destination}")
+            else:
+                wavfile.write(destination, sample_rate, mixed)
+            facts = analyze_wav(destination)
+            history = target_take.processing_history + (
+                "layer-composite:" + "+".join(source_values),
+                "no-normalization",
+            )
+            replacements[(target_take.instrument, target_take.articulation,
+                          target_take.velocity, target_take.repetition)] = replace(
+                target_take,
+                prepared_file=str(destination.resolve()),
+                sample_rate=sample_rate,
+                frames=int(facts["frames"]),
+                peak_dbfs=float(facts["peak_dbfs"]),
+                rms_dbfs=float(facts["rms_dbfs"]),
+                clipped=bool(facts["clipped"]),
+                sha256=hashlib.sha256(destination.read_bytes()).hexdigest(),
+                processing_history=history,
+            )
+    return SampleLibrary(library.identifier, library.channel_layout, tuple(
+        replacements.get((take.instrument, take.articulation, take.velocity, take.repetition), take)
+        for take in library.takes
+    ))
+
+
+def _drumgizmo_composite_specs(plan_path: Path) -> list[tuple[tuple[str, str], tuple[tuple[str, str], ...]]]:
+    document = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or document.get("kind") != "sd3-megakit-plan":
+        raise ValueError("expected an sd3-megakit-plan")
+    result: list[tuple[tuple[str, str], tuple[tuple[str, str], ...]]] = []
+    seen: set[tuple[str, str]] = set()
+    for specification in document.get("drumgizmo_composites", []):
+        if not isinstance(specification, dict):
+            raise ValueError("each DrumGizmo composite must be an object")
+        target_value, source_values = specification.get("target"), specification.get("sources")
+        if (not isinstance(target_value, str) or target_value.count(".") != 1 or
+                not isinstance(source_values, list) or len(source_values) < 2 or
+                not all(isinstance(value, str) and value.count(".") == 1 for value in source_values)):
+            raise ValueError("DrumGizmo composite needs target and at least two instrument.articulation sources")
+        target = tuple(target_value.split(".", 1))
+        sources = tuple(tuple(value.split(".", 1)) for value in source_values)
+        if sources[0] != target or target in seen or len(set(sources)) != len(sources):
+            raise ValueError("DrumGizmo composite target must be its first unique source and may be declared once")
+        seen.add(target)
+        result.append((target, sources))
+    return result
+
+
+def _composite_filename(target: tuple[str, str], velocity: int, repetition: int) -> str:
+    return (f"{target[0]}__{target[1]}__v{velocity:03d}"
+            f"__rr{repetition:02d}_composite.wav")
+
+
+def capture_drumgizmo_composites(session: CaptureSessionPlan, *, plan_path: Path,
+                                  output_root: Path, capture=capture_chord) -> tuple[Path, ...]:
+    """Capture simultaneous SD3 layer chords for exact DrumGizmo attacks."""
+    requests = {(request.instrument, request.articulation): request for request in session.requests}
+    output_root.mkdir(parents=True, exist_ok=True)
+    captured: list[Path] = []
+    for target, sources in _drumgizmo_composite_specs(plan_path):
+        source_requests = []
+        for source in sources:
+            request = requests.get(source)
+            if request is None:
+                raise ValueError(f"DrumGizmo composite source is absent from the capture session: {source}")
+            source_requests.append(request)
+        primary = source_requests[0]
+        for request in source_requests[1:]:
+            if request.velocities != primary.velocities or request.repetitions != primary.repetitions:
+                raise ValueError(f"DrumGizmo composite sources need identical velocity/RR grids: {target}")
+            if request.channel != primary.channel or request.controllers != primary.controllers:
+                raise ValueError(f"DrumGizmo composite sources need one channel/controller contract: {target}")
+        notes = tuple(request.note for request in source_requests)
+        if len(set(notes)) != len(notes):
+            raise ValueError(f"DrumGizmo composite MIDI notes must be unique: {target}")
+        for velocity in primary.velocities:
+            for repetition in range(1, primary.repetitions + 1):
+                output = output_root / _composite_filename(target, velocity, repetition)
+                if output.is_file():
+                    continue
+                print(
+                    f"[{target[0]}.{target[1]} v{velocity} rr{repetition}] chord={notes}",
+                    flush=True,
+                )
+                path = capture(
+                    midi_port=session.midi_output,
+                    audio_input=session.audio_input,
+                    notes=notes,
+                    velocity=velocity,
+                    output=output,
+                    channel=primary.channel,
+                    controllers=primary.controllers,
+                    duration=(session.gate_ms + session.tail_ms) / 1000,
+                    gate=session.gate_ms / 1000,
+                    preroll=session.preroll_ms / 1000,
+                    sample_rate=session.sample_rate,
+                    channels=len(session.channels),
+                )
+                if path != output or not output.is_file():
+                    raise RuntimeError(f"composite capture did not create expected WAV: {output}")
+                captured.append(output)
+                if session.cooldown_ms:
+                    time.sleep(session.cooldown_ms / 1000)
+    return tuple(captured)
+
+
+def apply_captured_drumgizmo_composites(library: SampleLibrary, *, composite_root: Path,
+                                        plan_path: Path) -> SampleLibrary:
+    """Point target takes at approved simultaneous chord WAVs after strict QC."""
+    targets = {target: sources for target, sources in _drumgizmo_composite_specs(plan_path)}
+    updated: list[SampleTake] = []
+    for take in library.takes:
+        key = (take.instrument, take.articulation)
+        sources = targets.get(key)
+        if sources is None:
+            updated.append(take)
+            continue
+        path = composite_root / _composite_filename(key, take.velocity, take.repetition)
+        if not path.is_file():
+            raise FileNotFoundError(f"simultaneous DrumGizmo composite is missing: {path}")
+        quality = assess_wav(path, CaptureQualityPolicy(
+            expected_sample_rate=take.sample_rate,
+            expected_channels=len(library.channel_layout),
+        ))
+        if quality["automatic_status"] != "accepted":
+            raise ValueError(f"DrumGizmo composite failed quality gates: {path}: {quality['findings']}")
+        facts = quality["facts"]
+        updated.append(replace(
+            take,
+            prepared_file=str(path.resolve()),
+            sample_rate=int(facts["sample_rate"]),
+            frames=int(facts["frames"]),
+            peak_dbfs=float(facts["peak_dbfs"]),
+            rms_dbfs=float(facts["rms_dbfs"]),
+            clipped=bool(facts["clipped"]),
+            sha256=str(facts["sha256"]),
+            processing_history=take.processing_history + (
+                "simultaneous-layer-capture:" + "+".join(".".join(source) for source in sources),
+            ),
+        ))
+    return SampleLibrary(library.identifier, library.channel_layout, tuple(updated))
+
+
+def audit_drumgizmo_composites(session: CaptureSessionPlan, *, composite_root: Path,
+                                plan_path: Path) -> dict[str, Any]:
+    """Audit the complete simultaneous-layer grid against its capture session."""
+    requests = {(request.instrument, request.articulation): request for request in session.requests}
+    policy = CaptureQualityPolicy(
+        expected_sample_rate=session.sample_rate,
+        expected_channels=len(session.channels),
+    )
+    records: list[dict[str, Any]] = []
+    for target, _sources in _drumgizmo_composite_specs(plan_path):
+        request = requests.get(target)
+        if request is None:
+            raise ValueError(f"DrumGizmo composite target is absent from the capture session: {target}")
+        for velocity in request.velocities:
+            for repetition in range(1, request.repetitions + 1):
+                path = composite_root / _composite_filename(target, velocity, repetition)
+                record: dict[str, Any] = {
+                    "instrument": target[0], "articulation": target[1],
+                    "velocity": velocity, "repetition": repetition, "path": str(path),
+                }
+                if path.is_file():
+                    record.update(assess_wav(path, policy))
+                else:
+                    record.update({
+                        "automatic_status": "missing", "findings": ["missing_composite"],
+                        "audition_status": "pending",
+                    })
+                records.append(record)
+    counts = {status: sum(record["automatic_status"] == status for record in records)
+              for status in ("accepted", "rejected", "missing")}
+    rr_groups: dict[tuple[str, str, int], list[str]] = {}
+    for record in records:
+        digest = record.get("variation_fingerprint_sha256")
+        if record.get("automatic_status") == "accepted" and isinstance(digest, str):
+            key = (str(record["instrument"]), str(record["articulation"]), int(record["velocity"]))
+            rr_groups.setdefault(key, []).append(digest)
+    duplicate_round_robins = [
+        {"instrument": key[0], "articulation": key[1], "velocity": key[2],
+         "repetitions": len(hashes), "unique_audio_fingerprints": len(set(hashes))}
+        for key, hashes in sorted(rr_groups.items())
+        if len(hashes) > 1 and len(set(hashes)) < len(hashes)
+    ]
+    counts["round_robin_duplicate_cells"] = len(duplicate_round_robins)
+    return {
+        "kind": "drumgizmo-composite-quality-report", "schema_version": 1,
+        "megakit_plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+        "policy": {
+            "minimum_duration_ms": policy.minimum_duration_ms,
+            "silence_rms_dbfs": policy.silence_rms_dbfs,
+            "reject_clipped": policy.reject_clipped,
+            "expected_sample_rate": policy.expected_sample_rate,
+            "expected_channels": policy.expected_channels,
+        },
+        "summary": counts, "round_robin_duplicates": duplicate_round_robins,
+        "takes": records,
+    }
+
+
+def validate_drumgizmo_composite_report(report_path: Path, *, session_path: Path,
+                                         composite_root: Path, plan_path: Path) -> dict[str, Any]:
+    """Reject stale, incomplete, modified, or duplicate simultaneous layer takes."""
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("a valid simultaneous-layer quality report is required") from error
+    session_sha256 = hashlib.sha256(session_path.read_bytes()).hexdigest()
+    plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    if (report.get("kind") != "drumgizmo-composite-quality-report"
+            or report.get("session_sha256") != session_sha256
+            or report.get("megakit_plan_sha256") != plan_sha256):
+        raise ValueError("the simultaneous-layer quality report is stale for the session or MegaKit plan")
+    fresh = audit_drumgizmo_composites(
+        CaptureSessionPlan.read(session_path), composite_root=composite_root, plan_path=plan_path,
+    )
+    expected_summary = fresh["summary"]
+    if (report.get("summary") != expected_summary
+            or expected_summary.get("rejected") != 0
+            or expected_summary.get("missing") != 0
+            or expected_summary.get("round_robin_duplicate_cells") != 0):
+        raise ValueError("the simultaneous-layer quality report failed or no longer matches the WAV files")
+
+    def indexed(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        takes = document.get("takes")
+        if not isinstance(takes, list):
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for take in takes:
+            if not isinstance(take, dict) or not isinstance(take.get("path"), str):
+                return {}
+            name = Path(take["path"]).name
+            if name in result:
+                return {}
+            result[name] = take
+        return result
+
+    recorded, current = indexed(report), indexed(fresh)
+    if set(recorded) != set(current) or not recorded:
+        raise ValueError("the simultaneous-layer report does not cover the exact composite grid")
+    for name in recorded:
+        recorded_facts, current_facts = recorded[name].get("facts"), current[name].get("facts")
+        if (not isinstance(recorded_facts, dict) or not isinstance(current_facts, dict)
+                or recorded_facts.get("sha256") != current_facts.get("sha256")
+                or recorded[name].get("variation_fingerprint_sha256")
+                != current[name].get("variation_fingerprint_sha256")):
+            raise ValueError(f"simultaneous-layer WAV changed after quality review: {name}")
+    return report
 
 
 def prepare_selected_takes(library: SampleLibrary, *, audio_root: Path, output_root: Path,
@@ -292,6 +674,87 @@ def verify_drumgizmo_kit(kit_directory: Path, report_path: Path, *, executable: 
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report
+
+
+def write_drumgizmo_validation_report(kit_directory: Path, report_path: Path) -> dict[str, Any]:
+    """Validate the self-contained kit and fingerprint every exported file."""
+    validation = validate_drumgizmo_kit(kit_directory)
+    files = []
+    report_resolved = report_path.resolve()
+    for path in sorted(item for item in kit_directory.rglob("*")
+                       if item.is_file() and item.resolve() != report_resolved):
+        files.append({
+            "path": path.relative_to(kit_directory).as_posix(),
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+    report = {
+        "kind": "drumgizmo-kit-validation-report", "schema_version": 1,
+        "status": "pass", "kit_directory": str(kit_directory.resolve()),
+        "kit": validation, "files": files, "hardware_io": "disabled",
+        "external_audio_load": "not_executed",
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report
+
+
+def verify_drumgizmo_validation_report(kit_directory: Path, report_path: Path) -> dict[str, Any]:
+    """Verify that every kit byte still matches one exact validation manifest."""
+    kit_root = kit_directory.resolve()
+    report_resolved = report_path.resolve()
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"invalid DrumGizmo validation report: {report_path}") from error
+    if (report.get("kind") != "drumgizmo-kit-validation-report"
+            or report.get("schema_version") != 1 or report.get("status") != "pass"):
+        raise ValueError("DrumGizmo validation report is not a passing v1 manifest")
+    declared_root = report.get("kit_directory")
+    if not isinstance(declared_root, str) or Path(declared_root).resolve() != kit_root:
+        raise ValueError("DrumGizmo validation report belongs to another kit")
+    records = report.get("files")
+    if not isinstance(records, list):
+        raise ValueError("DrumGizmo validation report has no file manifest")
+    declared: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+            raise ValueError("DrumGizmo validation report contains an invalid file record")
+        relative = Path(record["path"])
+        path = (kit_root / relative).resolve()
+        try:
+            path.relative_to(kit_root)
+        except ValueError as error:
+            raise ValueError(f"DrumGizmo validation path escapes the kit: {relative.as_posix()}") from error
+        key = relative.as_posix()
+        if relative.is_absolute() or key in declared:
+            raise ValueError(f"DrumGizmo validation path is invalid or duplicated: {key}")
+        declared[key] = record
+    for required in ("drumkit.xml", "midimap.xml"):
+        if required not in declared:
+            raise ValueError(f"DrumGizmo validation manifest is missing {required}")
+    current = {
+        path.relative_to(kit_root).as_posix(): path
+        for path in kit_root.rglob("*")
+        if path.is_file() and path.resolve() != report_resolved
+    }
+    if set(current) != set(declared):
+        missing = sorted(set(declared) - set(current))
+        extra = sorted(set(current) - set(declared))
+        raise ValueError(f"DrumGizmo kit file set changed after validation; missing={missing}, extra={extra}")
+    for relative, path in current.items():
+        record = declared[relative]
+        expected_bytes = record.get("bytes")
+        expected_sha256 = record.get("sha256")
+        actual_bytes = path.stat().st_size
+        actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+        if expected_bytes != actual_bytes or expected_sha256 != actual_sha256:
+            raise ValueError(
+                f"DrumGizmo file changed after validation: {relative}; "
+                f"expected bytes={expected_bytes}, sha256={expected_sha256}; "
+                f"got bytes={actual_bytes}, sha256={actual_sha256}"
+            )
     return report
 
 
