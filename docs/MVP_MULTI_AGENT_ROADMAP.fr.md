@@ -1,15 +1,28 @@
 # Roadmap multi-agent — prototype eDrum DDrum4 / SD3 / DrumGizmo
 
-Statut : proposition d'exécution fondée sur l'audit du dépôt au 21 août 2026.
+Statut : baseline hors ligne, configuration des modules, promotion configurée,
+flash Uno et bootstrap matériel sans pads validés au 31 août 2026 ; validation
+physique avec pads encore requise.
 
 ## Statut d'exécution
 
-Le socle code du contrat `rig-project/v1`, compilateur offline, Converter,
-bridge firmware, export DrumGizmo, Control Center et vérifications natives est
-présent dans le dépôt. Cela ne clôt pas le MVP: les gates suivants exigent le
-rig physique et ne doivent pas être simulés par des résultats de code : preuve
-DIN/echo et décision `DUAL`, captures SD3, golden dump et relecture DDTi,
-transfert/audition DDrum4, chargement réel DrumGizmo et campagnes de latence.
+Le contrat `rig-project/v1`, le compilateur offline, le Converter, le bridge
+firmware, le Control Center et les lanceurs Windows sont implémentés. Le
+MegaKit SD3 v23 est approuvé et capturé (939 masters et 42 composites), et le
+kit DrumGizmo r5 autonome est exporté (77 instruments, 1001 samples, 1018
+fichiers). `dgvalidator` et DrumGizmo 0.9.20 l'ont chargé sous WSL, y compris
+une preuve audio de choke. Les diagnostics hors ligne passent 5986/5986 et le
+mapping complet tient sur Uno dans l'environnement non téléversable de
+capacité (37,9 % Flash, 38,8 % RAM).
+
+Le bootstrap matériel sans pads est désormais acquis : dump DDTi frais,
+écriture/readback 42/42, snapshot eDRUMin, promotion configurée, flash Uno,
+diagnostic 5986/5986 et audition 30/30 avec 60/60 événements au THRU. Cela ne
+clôt pas le MVP : après branchement des pads, les 75 traces r10 doivent vérifier
+strictement le contrat prescrit, puis viennent les campagnes de dynamique,
+CC4/CC16, chokes, absence de doublons/boucles et latence. Seules ces mesures
+peuvent promouvoir le profil de `post-flash-validation-pending` à
+`hardware-verified` et autoriser le lanceur live.
 
 Linux est une cible portable pour les messages MIDI des DDrum4, DDTi et
 eDRUMin lorsque les backends ALSA/JACK ou équivalents et les périphériques USB
@@ -19,8 +32,9 @@ DrumGizmo remplace SD3 pour la validation audio Linux.
 Une session Linux `renderer: drumgizmo` est déclarée dans
 `profiles/live-session.drumgizmo.example.json` : elle démarre le Converter et
 DrumGizmo, transmet le profil runtime et n'établit que les connexions JACK
-explicitement enregistrées. Le chargement et l'audition restent à prouver sur
-le rig réel, jamais par une simulation de test.
+explicitement enregistrées. Le chargement moteur et le choke audio sont
+prouvés hors matériel ; le chemin depuis les vrais pads et sa latence restent
+à mesurer sur le rig.
 
 Document directeur : `architecture_finale_edrum_ddrum4_sd3.md`.
 
@@ -53,19 +67,21 @@ Le premier système officiellement supporté est Windows 11. Le moteur JUCE, les
 
 | Besoin | Existant à réutiliser | Écart principal |
 | --- | --- | --- |
-| Domaine kit/profils | `packages/drum-domain`, `contracts/schemas`, profils composables | Pas de Scene/VP, Logical Sound et double renderer dans un même contrat |
-| Capture SD3 | `apps/drum-sampler`, capture PortAudio/WASAPI loopback, reprise, bibliothèque neutre | Pas de recette complète unique, quality gate/retry/report encore incomplets |
-| Sons DDrum4 | `apps/ddrum4-bank-builder`, builders snare/HH/cymbales, `ddrum4edit`, transfert WinMM | Pas de full-bank reproductible depuis un seul projet ; affectation finale de kit encore partiellement manuelle |
-| Banque actuelle | Snare, HH et deux crashes flagship capturés, transférés et auditionnés | Repack combiné crash + HH-edge et palette finale à terminer ; `MEM.LEFT` est l'autorité réelle |
-| Converter live | `apps/ddrum4-modernizer`, cœur C++ sans allocation, position/CC4/choke/PC, UI JUCE | Une seule entrée, mappings directs, pas de source canonique, Scene/VP, dédoublonnage ou echo guard |
-| Arduino | `firmware/ddrum4-midi-bridge`, cœur déterministe, génération de header, Note/velocity/CC4/aftertouch | Firmware courant minimal, pas de state machine, quantification HH, multi-événements ni chargement dynamique |
-| DDTi | `apps/ddti`, dump, GUI, presets, diff et écriture sûre des champs validés | À intégrer/lancer depuis le projet, pas à réécrire |
-| DrumGizmo | Export XML 2.0, map issue du contrat central, sélection runtime et export de kit | Chargement réel, version/backend et expressions non-note à valider sur le rig Linux |
-| SD3 | Profils de capture et procédure MIDI Learn | Aucun générateur de preset SD3 natif chargeable |
-| OS/live | Bootstrap, tests, flash/transfert, preflight et sessions Windows/Linux déclaratives | Chargement live sur le rig, priorité/latence et rapport de session réel à valider |
-| UI globale | UI JUCE du Converter et UI PySide DDTi | Pas de projet, compilation multi-target ou orchestration commune |
+| Domaine kit/profils | Contrat unique Physical → Logical → trois renderers, Scene/VP et expressions validées | Contrat configuré ; vérification fonctionnelle par les 75 traces r10 |
+| Capture SD3 | Campagne v23 résumable, calibration, quality gates, 939 masters + 42 composites | Aucun écart hors nouvelle recapture décidée par l'utilisateur |
+| Sons DDrum4 | Banque r15 encodée, transférée, auditionnée et documentée | Affectations physiques à revalider après promotion live |
+| Converter live | Runtime multi-source Scene/VP, CC4/CC16, position, choke, contrôle logique et UI JUCE | Ports exacts et comportement DUAL à mesurer |
+| Arduino | Tables compactes Scene/VP, commandes natives, HH et chokes ; profil configuré compilé, flashé et testé sans pads | Mesures physiques, comportement DUAL et echo guard actif à valider |
+| DDTi | Éditeur intégré, dump/diff/staging sûr ; écriture et readback 42/42 vérifiés | Réglages électriques et frappes réelles à valider avec les pads |
+| DrumGizmo | Kit r5 autonome et immuable, midimap, groupes HH/choke, validation et smoke moteur/audio | Jeu depuis pads et latence réelle à mesurer |
+| SD3 | MegaKit v23 natif, MIDI maps custom/standard, calibration et capture complète | Session live depuis pads à valider |
+| OS/live | Preflight fail-closed, réglages basse latence, lancement/arrêt, profil local configuré et rapports persistants | Promotion `hardware-verified` et rapport de session réel après essais pads |
+| UI globale | Control Center PySide + Performance JUCE + DDTi Editor, compilation et workflows intégrés | Validation ergonomique finale pendant les essais pads |
 
-Le 21 août, les tests des cœurs firmware et Converter passent. La commande `scripts/test-all.ps1` échoue dans l'interpréteur Python actif parce que `mido` n'est pas installé ; ce défaut d'environnement doit être corrigé avant de prendre une nouvelle baseline complète.
+Le 31 août, `scripts/test-all.ps1` passe : 229 tests Python partagés, 63 tests
+Control Center, les tests firmware/DIN natifs et les tests Converter/runtime
+C++. L'application JUCE Release et l'environnement AVR `uno_capacity` se
+compilent également sans upload.
 
 ## 3. Périmètre du MVP
 
@@ -85,20 +101,32 @@ Le MVP est atteint lorsqu'un même projet permet les opérations suivantes sur l
 Le MVP n'inclut pas :
 
 - un DAW, un moteur audio, un séquenceur ou un éditeur MIDI générique ;
-- le reverse engineering du format de preset SD3 ;
+- un éditeur SD3 générique : le générateur actuel reste borné aux structures
+  et presets sources validés par hash ;
 - l'automatisation souris/clavier de DDrum4UI ;
 - un éditeur complet de tous les SysEx DDrum4 ;
 - l'auto-calibration des pads ou la reconstruction sophistiquée d'un rimshot mal détecté par le module ;
 - le support de périphériques arbitraires ou le packaging Linux complet ;
 - une UI « 128 notes » exhaustive avant que le flux vertical soit fonctionnel.
 
-Pour SD3, le MVP génère la MIDI map, la recette du mega-kit et une checklist vérifiable. La création et la sauvegarde du mega-kit dans SD3 restent une opération manuelle unique. Si un format d'import officiellement exploitable est identifié plus tard, il sera ajouté comme exporter optionnel.
+Pour SD3, le workflow génère le preset MegaKit, sa MIDI map, sa recette et sa
+checklist à partir de sources validées par hash. Le chargement dans SD3 et
+l'approbation auditive restent des actions utilisateur ; la v23 courante a
+franchi ces deux gates.
 
-Prérequis externes suivis dans le `project-report` : Master Merger pour le contrôle dual bidirectionnel ; loopMIDI ou Windows MIDI Services ; UMC404HD, driver et buffer déclaré ; chemin du host/SD3 et mega-kit confirmé ; version/backend DrumGizmo ; versions locales DDrum4UI/ddrum4edit ; racines de samples externes, hashes et licences. Aucun de ces assets locaux n'est copié dans Git ou dans le bundle.
+Prérequis externes suivis dans le `project-report` : Master Merger pour le contrôle dual bidirectionnel ; loopMIDI ou Windows MIDI Services ; UMC404HD, driver et buffer déclaré ; chemin du host/SD3 et mega-kit confirmé ; version/backend DrumGizmo ; versions locales DDrum4UI/ddrum4edit ; racines de samples externes, hashes et licences. Aucun de ces assets locaux n'est copié dans Git. Le bundle partageable reste lui aussi sans asset privé ; une archive personnelle distincte peut embarquer explicitement le preset SD3 utilisateur et le kit DrumGizmo dérivé, avec manifeste `redistribution: prohibited`, uniquement pour migrer vers le laptop du propriétaire.
 
 ## 4. Modes live et gate de sécurité
 
-Les documents du dépôt ne permettent pas encore de déclarer sûr le mode dual final. Le firmware ne contient actuellement aucun echo guard. Des documents signalent un écho/round-trip observé dans certaines configurations, mais le comportement propre du DDrum4 doit être reproduit et quantifié sur un banc isolé avant de réparer l'écart entre la documentation et le code.
+Les documents du dépôt ne permettent pas encore de déclarer sûr le mode dual
+final. Le firmware contient l'echo guard borné et ses tests natifs, mais le
+profil flashé le laisse volontairement désactivé. Des documents signalent un
+écho/round-trip observé dans certaines configurations ; le comportement propre
+du DDrum4 doit être reproduit et quantifié sur un banc isolé avant d'activer le
+guard et d'ouvrir le mode `DUAL`. Le probe borné
+`scripts/probe-ddrum4-soft-through.ps1` matérialise ce gate : 100 Note On, 100
+releases zéro-vélocité et 100 poly-aftertouch, rapport JSON, double confirmation
+et Arduino OUT physiquement débranché.
 
 Le prototype est livré par paliers :
 
@@ -401,7 +429,11 @@ Propriétaire : agent Capture/Export. Dépend de M1 et de la bibliothèque M4.
 
 - fournir à la CLI les notes issues du projet ; fait : `drumgizmo-midimap.json` contient `instrument`, `articulation` et note, puis `drum-sampler export-drumgizmo --note-map` les applique ;
 - exporter les canaux réellement capturés ; quatre canaux seulement si la capture et le backend cible ont été validés ; l'export valide aussi les liens XML (instruments, canaux, WAV lisibles et `filechannel`, puis `midimap`) avant de remettre le kit ;
-- ajouter rapport et smoke test avec version/backend DrumGizmo enregistrés ; fait hors audio avec `drum-sampler verify-drumgizmo`, le chargement audio réel reste un gate matériel.
+- ajouter rapport et smoke test avec version/backend DrumGizmo enregistrés ;
+  fait avec DrumGizmo 0.9.20 sous WSL, `dgvalidator --pedantic`, chargement du
+  moteur et sortie audio WAV factice. La preuve comparative Poly Aftertouch
+  0/127 mesure une atténuation de queue de 23,69 dB ; le package r5 groupe en
+  outre les 14 articulations de hi-hat pour éviter les queues superposées.
 
 Sortie : kit DrumGizmo réellement chargé/joué avec le même namespace logique que SD3.
 
@@ -432,14 +464,15 @@ Propriétaires : intégrateur + Validation/bench.
 
 Travail :
 
-- produire un environnement local reproductible et un raccourci/lanceur sans `PYTHONPATH` manuel ; un installeur signé est hors scope personnel ;
+- [x] produire un environnement Windows x64 reproductible et un raccourci/lanceur sans `PYTHONPATH` manuel : CPython embarqué, dépendances verrouillées, Converter Release, manifest SHA-256, installation versionnée sans droits administrateur, diagnostic post-installation et refus des chemins Win32 trop longs ; un installeur signé reste hors scope personnel ;
+- [x] séparer le ZIP `tools-only`, partageable sans captures/audio, du ZIP `private-with-assets` destiné uniquement au laptop du propriétaire et pouvant contenir le preset SD3 approuvé et le kit DrumGizmo r5 ; aucune archive générée ne rentre dans Git ;
 - exécuter le flux projet -> configs -> flash -> live -> capture -> DDrum4 -> DrumGizmo ;
 - tester Metalcore, Scene électronique, VP1 et VP3/VP4 ;
 - tester débranchement/reconnexion, Panic, fallback DDrum4 et restauration OS ;
 - exécuter les runs de latence sur les deux renderers et archiver les raws ;
 - documenter seulement le démarrage, les branchements et les limites restantes.
 
-Sortie : prototype personnel lançable, rapports de validation et de latence, aucun blocker silencieux. Le bundle exclut captures/audio, profils locaux et secrets interdits par les règles du dépôt.
+Sortie : prototype personnel lançable, rapports de validation et de latence, aucun blocker silencieux. Le bundle public exclut captures/audio, profils locaux et secrets interdits par les règles du dépôt. L'archive privée est un artefact local ignoré, réservé au transfert vers le laptop live, et ne contient jamais les applications ou banques Toontrack elles-mêmes.
 
 ## 8. Organisation multi-agent
 

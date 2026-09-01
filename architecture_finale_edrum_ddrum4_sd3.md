@@ -62,11 +62,15 @@ Exemple : le pad **Stack** produit toujours le même événement physique. Selon
 
 | État | Événement physique | Son logique |
 |---|---|---|
-| Metalcore | `stack.hit` | Acoustic Stack |
-| Sleep Hybrid | `stack.hit` | Acoustic Stack ou Impact |
+| Metalcore | `stack.hit` | Acoustic Stack ou Custom Stack Progressive |
+| Sleep Hybrid | `stack.hit` | Custom Stack Progressive ou Impact |
 | DnB | `stack.hit` | Glitch |
 | Industrial | `stack.hit` | Metallic Hit |
 | Trap | `stack.hit` | Clap ou Acoustic Stack |
+
+Le même pad Stack/Spock expose aussi deux utilitaires de charleston forcés :
+`HH Edge semi-ouvert` pour jouer de la double pédale sans relâcher le pied, et
+`HH Edge fermé`. Ces hits ne remplacent jamais le CC4 continu du vrai pad HH.
 
 Arduino et le `Midi Converter` doivent donc partager **la même définition de l'état logique**, mais chacun possède son propre renderer.
 
@@ -273,9 +277,31 @@ par paire `instrument/articulation` du contrat `rig-project/v1`. Les Scenes et
 VP sont résolus en amont par le Converter, qui choisit la note du Logical
 Sound. DrumGizmo ne change pas de kit à chaque Scene.
 
-La première cible validable est note-only : note-on/off et vélocité. Le CC4
-continu, la position de snare et les chokes ne sont pas émis vers DrumGizmo
-tant qu'un kit/backend n'a pas prouvé une convention MIDI stable pour eux.
+Les centres de caisse claire SD3 composés de plusieurs instruments ne sont pas
+reconstruits en additionnant des prises séparées. La campagne déclenche leurs
+notes de layers simultanément et capture directement chaque cellule de
+vélocité/round-robin. DrumGizmo reçoit ainsi la même attaque cohérente et le
+même équilibre de layers que SD3. Le kit ne peut être exporté que si les 939
+prises élémentaires et les 42 prises composites passent leurs contrôles
+48 kHz/stéréo sans silence, écrêtage ni fichier manquant.
+
+Ce gate a été franchi le 29 août 2026 : 939/939 masters et 42/42 composites
+ont été acceptés sans rejet, manque ni round robin dupliqué. L'export autonome
+contient 77 instruments, 1001 samples et 1018 fichiers validés. Le package r5
+passe aussi `dgvalidator --pedantic` 0.9.20, puis un chargement réel DrumGizmo
+0.9.20 des 2002 canaux en streaming avec entrée synthétique et sortie factice.
+Le moteur traite 48 000 frames et quitte proprement sans ouvrir de hardware.
+
+Le chemin de frappe comprend note-on/off et vélocité. Le package r5 ajoute le
+groupe de choke `hihat` aux dix positions acoustiques, aux deux pédales et aux
+deux hats électroniques. Pour les cymbales, le Converter recible le Poly
+Aftertouch sur la note réellement active. Un smoke audio déterministe du même
+Crash1 bow, Poly Aftertouch 0 puis 127 à 250 ms, a mesuré une attaque identique
+à 0,00 dB et une queue atténuée de 23,69 dB : la convention DrumGizmo 0.9.20
+est donc `user-confirmed`. Le CC4 continu reste quantifié en notes discrètes.
+Snare2 quantifie désormais sa plage NOTE P 8–15 vers les captures
+Center/Mid/Edge DrumGizmo ; seule la position Snare1 issue de CC16 reste
+note-only tant que ses seuils physiques n'ont pas été mesurés.
 
 Quand le kit DrumGizmo contient des articulations de charleston discrètes
 validées, le profil peut toutefois déclarer `quantized_note` pour sa cible
@@ -403,8 +429,8 @@ sans changer le principe.
 | `scene_id` | style global : Metalcore, Sleep, DnB, Industrial, Trap… |
 | `VP1` | identité/configuration de Snare1 |
 | `VP2` | rôle du pad Tom4/Snare2 et identité de Snare2 |
-| `VP3` | famille générale de remapping des percussions/cymbales auxiliaires |
-| `VP4` | variante 1–5 à l'intérieur de la famille VP3 |
+| `VP3` | famille générale de remapping du Stack/Spock et des percussions/cymbales auxiliaires |
+| `VP4` | variante 1–5 du pad Perc à l'intérieur de la famille VP3 |
 
 La Scene fournit des **valeurs par défaut**. Les VP sont des overrides rapides.
 
@@ -484,10 +510,10 @@ Une proposition simple :
 | Message | Signification |
 |---|---|
 | Program Change sur CH14/CH15 | `scene_id` |
-| CC20 | VP1, valeurs 0–4 |
-| CC21 | VP2, valeurs 0–4 |
-| CC22 | VP3, valeurs 0–4 |
-| CC23 | VP4, valeurs 0–4 |
+| CC20 | VP1, valeurs 1–5 |
+| CC21 | VP2, valeurs 1–6 |
+| CC22 | VP3/Stack, valeurs 1–8 |
+| CC23 | VP4/Perc, valeurs 1–5 |
 | CC24 | Click on/off ou action PC dédiée |
 | CC25–31 | réservés |
 
@@ -668,6 +694,19 @@ logical sound
         ↓
 custom SD3 MIDI note / CC
 ```
+
+Le chargement d'un nouveau `.sd3p` n'est requis que lorsque la composition
+physique du MegaKit change : ajout/retrait/remplacement d'un instrument, de ses
+mics ou de son routage interne. Une fois le MegaKit chargé :
+
+- les sons et articulations changent par Note/CC ;
+- les ouvertures forcées du HH envoient leur CC4 juste avant le hit ;
+- les mutes, fades et niveaux de bus doivent passer par des paramètres
+  d'automation SD3 pré-appris, jamais par un rechargement de kit ;
+- faute de preuve d'un mapping `midilearn` sérialisable et stable dans les
+  presets locaux, le Converter n'invente pas d'adresse de bus. Les futurs CC
+  d'automation seront ajoutés après apprentissage/mesure dans SD3 et conservés
+  dans le profil de scène.
 
 Cela permet :
 
@@ -1253,10 +1292,28 @@ Le SD3 Renderer n'a pas cette contrainte : il route simplement vers la vraie des
 | **3** | Drum'n'Bass |
 | **4** | Industrial |
 | **5** | Trap / Electro |
+| **6** | Progressive Foundry Custom Stack 20/17/13 |
+| **7** | Stack pad → HH Edge semi-ouvert forcé |
+| **8** | Stack pad → HH Edge fermé forcé |
 
 ## 32.2 VP4 — variante dans la famille
 
 VP4 vaut 1–5 à l'intérieur de VP3, soit **25 layouts de surfaces** au lieu de 5 + 5 choix indépendants.
+
+Les valeurs VP3 6–8 sont des accès directs au pad Stack/Spock et laissent le
+pad Perc piloté par VP4 :
+
+| VP3 | Hit du pad `stack.hit` | SD3 | DDrum4 r15 | DrumGizmo |
+|---:|---|---|---|---|
+| **6** | Custom Stack Progressive 20/17/13 | note 86, voix `Spock/Crash4-5` | fallback Acoustic Stack note 48 | note 86 |
+| **7** | HH Edge semi-ouvert forcé | CC4=64 puis note 65 | NOTE P 42 | capture `hh.edge_half`, note 121 |
+| **8** | HH Edge fermé forcé | CC4=127 puis note 65 | NOTE P 40 | capture `hh.edge_closed`, note 117 |
+
+Le Custom Stack est une **voix échantillonnée SD3 unique** : Toontrack assemble
+les cymbales 20/17/13 dans l'instrument. Le renderer ne doit donc pas fabriquer
+un accord de trois notes. Pour VP3 7/8, le CC4 fixe est envoyé immédiatement
+avant le Note On ; le prochain CC4 réel du eDRUMin continue ensuite son chemin
+normal.
 
 ### VP3 = 1 — Acoustic
 
@@ -1322,7 +1379,7 @@ VP4 vaut 1–5 à l'intérieur de VP3, soit **25 layouts de surfaces** au lieu d
 | China1 | China | China/Impact | Low e-tom | Metallic | Cowbell/Clap |
 | China2 | China | China/FX | Glitch/Woodblock | Industrial Hit | Woodblock/Rim |
 | Ride | Ride | Ride | Ride/Click | Ride/Metal | Click/FX |
-| **Stack** | **Acoustic Stack** | Stack/Impact | Glitch/e-tom/Stack | Metallic/Impact/Stack | Clap/HH/Stack |
+| **Stack** | **Acoustic / Progressive Custom / HH Edge forcé** | Stack/Impact | Glitch/e-tom/Stack | Metallic/Impact/Stack | Clap/HH/Stack |
 | **Perc** | Utility/Cowbell/Woodblock | Low e-tom/Clap | Click/Clap | Metal/Glitch | Rim/Click/Clap |
 
 Crash1 et Crash2 restent les deux surfaces acoustiques les plus protégées.
@@ -1376,46 +1433,50 @@ Chaque device possède sa propre table `raw MIDI → Physical ID`.
 
 ## 35.1 eDRUMin
 
-Le eDRUMin doit conserver le maximum d'expression. Les notes exactes peuvent être remappées ; une proposition de namespace simple est :
+Le eDRUMin doit conserver le maximum d'expression. Les notes ci-dessous sont
+le **contrat imposé au module**, pas des valeurs à découvrir en frappant les
+pads. Elles sont enregistrées dans une custom Drum Map eDRUMin et restent
+stables pour toutes les Scenes et palettes :
 
 | Raw event CH_EDRUM | Physical ID | Information conservée |
 |---|---|---|
-| Note 0 | `snare1.head` | velocity + position continue/metadata |
-| Note 1 | `snare1.rimshot` / `snare1.cross` | zone selon configuration |
-| Note 2 | `hh.bow` | velocity + CC4 |
-| Note 3 | `hh.edge` | velocity + CC4 |
-| Note 4 | `hh.pedal_close` | velocity |
-| Note 5 | `hh.pedal_splash` | velocity |
-| **CC4** | `hh.opening` | **0–127 continu** |
+| Note 0 | `snare1.head` | velocity ; position associée par CC16 |
+| Note 1 | `snare1.rimshot` | velocity |
+| Note 2 | `snare1.cross` | velocity |
+| Note 3 | `hh.bow` | velocity + CC4 |
+| Note 4 | `hh.edge` | velocity + CC4 |
+| Note 5 | `hh.pedal_close` | velocity |
+| Note 6 | `hh.pedal_splash` | velocity |
+| Note 7 | `ride.bow` | velocity |
+| Note 8 | `ride.bell` | velocity |
+| **CC4** | `hh.opening` | **0–127 continu, fermé 127 / ouvert 0 à mesurer** |
+| **CC16** | `snare1.head.position` | **0–127 continu, transmis sans perte à SD3** |
 
-Si eDRUMin encode la position de snare avec un autre message/CC ou plusieurs notes, le `Source Profile` traduit ce format vers `position=0..1`. Arduino peut ensuite quantifier en Center/Mid/Edge pour DDrum4, alors que le Converter peut garder une résolution supérieure pour SD3.
+Le Source Profile courant normalise la position eDRUMin CC16 vers
+`snare1.head.position`. Le Converter la retransmet telle quelle à SD3 sur
+CH10/CC16. Une quantification Center/Mid/Edge pour DDrum4 ou DrumGizmo exige
+encore les seuils observés du pad physique et ne doit pas être inventée.
 
 ## 35.2 DDTi
 
-Le DDTi peut être entièrement remappé. Pour simplifier le debug, on recommande une plage compacte et explicite sur `CH_DDTI`.
+Le DDTi est entièrement remappé sur `CH_DDTI = CH2`. Cette table est le
+contrat écrit par l'outil DDTi dans les vingt kits internes ; elle n'est pas un
+exemple et elle ne dépend pas des pads :
 
-Exemple de mapping à adapter aux pads réellement branchés au DDTi :
+| Entrée DDTi | Zone | Raw note CH2 | Physical ID |
+|---:|---|---:|---|
+| 1 | Tip | 16 | `crash1.bow` |
+| 1 | Ring | 17 | `crash1.edge` |
+| 2 | Tip | 18 | `crash2.bow` |
+| 2 | Ring | 19 | `crash2.edge` |
+| 3 | Tip | 20 | `crash3.edge` |
+| 4 | Tip | 21 | `splash1.hit` |
+| 5 | Tip | 22 | `splash2.hit` |
+| 6 | Tip | 23 | `stack.hit` |
 
-| Raw note CH_DDTI | Physical ID proposé |
-|---:|---|
-| 16 | `splash1.hit` |
-| 17 | `splash2.hit` |
-| 18 | `ride.bow` |
-| 19 | `ride.bell` |
-| 20 | `crash1.bow` |
-| 21 | `crash1.edge` |
-| 22 | `crash2.bow` |
-| 23 | `crash2.edge` |
-| 24 | `crash3.edge` |
-| 25 | `china1.edge` |
-| 26 | `china1.bell` |
-| 27 | `china2.edge` |
-| 28 | `china2.bell` |
-| 29 | `perc.hit` |
-| 30 | `stack.hit` |
-| 31 | réserve |
-
-Les pads qui ne sont pas physiquement sur le DDTi sont simplement retirés de ce profile.
+Ride, chinas et percussion auxiliaire ne sont pas sur le DDTi : ils restent
+respectivement propriétaires de l'eDRUMin et du DDrum4. Les zones Ring non
+utilisées ne sont pas routées.
 
 Les chokes/zone messages réels du DDTi doivent être normalisés par le profile sans imposer leur représentation au reste du système.
 
@@ -1427,20 +1488,55 @@ Dans la configuration renderer proposée :
 
 | Trigger/channel physique DDrum4 | Raw base note | Physical pad connecté |
 |---|---:|---|
-| KICK | 0 | **à renseigner selon câblage** |
-| SNARE | 8 | **à renseigner** |
-| RIM | 16 | **à renseigner** |
-| TOM HIGH | 24 | **à renseigner** |
-| TOM MID | 32 | **à renseigner** |
-| TOM LOW | 40 | **à renseigner** |
-| PERC | 48 | **à renseigner** |
-| CYMBAL1 | 56 | **à renseigner** |
-| CYMBAL2 | 64 | **à renseigner** |
-| HI-HAT | 72 | **à renseigner** |
+| KICK | 0 | `kick.hit` |
+| SNARE | 8 | `snare2.head`, position brute 8–15 avec NOTE P=8 |
+| RIM | 16 | `snare2.rimshot` / `snare2.cross` |
+| TOM HIGH | 24 | `tom1.hit` |
+| TOM MID | 32 | `tom2.hit` |
+| TOM LOW | 40 | `tom3.hit` |
+| PERC | 48 | libre dans le câblage courant |
+| CYMBAL1 | 56 | `china1.edge` / `china1.bell` |
+| CYMBAL2 | 64 | `china2.edge` / `china2.bell` |
+| HI-HAT | 72 | `perc.hit`, hi-hat DDrum utilisé en percussion |
 
 Cette table est la seule partie du `Source Profile DDrum4` à modifier si l'on recâble les pads sur d'autres trigger inputs.
 
 Pour un pad positionnel branché au DDrum4, les offsets du bloc raw (`base + 0…7`) doivent être interprétés comme **position physique du hit**, et non comme l'articulation du Sound renderer actuellement chargé. Le Source Profile reconstruit donc d'abord `pad + position`, puis le Scene Router décide de la destination.
+
+Le profil courant applique ce contrat à `snare2.head` : les notes brutes 8–15
+sont normalisées en position 0–127 pour SD3/CC16. Le renderer DDrum4 les
+quantifie en Center/Mid/Edge sur 8/11/12 lorsque VP2 sélectionne une caisse
+claire, et les replie sur une seule note lorsque la surface joue Tom4 ou un
+son électronique non positionnel. DrumGizmo sélectionne de même Center/Mid/Edge
+sur 32–34, 37–39 ou 42–44 selon la scène acoustique ; Tom4 et l'électronique
+restent mono-position.
+
+Correction après le test matériel du 31 août 2026 : les anciennes sorties
+33/34/35 étaient des positions vides de `PERC_981`. La quantification DDrum4
+Center/Mid/Edge utilise désormais **8/11/12** dans `SNRE_981`; Tom4 utilise
+**27** (Floor Tom 2). Le compilateur est couvert par un test qui interdit toute
+note renderer ne possédant aucun layer résident dans la banque installée.
+
+Le renderer DDrum4 compact applique aussi les fallbacks résidents suivants :
+
+| Famille logique | Note(s) réellement audibles | Sound résident |
+|---|---:|---|
+| Kick acoustique / électronique | 0 / 4 | `KICK_981` |
+| Snare Center/Mid/Edge | 8 / 11 / 12 | `SNRE_981` |
+| Rimshot / cross-stick | 16 / 18 | `RIM_981` |
+| Toms 1–4 | 24 / 25 / 26 / 27 | `TOM_981` |
+| HH edge fermé → ouvert, pédale | 40–45 | `CYMB_981` |
+| Cowbell / woodblock | 54 / 55 | `PERC_982` |
+| Tous les crashs bow/edge | 56 | `CYMB_982` — un sample, pitch par palette |
+| Splash 1/2 | 58 | `CYMB_982` |
+| Chinas edge/bell | 59 | `CYMB_982` |
+| Ride bow/bell | 66 / 67 | `CYMB_983` |
+| HH bow fermé → ouvert | 72–76 | `HHAT_981` |
+| Stack DDrum4 par défaut | 43 | `CYMB_981`, HH edge ouvert |
+
+Les articulations distinctes et le Progressive Custom Stack restent complètes
+dans SD3/DrumGizmo. Le DDrum4 réduit volontairement ces cas aux samples résidents
+sans adresser une position vide.
 
 ### Exemple important
 
@@ -1474,7 +1570,7 @@ Exemples :
 | `kick.hit` | MC Kick | Sleep Kick | DnB Kick | Industrial Kick | 808 Kick |
 | `snare1.head` | VP1 Snare | VP1 Snare | VP1 Snare | VP1 Snare | VP1 Snare |
 | `snare2.head` | Tom4 ou VP2 Snare | VP2 | VP2 | VP2 e-snare | VP2 e-snare |
-| `stack.hit` | Acoustic Stack | Stack/Impact | Glitch | Metallic Hit | Clap/Stack |
+| `stack.hit` | Acoustic/Custom Stack/HH Edge forcé selon VP3 | Stack/Impact | Glitch | Metallic Hit | Clap/Stack |
 | `perc.hit` | Utility | Low E-Tom/Clap | Click | Glitch/Metal | Click/Clap |
 | `splash1.hit` | Splash | Splash/e-HH | E-HH Closed | Glitch | E-HH Closed |
 | `china2.edge` | China | China/FX | Glitch/Woodblock | Industrial Hit | Woodblock/Rim |
@@ -1635,6 +1731,10 @@ Center / Mid / Edge
 
 puis NOTE P correspondant au Sound actif.
 
+Cette conversion DDrum4 est une cible mesurée future. Dans le profil v23
+courant, CC16 est fonctionnel vers SD3 seulement ; DDrum4 et DrumGizmo sont
+explicitement `unsupported` pour cette expression.
+
 ## 38.3 Hi-Hat
 
 ```text
@@ -1646,6 +1746,13 @@ NOTE P DDrum4
 ```
 
 Le CC original reste disponible sur le bus brut pour SD3.
+
+Pour le premier flash sans pads, la promotion configurée emploie le contrat
+normalisé eDRUMin `fermé=127/ouvert=0` et les seuils musicaux déclarés pour
+DDrum4/DrumGizmo. Ils deviennent `user-confirmed` par le snapshot module, pas
+`measured`. Après branchement, une trace CC4 doit contenir le contrôleur 4
+prescrit et permet d'affiner endpoints/seuils ; toute autre adresse est un
+`contract-mismatch` et ne réécrit jamais la map.
 
 ## 38.4 Choke
 
@@ -1661,6 +1768,25 @@ la frappe. Le simulateur offline reproduit cette séquence (Note-On, changement
 d'état, aftertouch) avec son propre ledger : il ne réévalue donc jamais la
 nouvelle Scene pour un hit déjà joué. Aucun profil ne l'active sans trace
 isolée mesurée.
+
+Le bootstrap sans pads est une exception strictement limitée au premier flash :
+`promote-configured` conserve les adresses prescrites et produit
+`validation_stage: post-flash-validation-pending`. Le mapping firmware peut
+être flashé avec les receipts DDTi/eDRUMin, mais le launcher live le refuse.
+Après branchement, seules les traces physiques complètes produisent un profil
+`hardware-verified` jouable ; les valeurs configurées ne sont donc jamais
+présentées comme des mesures de pad.
+
+La preuve est volontairement divisée en deux. La trace receive-only démontre
+uniquement qu'un module source émet, après une frappe isolée, un Poly
+Aftertouch de même canal/note. Elle ne démontre pas qu'un renderer a réellement
+coupé l'audio. Lors de la promotion, l'opérateur confirme donc séparément les
+cibles `ddrum4` et `sd3`; elles deviennent `user-confirmed`, jamais `measured`
+sur la seule base de la trace. Le contrôle audible de chaque choke DDrum4/SD3
+reste un gate post-flash. Pour DrumGizmo, cette convention est désormais
+prouvée sur le moteur 0.9.20 et le package r5 : le target `poly_aftertouch` est
+`user-confirmed`. Les traces physiques restent néanmoins obligatoires pour
+démontrer que chaque module source émet bien son aftertouch corrélé.
 
 ---
 # 39. MIDI Map E — vers SD3 : custom mega-kit
@@ -2268,12 +2394,45 @@ et les CC VP de CH14/15 restent ceux du contrat. Une capture qui ne permet pas e
 d'abaisser CC4, Note P ou une expression au firmware fait échouer la génération
 plutôt que d'inventer une règle.
 
+Une expression déclarée `unsupported` pour DDrum4 avec un événement
+`unsupported` est une exception explicite : elle peut rester active sur le PC
+sans réserver de table Arduino. C'est le cas de Snare1 CC16, transmis à SD3 mais
+volontairement note-only côté DDrum4. Cette omission déclarée ne doit pas rendre
+le reste du firmware non flashable.
+
+La même distinction vaut pour un renderer PC : une expression explicitement
+`unsupported` reste publiée dans le rapport de capacités, mais ne rend pas son
+chemin Note-On inutilisable. DrumGizmo peut donc être `ready` en mode
+note-only pour la position non implémentée, tandis qu'une expression
+absente, `planned` ou mal abaissée reste bloquante.
+
+Les adresses brutes DDrum4/eDRUMin/DDTi sont configurées par le toolchain et ne
+sont donc pas dérivées d'une campagne de frappe. Le flash exige une preuve de
+configuration (DDrum4 déjà confirmé, receipt DDTi après dump/écriture, Drum Map
+eDRUMin appliquée), puis les frappes réelles servent à calibrer dynamique,
+CC4, CC16, crosstalk et chokes. Elles vérifient le contrat sans le réécrire.
+
+Le compilateur calcule un `source_contract_sha256` indépendant des noms de
+ports PC. Le template DDTi, le contrat source et le mapping firmware live
+doivent porter le même fingerprint. Le flash Uno passe par un seul gate :
+mapping `deployment=live/status=ready/hardware_flash=ready`, readback DDTi
+canonique, snapshot eDRUMin confirmé, DDrum4 confirmé et header régénéré dont
+le hash est figé dans un permis d'upload court. Un `pio upload` direct sans ce
+permis est refusé avant l'ouverture du port série.
+
+Avant les calibrations physiques, `scripts/build-firmware-capacity.ps1` peut compiler
+les tables complètes dans l'environnement `uno_capacity`. Le header d'estimation
+exige `DDRUM_CAPACITY_ESTIMATE_ONLY` et l'environnement remplace la commande
+d'upload par un rejet systématique. Ce chemin prouve la capacité AVR sans
+affaiblir le gate `ready/live/hardware_flash: ready` du vrai header.
+
 ## 44.9 SD3
 
 - un seul mega-kit ;
 - toutes les destinations présentes simultanément ;
 - custom MIDI map §39 ;
 - CC4 continu pour HH ;
+- CC16 continu pour la position de Snare1 ;
 - sorties 4-stems vers UMC ;
 - aucun changement de preset requis pendant le live.
 
@@ -2284,6 +2443,8 @@ plutôt que d'inventer une règle.
   `drum-sampler export-drumgizmo --note-map` ;
 - le backend et la version sont déclarés dans le rapport de session ;
 - ALSA/JACK et les ports MIDI/audio sont préflightés avant le live ;
+- le package r5 groupe les 14 sons de charleston et accepte le choke de cymbale
+  par Poly Aftertouch reciblé sur la frappe active ;
 - les expressions non validées par le kit restent des sacrifices déclarés,
   jamais des CC inventés par le Converter.
 
@@ -2565,6 +2726,9 @@ renderers:
     perc.glitch: {sound: S10, variation: 3, note: 55}
   sd3:
     perc.glitch: {note: 89}
+    stack.progressive_custom: {note: 86}
+    hh.edge_half: {note: 65, controllers: [[4, 64]]}
+    hh.edge_closed: {note: 65, controllers: [[4, 127]]}
 ```
 
 L'éditeur de kit envisagé peut générer ce fichier pour Arduino et le Converter afin d'éviter toute divergence.
@@ -2672,9 +2836,10 @@ Sources de référence :
 
 Le document fixe l'architecture, mais laisse volontairement certains paramètres dans les fichiers de configuration plutôt que de les graver dans le design :
 
-- quels pads non-eDRUMin sont physiquement sur DDTi ou DDrum4 ;
-- notes brutes exactes DDTi/eDRUMin si elles diffèrent des propositions ;
-- format exact de la position eDRUMin ;
+- le réglage analogique des pads sur leur module propriétaire (gain, seuil,
+  scan, retrigger, crosstalk et courbe), sans modifier les notes contractuelles ;
+- seuils réels de la position eDRUMin CC16 pour une future quantification
+  Center/Mid/Edge DDrum4/DrumGizmo ;
 - représentation réelle des chokes par chaque source ;
 - numéros CC exacts du protocole logique externe si les contrôleurs existants imposent autre chose ;
 - affectation exacte des quatre sorties physiques DDrum4 ;
@@ -2683,3 +2848,41 @@ Le document fixe l'architecture, mais laisse volontairement certains paramètres
 - présence ou non de S11/S12 selon `MEM.LEFT`.
 
 Ces paramètres n'affectent pas le fonctionnement général tant que les invariants du §53 sont respectés.
+
+---
+
+# 58. Déploiement du laptop de répétition/live
+
+Le laptop Windows 11 x64 est l'hôte opérationnel du Control Center, du
+Converter et de SD3, avec DrumGizmo comme renderer alternatif. Il doit pouvoir
+être reconstruit sans clone Git, environnement de développement ni `PYTHONPATH`
+manuel à partir d'une archive versionnée.
+
+Le constructeur `scripts/build-greg-hybrid-live-bundle.ps1` produit :
+
+- CPython 3.12 embarqué et toutes les dépendances GUI/MIDI/audio verrouillées
+  par version et SHA-256 du wheel Windows (`pip --require-hashes`) ;
+- l'ensemble des outils Python, contrats, profils, firmware source et docs ;
+- le Converter Release et un rig recompilé depuis le projet sélectionné ;
+- un manifest SHA-256 exhaustif, un diagnostic sans I/O et un installateur
+  sans droits administrateur avec versions côte à côte ;
+- les raccourcis Control Center, lancement live fail-closed et arrêt/restauration.
+
+Deux scopes sont obligatoirement distincts :
+
+- `tools-only` ne contient aucun preset/audio privé et peut servir de bundle
+  technique partageable. Sa construction refuse explicitement `assets/`, les
+  formats audio/presets module et les archives de kit reconnaissables ;
+- `private-with-assets` peut ajouter le preset SD3 v23 approuvé et le kit
+  DrumGizmo r5 dérivé pour la migration personnelle vers le laptop. Le
+  manifest les marque `redistribution: prohibited`; cette archive reste dans
+  `build/releases`, hors Git, et ne contient jamais SD3, les EZX ou leurs
+  installateurs.
+
+L'installation vérifie chaque fichier avant copie, refuse un chemin trop long
+pour les DLL natives, puis teste Python, Qt, MIDI/audio, tous les modules et le
+Converter. `Configure-Live-Rig.cmd` et le raccourci live restent bloqués tant
+que le projet compilé n'est pas `deployment: live` avec
+`validation_stage: hardware-verified`. Le bundle peut donc être préinstallé
+avant les tests de pads sans créer de faux état jouable ; après promotion, le
+même constructeur produit l'archive finale.
