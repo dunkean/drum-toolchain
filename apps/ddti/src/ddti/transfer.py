@@ -110,6 +110,36 @@ def build_transfer_plan_from_file(path: Path) -> DDTiTransferPlan:
     return build_transfer_plan(path.read_bytes())
 
 
+def verify_configuration_readback(candidate_raw: bytes, readback_raw: bytes) -> dict[str, object]:
+    """Require a complete post-write dump to equal the canonical candidate.
+
+    The DDTi canonicalises the ignored Program Change byte of disabled kits.
+    Both sides are normalised for that one documented behaviour; every other
+    byte, including all trigger settings retained from the fresh base dump,
+    must round-trip exactly.
+    """
+    candidate = decode_configuration(build_transfer_plan(candidate_raw).dump).canonicalize_disabled_program_changes()
+    readback = decode_configuration(build_transfer_plan(readback_raw).dump).canonicalize_disabled_program_changes()
+    differences = diff_ddti_bytes(candidate.raw, readback.raw)
+    if differences:
+        first = differences[0]
+        raise ValueError(
+            "DDTi post-write readback differs from the reviewed candidate: "
+            f"{len(differences)} byte(s), first offset 0x{first.offset:06X}"
+        )
+    candidate_plan = build_transfer_plan(candidate.raw)
+    readback_plan = build_transfer_plan(readback.raw)
+    return {
+        "kind": "ddti-configuration-readback-receipt/v1",
+        "status": "verified",
+        "candidate_sha256": candidate_plan.sha256,
+        "readback_sha256": readback_plan.sha256,
+        "packet_count": len(readback_plan.dump.packets),
+        "byte_count": len(readback_plan.raw),
+        "canonicalization": "disabled-program-change-value-only",
+    }
+
+
 def build_safe_write_plan(source_raw: bytes, candidate_raw: bytes) -> DDTiSafeWritePlan:
     """Reject every candidate mutation outside experimentally proven fields."""
     source_plan = build_transfer_plan(source_raw)

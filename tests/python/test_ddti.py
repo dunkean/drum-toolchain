@@ -21,7 +21,7 @@ from ddti.protocol import decode_dump
 from ddti.diff import diff_bytes, diff_ddti_bytes, diff_files, render_diff
 from ddti.sysex import SysExMessage, parse_stream, render_hex
 from ddti.state import DDTiStateStore
-from ddti.transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan, send_note_write_validation, send_reviewed_transfer, send_safe_configuration
+from ddti.transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan, send_note_write_validation, send_reviewed_transfer, send_safe_configuration, verify_configuration_readback
 
 
 class _InputPort:
@@ -54,6 +54,16 @@ class _OutputPort:
 
 
 class DDTiTests(unittest.TestCase):
+    def test_post_write_readback_requires_the_complete_canonical_candidate(self) -> None:
+        golden = (Path(__file__).resolve().parents[2] / "captures/factory_dump_002_full.golden.syx").read_bytes()
+        candidate = decode_configuration(decode_dump(golden)).canonicalize_disabled_program_changes()
+        receipt = verify_configuration_readback(golden, candidate.raw)
+        self.assertEqual(receipt["status"], "verified")
+        self.assertEqual(receipt["candidate_sha256"], receipt["readback_sha256"])
+        changed = candidate.with_note(0, 1, "tip", candidate.kits[0].inputs[0].tip.note + 1)
+        with self.assertRaisesRegex(ValueError, "readback differs"):
+            verify_configuration_readback(golden, changed.raw)
+
     def test_documented_velocity_curve_codes_are_named(self) -> None:
         self.assertEqual(
             VELOCITY_CURVE_LABELS,
@@ -453,13 +463,13 @@ class DDTiTests(unittest.TestCase):
         self.assertEqual(bindings, set(roles))
         self.assertEqual(sorted(roles.values()), list(range(16, 24)))
         self.assertEqual(len({(binding["input"], binding["zone"]) for binding in layout["bindings"]}), 8)
-        kit_body = bytes((9, 35, 3)) * 20 + bytes(6)
-        raw = bytes((0xF0, 0, 0, 0x0E, 0x2C, 0x0D, 0, 0, 0x46, 1, 0)) + kit_body + bytes((0xF7,))
+        raw = (repository / "captures/factory_dump_002_full.golden.syx").read_bytes()
         staged = apply_role_template(decode_configuration(decode_dump(raw)), template, layout)
-        for binding in layout["bindings"]:
-            zone = getattr(staged.kits[0].inputs[binding["input"] - 1], binding["zone"])
-            self.assertEqual(zone.channel, 2)
-            self.assertEqual(zone.note, roles[binding["role"]])
+        for kit in staged.kits[:20]:
+            for binding in layout["bindings"]:
+                zone = getattr(kit.inputs[binding["input"] - 1], binding["zone"])
+                self.assertEqual(zone.channel, 2)
+                self.assertEqual(zone.note, roles[binding["role"]])
 
     def test_transfer_plan_accepts_only_a_complete_observed_dump(self) -> None:
         kits = b"".join(

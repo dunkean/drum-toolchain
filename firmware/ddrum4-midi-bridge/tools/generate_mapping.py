@@ -25,12 +25,22 @@ def integer(value, label, minimum, maximum):
     return value
 
 
-def project_mapping_header(document, output_channel):
-    """Lower a ready rig-compiler firmware plan to fixed Arduino tables."""
+def project_mapping_header(document, output_channel, *, capacity_estimate=False):
+    """Lower a rig-compiler firmware plan to fixed Arduino tables.
+
+    Normal output remains restricted to a reviewed live flash plan.  Capacity
+    estimates may lower a complete simulation plan, but the resulting header
+    contains a compile-time guard and is therefore usable only by the dedicated
+    non-uploadable PlatformIO environment.
+    """
     if document.get("format") != "ddrum4-firmware-project-mapping-plan/v1":
         raise ValueError("expected ddrum4-firmware-project-mapping-plan/v1")
-    if document.get("status") != "ready" or document.get("deployment") != "live" or document.get("hardware_flash") != "ready":
+    if (not capacity_estimate and
+            (document.get("status") != "ready" or document.get("deployment") != "live" or
+             document.get("hardware_flash") != "ready")):
         raise ValueError("firmware project mapping is not a verified live flash plan")
+    if capacity_estimate and document.get("lowering_blockers"):
+        raise ValueError("capacity estimate requires a firmware plan without lowering blockers")
     output_channel = integer(output_channel, "output channel", 1, 16)
     if output_channel != integer(document.get("ddrum4_output_channel"), "project DDrum4 output channel", 1, 16):
         raise ValueError("--output-channel differs from the reviewed project DDrum4 output channel")
@@ -50,6 +60,9 @@ def project_mapping_header(document, output_channel):
     if hihat_document is not None:
         if not isinstance(hihat_document, dict):
             raise ValueError("hihat_quantization must be an object")
+        accepted_hihat_statuses = {"measured", "user-confirmed", "planned"} if capacity_estimate else {"measured", "user-confirmed"}
+        if hihat_document.get("status") not in accepted_hihat_statuses:
+            raise ValueError("hihat_quantization must be measured or user-confirmed before firmware generation")
         hihat_source_channel = integer(hihat_document.get("source_channel"), "hihat source channel", 1, 16)
         hihat_cc = integer(hihat_document.get("input_cc"), "hihat input CC", 0, 127)
         hihat_closed = integer(hihat_document.get("input_closed"), "hihat closed value", 0, 127)
@@ -69,7 +82,7 @@ def project_mapping_header(document, output_channel):
                     not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1):
                 raise ValueError(f"hihat articulation {physical!r} has invalid zone count")
             notes = [integer(value, f"hihat {physical} note", 0, 127) for value in notes]
-            boundaries = [integer(value, f"hihat {physical} boundary", 0, 127) for value in boundaries]
+            boundaries = [integer(value, f"hihat {physical} boundary", 0, 126) for value in boundaries]
             if any(right <= left for left, right in zip(boundaries, boundaries[1:])):
                 raise ValueError(f"hihat articulation {physical!r} boundaries must rise")
             hihat_routes.append((physical, notes, boundaries))
@@ -103,16 +116,30 @@ def project_mapping_header(document, output_channel):
         if (hihat_document is not None and match.get("type") == "cc" and
                 source.get("channel") == hihat_source_channel and match.get("cc") == hihat_cc):
             continue
+        declared_expression = next((item for item in expression_routing
+                                    if isinstance(item, dict) and
+                                    item.get("source") == source.get("id") and
+                                    item.get("physical") == record.get("physical") and
+                                    item.get("expression") in record.get("emit", {}).get("expressions", ())), None)
+        ddrum_expression_target = (declared_expression.get("targets", {}).get("ddrum4", {})
+                                   if isinstance(declared_expression, dict) else {})
+        # Explicit PC-only expression routes consume no Arduino table entry.
+        # They are not silently ignored: the compiler capability report keeps
+        # them visible as unsupported for the DDrum4 target.
+        if (match.get("type") in {"cc", "poly_aftertouch"} and
+                ddrum_expression_target.get("status") == "unsupported" and
+                ddrum_expression_target.get("event", {}).get("type") == "unsupported"):
+            continue
         # A reviewed pressure route follows the original active raw Note via
         # DdrumBridge's bounded ledger. It therefore has no independent
         # StateRoute to generate.
         if match.get("type") == "poly_aftertouch":
             pressure_records.append((index, source, match, record.get("physical")))
             continue
-        if match.get("type") != "note":
-            raise ValueError(f"record {index}: firmware generation supports only exact note decoders")
+        matcher = match.get("type")
+        if matcher not in {"note", "note_range"}:
+            raise ValueError(f"record {index}: firmware generation supports exact or positional Note decoders")
         channel = integer(source.get("channel"), f"record {index} source channel", 1, 16)
-        note = integer(match.get("note"), f"record {index} source note", 0, 127)
         renderer = renderers.get("ddrum4")
         if not isinstance(renderer, dict):
             raise ValueError(f"record {index}: ddrum4 renderer is required")
@@ -128,7 +155,42 @@ def project_mapping_header(document, output_channel):
             if name not in variables:
                 raise ValueError(f"record {index}: unknown firmware VP predicate {name!r}")
             values[variables.index(name)] = integer(value, f"record {index} predicate {name}", 0, 127)
-        state_routes.append((channel, note, scenes.index(scene), *values, output_note))
+        if matcher == "note":
+            input_outputs = [(integer(match.get("note"), f"record {index} source note", 0, 127), output_note)]
+        else:
+            emit = record.get("emit", {})
+            note_range = match.get("note_range")
+            if (not isinstance(emit, dict) or "position" not in emit.get("expressions", ()) or
+                    not isinstance(note_range, list) or len(note_range) != 2):
+                raise ValueError(f"record {index}: note_range requires an explicit position expression and two bounds")
+            low = integer(note_range[0], f"record {index} source range low", 0, 127)
+            high = integer(note_range[1], f"record {index} source range high", 0, 127)
+            if high <= low:
+                raise ValueError(f"record {index}: positional source range must have distinct ascending bounds")
+            policy = renderer.get("position_policy")
+            if policy is None:
+                input_outputs = [(note, output_note) for note in range(low, high + 1)]
+            elif policy == "note_range_quantized":
+                notes = renderer.get("position_notes")
+                boundaries = renderer.get("position_upper_boundaries")
+                if (not isinstance(notes, list) or not 2 <= len(notes) <= 8 or
+                        not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1):
+                    raise ValueError(f"record {index}: invalid note_range_quantized renderer")
+                notes = [integer(value, f"record {index} position note", 0, 127) for value in notes]
+                boundaries = [integer(value, f"record {index} position boundary", 0, 126) for value in boundaries]
+                if notes[0] != output_note or any(right <= left for left, right in zip(boundaries, boundaries[1:])):
+                    raise ValueError(f"record {index}: invalid positional note order or boundaries")
+                input_outputs = []
+                for note in range(low, high + 1):
+                    normalized = ((note - low) * 127) // (high - low)
+                    zone = 0
+                    while zone < len(boundaries) and normalized > boundaries[zone]:
+                        zone += 1
+                    input_outputs.append((note, notes[zone]))
+            else:
+                raise ValueError(f"record {index}: unsupported positional renderer policy {policy!r}")
+        state_routes.extend((channel, note, scenes.index(scene), *values, rendered_note)
+                            for note, rendered_note in input_outputs)
         relay_channels.add(channel)
     if not state_routes:
         raise ValueError("firmware project mapping has no state routes")
@@ -146,7 +208,9 @@ def project_mapping_header(document, output_channel):
             raise ValueError(f"record {index}: pressure requires exactly one declared source-channel-note expression route")
         target = declared[0].get("targets", {}).get("ddrum4", {})
         event = target.get("event", {}) if isinstance(target, dict) else {}
-        if (target.get("status") not in {"measured", "user-confirmed"} or
+        accepted_pressure_statuses = ({"planned", "measured", "user-confirmed"} if capacity_estimate
+                                      else {"measured", "user-confirmed"})
+        if (target.get("status") not in accepted_pressure_statuses or
                 event.get("type") != "poly_aftertouch" or event.get("note_from") != "active_rendered_hit"):
             raise ValueError(f"record {index}: pressure route is not a reviewed active-rendered-hit DDrum4 target")
         primary_notes = {item.get("match", {}).get("note") for item in records
@@ -185,8 +249,8 @@ def project_mapping_header(document, output_channel):
         if scene not in scenes or not isinstance(actions, list):
             raise ValueError("invalid DDrum state action scene")
         for action in actions:
-            if not isinstance(action, dict) or action.get("status") == "planned":
-                raise ValueError("firmware refuses planned DDrum state actions")
+            if not isinstance(action, dict) or action.get("status") not in {"measured", "user-confirmed"}:
+                raise ValueError("firmware accepts measured or user-confirmed DDrum state actions only")
             if action.get("type") != "program_change":
                 raise ValueError("firmware supports only reviewed Program Change state actions; SysEx needs streaming approval")
             predicates = action.get("when", {})
@@ -207,6 +271,15 @@ def project_mapping_header(document, output_channel):
     lines = [
         "// Generated from rig-compiler firmware-project-mapping.json; do not edit manually.",
         f"// Rig project SHA-256: {source_hash}",
+    ]
+    if capacity_estimate:
+        lines.extend([
+            "// CAPACITY ESTIMATE ONLY: this mapping is not reviewed for hardware deployment.",
+            "#ifndef DDRUM_CAPACITY_ESTIMATE_ONLY",
+            '#error "Capacity-estimate mappings must never be used by a flashable firmware environment"',
+            "#endif",
+        ])
+    lines.extend([
         "#pragma once",
         "#include \"DdrumBridge.h\"",
         "",
@@ -218,7 +291,7 @@ def project_mapping_header(document, output_channel):
         "constexpr size_t NOTE_ROUTE_COUNT = 0;",
         "",
         "const StateRoute STATE_ROUTES[] PROGMEM = {",
-    ]
+    ])
     lines.extend("  {" + ", ".join(str(value) for value in (*route, 1, 127, 1, 127)) + "}," for route in state_routes)
     lines.extend([
         "};",
@@ -280,9 +353,25 @@ def project_mapping_header(document, output_channel):
                          f"{len(notes)}, {{" + ", ".join(str(value) for value in padded_boundaries) + "}, {" +
                          ", ".join(str(value) for value in padded_notes) + f"}}}}, // {physical} input note is resolved below")
         # The physical role is resolved from the source decoder, not guessed from a pad socket.
-        decoder_notes = {record["physical"]: record["match"]["note"] for record in records
-                         if isinstance(record, dict) and record.get("match", {}).get("type") == "note" and
-                         record.get("source", {}).get("channel") == hihat_source_channel}
+        decoder_notes = {}
+        decoder_keys = set()
+        for physical, notes, _boundaries in hihat_routes:
+            matching = [record for record in records
+                        if isinstance(record, dict) and record.get("physical") == physical and
+                        record.get("match", {}).get("type") == "note" and
+                        record.get("source", {}).get("channel") == hihat_source_channel]
+            raw_notes = {record["match"].get("note") for record in matching}
+            output_notes = {record.get("renderers", {}).get("ddrum4", {}).get("note") for record in matching}
+            if len(raw_notes) != 1 or not all(isinstance(note, int) and 0 <= note <= 127 for note in raw_notes):
+                raise ValueError(f"hihat articulation {physical!r} needs exactly one exact Note source decoder")
+            if notes[0] not in output_notes:
+                raise ValueError(f"hihat articulation {physical!r} base output note differs from its DDrum4 renderer")
+            raw_note = next(iter(raw_notes))
+            decoder_key = (hihat_source_channel, raw_note)
+            if decoder_key in decoder_keys:
+                raise ValueError("hihat articulations cannot share one source channel/note decoder")
+            decoder_keys.add(decoder_key)
+            decoder_notes[physical] = raw_note
         start = len(lines) - len(hihat_routes)
         for offset, (physical, _notes, _boundaries) in enumerate(hihat_routes):
             if physical not in decoder_notes:
@@ -304,17 +393,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", nargs="?", type=Path)
     parser.add_argument("--project-mapping", type=Path, help="ready firmware-project-mapping.json emitted by rig-compiler")
+    parser.add_argument("--capacity-estimate", action="store_true",
+                        help="generate a guarded compile-only header from a complete non-live project plan")
     parser.add_argument("--output-channel", type=int, help="measured DDrum4 MIDI input channel, 1..16; required with --project-mapping")
     parser.add_argument("--output", type=Path, default=Path("include/generated_mapping.h"))
     args = parser.parse_args()
     try:
         if bool(args.manifest) == bool(args.project_mapping):
             raise ValueError("provide exactly one manifest or --project-mapping")
+        if args.capacity_estimate and not args.project_mapping:
+            raise ValueError("--capacity-estimate requires --project-mapping")
         if args.project_mapping:
             if args.output_channel is None:
                 raise ValueError("--output-channel is required with --project-mapping")
             document = json.loads(args.project_mapping.read_text(encoding="utf-8"))
-            output = project_mapping_header(document, args.output_channel)
+            output = project_mapping_header(document, args.output_channel,
+                                            capacity_estimate=args.capacity_estimate)
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(output, encoding="utf-8")
             return 0

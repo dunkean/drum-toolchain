@@ -13,7 +13,7 @@ from .models import decode_configuration
 from .mappings import apply_role_template
 from .presets import load_document, write_document
 from .protocol import decode_file
-from .transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan_from_file, send_note_write_validation, send_safe_configuration, send_settings_write_validation
+from .transfer import build_note_write_validation_plan, build_safe_write_plan, build_settings_write_validation_plan, build_transfer_plan_from_file, send_note_write_validation, send_safe_configuration, send_settings_write_validation, verify_configuration_readback
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -96,6 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
     safe_write.add_argument("--expected-sha256", required=True)
     safe_write.add_argument("--confirm", required=True, help="must be I_AUTHORIZE_DDTI_CONFIRMED_FIELDS")
     safe_write.add_argument("--inter-message-ms", type=float, default=50)
+    readback = commands.add_parser("verify-readback", help="compare a complete post-write panel dump with the canonical reviewed candidate")
+    readback.add_argument("candidate", type=Path)
+    readback.add_argument("readback", type=Path)
     api = commands.add_parser("serve", help="run the optional local FastAPI service against a captured dump")
     api.add_argument("dump", type=Path)
     api.add_argument("--host", default="127.0.0.1")
@@ -246,6 +249,12 @@ def main(argv: list[str] | None = None) -> int:
             inter_message_ms=args.inter_message_ms,
         )
         print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+    elif args.command == "verify-readback":
+        print(json.dumps(
+            verify_configuration_readback(args.candidate.read_bytes(), args.readback.read_bytes()),
+            indent=2,
+            sort_keys=True,
+        ))
     elif args.command == "serve":
         from .api import create_app
         try:

@@ -1,6 +1,6 @@
 # DDTi USB/MIDI identification
 
-Date observed: 2026-08-19.  This document records operating-system facts only;
+Dates observed: 2026-08-19 and 2026-08-29. This document records operating-system facts only;
 it does not establish the DDTi SysEx protocol.
 
 ## Connected candidate
@@ -48,6 +48,12 @@ Get-PnpDevice -PresentOnly |
 
 - No firmware, bootloader, or write operation has been attempted.
 - No SysEx request has been sent.
-- No DDTi dump has yet been captured in this repository.
-- The next permitted hardware action is a user-initiated panel dump captured
-  by the receive-only `ddti dump` command.
+- A complete 2016-byte / 42-packet golden dump is preserved as
+  `captures/factory_dump_002_full.golden.syx`, SHA-256
+  `43c64c486f72ec349c5ebee4020ef9e176f5d64033118f95fb25f6f81f84c70f`.
+- The reviewed offline staging changes exactly the channel and note fields of
+  the eight declared DDTi roles; it does not modify opaque bytes.
+- The next permitted hardware action is a fresh user-initiated panel dump of
+  the module's current state, captured by the receive-only `ddti dump`
+  command. Any write still requires current-state diff, explicit confirmation
+  and a readback receipt.

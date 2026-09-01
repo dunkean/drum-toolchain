@@ -6,7 +6,7 @@
   "properties": {
     "profile": {"type": "string", "minLength": 1}, "status": {"type": "string"},
     "sources": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "required": ["channel"], "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 1, "maximum": 16}}}},
-    "bindings": {"type": "array", "items": {"type": "object", "required": ["physical", "source", "input", "event"], "additionalProperties": false, "properties": {"physical": {"type": "string"}, "source": {"type": "string"}, "input": {"type": "integer", "minimum": 1}, "event": {"type": "object", "required": ["channel", "note"], "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 1, "maximum": 16}, "note": {"type": "integer", "minimum": 0, "maximum": 127}}}, "controllers": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 127}}}}},
+    "bindings": {"type": "array", "items": {"type": "object", "required": ["physical", "source", "input", "event"], "additionalProperties": false, "properties": {"physical": {"type": "string"}, "source": {"type": "string"}, "input": {"type": "integer", "minimum": 1}, "pad_jack": {"type": "string", "minLength": 1}, "input_mode": {"type": "string", "enum": ["single", "dual-input-primary", "dual-input-secondary"]}, "event": {"type": "object", "required": ["channel", "note"], "additionalProperties": false, "properties": {"channel": {"type": "integer", "minimum": 1, "maximum": 16}, "note": {"type": "integer", "minimum": 0, "maximum": 127}}}, "controllers": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 127}}}}},
     "notes": {"type": "array", "items": {"type": "string"}}
   }
 }

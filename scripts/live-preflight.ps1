@@ -5,8 +5,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'live-common.ps1')
 $configPath = Resolve-Path -LiteralPath $Config
-$session = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$session = Read-LiveJson -Path $configPath.Path
 $problems = [System.Collections.Generic.List[string]]::new()
 
 if ([string]$session.renderer -ne 'sd3') {
@@ -49,12 +50,17 @@ if ([string]::IsNullOrWhiteSpace([string]$session.runtime_profile.project_hash))
     $runtimeText = Get-Content -LiteralPath $session.runtime_profile.path -Raw
     $runtimeFormat = [regex]::Match($runtimeText, '(?m)^format:\s*["'']?([^\r\n"'']+)["'']?\s*$')
     $runtimeDeployment = [regex]::Match($runtimeText, '(?m)^deployment:\s*["'']?([^\r\n"'']+)["'']?\s*$')
+    $runtimeValidationStage = [regex]::Match($runtimeText, '(?m)^validation_stage:\s*["'']?([^\r\n"'']+)["'']?\s*$')
     $runtimeHash = [regex]::Match($runtimeText, '(?m)^source_sha256:\s*["'']?([0-9a-fA-F]{64})["'']?\s*$')
     if (-not $runtimeFormat.Success -or $runtimeFormat.Groups[1].Value.Trim() -ne 'rig-runtime-profile/v1') {
         $problems.Add('runtime_profile.path is not a rig-runtime-profile/v1 artifact')
     }
     if (-not $runtimeDeployment.Success -or $runtimeDeployment.Groups[1].Value.Trim() -ne 'live') {
         $problems.Add('runtime_profile.deployment must be live; simulation artifacts cannot launch a live session')
+    }
+    $validationStage = if ($runtimeValidationStage.Success) { $runtimeValidationStage.Groups[1].Value.Trim() } else { 'missing' }
+    if ($validationStage -ne 'hardware-verified') {
+        $problems.Add("runtime_profile.validation_stage must be hardware-verified before live play; current stage is '$validationStage'")
     }
     if (-not $runtimeHash.Success) {
         $problems.Add('runtime_profile.path does not contain a rig-runtime-profile source_sha256')
@@ -64,6 +70,12 @@ if ([string]::IsNullOrWhiteSpace([string]$session.runtime_profile.project_hash))
 }
 if ([string]::IsNullOrWhiteSpace([string]$session.asio_buffer_confirmation)) {
     $problems.Add('asio_buffer_confirmation must state the buffer verified manually in the driver')
+}
+$powerScheme = [string]$session.low_latency_power_scheme_guid
+if ([string]::IsNullOrWhiteSpace($powerScheme)) {
+    $problems.Add('low_latency_power_scheme_guid is missing')
+} elseif ($powerScheme -notmatch '^[0-9a-fA-F-]{36}$') {
+    $problems.Add('low_latency_power_scheme_guid must be an explicit GUID from powercfg /list')
 }
 
 # Listing names is deliberately read-only.  The preflight never opens an input
@@ -117,4 +129,6 @@ $report = [ordered]@{
     note = 'MIDI ports were listed read-only; this script intentionally does not open MIDI, send MIDI, or change driver settings.'
 }
 $report | ConvertTo-Json -Depth 6
-if ($RequireAll -and $problems.Count) { exit 2 }
+if ($RequireAll -and $problems.Count) {
+    throw "Live preflight blocked the session with $($problems.Count) problem(s)."
+}

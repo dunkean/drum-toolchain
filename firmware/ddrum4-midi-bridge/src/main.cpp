@@ -1,6 +1,10 @@
 #include <Arduino.h>
 #include "DdrumBridge.h"
+#if defined(DDRUM_CAPACITY_ESTIMATE_ONLY)
+#include "generated_capacity_mapping.h"
+#else
 #include "generated_mapping.h"
+#endif
 #include "MidiDinAdapter.h"
 
 // The generated mapping can enable CC4 -> Note-P only after the compiler has

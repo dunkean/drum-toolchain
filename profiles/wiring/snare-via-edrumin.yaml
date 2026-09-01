@@ -6,15 +6,23 @@ bindings:
   - physical: snare_main.head
     source: edrumin
     input: 1
+    pad_jack: hit
+    input_mode: dual-input-primary
     event: {channel: 3, note: 0}
   - physical: snare_main.rim
     source: edrumin
-    input: 1
+    input: 2
+    pad_jack: rim
+    input_mode: dual-input-secondary
     event: {channel: 3, note: 1}
   - physical: snare_main.rim
     source: edrumin
-    input: 1
+    input: 2
+    pad_jack: rim
+    input_mode: dual-input-secondary
     event: {channel: 3, note: 2}
 notes:
   - Notes 0/1/2 are the stable assigned head/rimshot/cross-stick contract shared with the canonical rig project.
-  - Position sensing and electrical trigger settings remain measurement-required until the snare pad is connected.
+  - The physical snare exposes separate HIT and RIM jacks; do not describe both as one stereo eDRUMin input.
+  - Inputs 1/2 form one dual-input dual-piezo pad; they are not independent musical kit pieces.
+  - Rimshot/cross-stick discrimination, position sensing and electrical trigger settings remain calibration-required until the snare pad is connected.

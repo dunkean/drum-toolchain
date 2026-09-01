@@ -154,6 +154,9 @@ bool DdrumBridge::isDeclaredPressure(uint8_t inputChannel, uint8_t inputNote) co
 }
 
 void DdrumBridge::rememberPrimaryHit(uint8_t inputChannel, uint8_t inputNote, const NoteRoute* route, uint32_t nowMs) {
+  // The AVR ledger is intentionally small. Non-chokable kick/snare/tom hits
+  // must never evict an active cymbal before its aftertouch arrives.
+  if (!isDeclaredPressure(inputChannel, inputNote)) return;
   size_t target = 0;
   uint32_t greatestAge = 0;
   bool replacementSelected = false;

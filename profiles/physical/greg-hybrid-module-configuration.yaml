@@ -1,0 +1,42 @@
+schema_version: 1
+kind: greg-hybrid-module-configuration
+id: greg-hybrid-r15
+raw_source_contract: ../projects/metalcore-r15-chain-simulator.yaml
+modules:
+  ddrum4:
+    channel: 12
+    status: user-confirmed
+    method: existing-module-configuration
+    profile: greg-hybrid-kit.yaml
+    owns: [kick_main, snare_secondary, tom_1, tom_2, tom_3, china_1, china_2, hihat_aux]
+  ddti:
+    channel: 2
+    status: verified-readback-2026-08-31
+    method: confirmed-fields-sysex
+    layout: greg-hybrid-ddti-layout.yaml
+    role_template: ../../build/rig/metalcore-r15/ddti-role-template.yaml
+    owns: [crash_1, crash_2, crash_3, splash_1, splash_2, stack]
+    safeguards:
+      - capture-current-complete-dump
+      - stage-only-confirmed-channel-and-note-fields
+      - review-exact-candidate-sha256
+      - write-over-direct-triggerio-usb
+      - capture-and-compare-post-write-dump
+  edrumin:
+    channel: 3
+    status: user-confirmed-snapshot-2026-08-31
+    method: edrumin-control-custom-drum-map
+    profile: greg-hybrid-edrumin.yaml
+    guide: ../../docs/greg-hybrid-edrumin-setup.md
+    owns: [snare_main, hihat_main, ride_main]
+flash_policy:
+  pads_required: false
+  required_before_flash:
+    - ddrum4-configuration-confirmed
+    - ddti-post-write-readback-receipt
+    - edrumin-drum-map-snapshot-confirmed
+  required_after-pad-connection:
+    - trigger-gain-threshold-scan-retrigger-and-crosstalk-calibration
+    - hihat-cc4-pedal-calibration
+    - snare-cc16-response-verification
+    - choke-and-zone-functional-tests

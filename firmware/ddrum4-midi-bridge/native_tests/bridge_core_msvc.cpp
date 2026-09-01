@@ -237,6 +237,57 @@ void test_ledger_expires_stale_aftertouch() {
           "stale pressure was routed after ledger expiry");
 }
 
+void test_ledger_saturation_evicts_only_the_oldest_hit() {
+  NoteRoute manyRoutes[17]{};
+  PressureRoute manyPressureRoutes[17]{};
+  for (uint8_t index = 0; index < 17; ++index) {
+    manyRoutes[index] = {11, static_cast<uint8_t>(30 + index), static_cast<uint8_t>(70 + index),
+                         1, 127, 1, 127};
+    manyPressureRoutes[index] = {11, static_cast<uint8_t>(30 + index)};
+  }
+  BridgeConfig saturated = config;
+  saturated.noteRoutes = manyRoutes;
+  saturated.noteRouteCount = 17;
+  saturated.pressureRoutes = manyPressureRoutes;
+  saturated.pressureRouteCount = 17;
+  DdrumBridge bridge(saturated);
+  MidiEvent output{};
+  for (uint8_t index = 0; index < 17; ++index)
+    require(bridge.process({MidiEventType::NoteOn, 11, static_cast<uint8_t>(30 + index), 90},
+                           &output, 1, index) == 1,
+            "ledger saturation primary hit missing");
+  require(bridge.process({MidiEventType::PolyAftertouch, 11, 30, 64}, &output, 1, 20) == 0,
+          "ledger saturation retained the oldest evicted hit");
+  require(bridge.process({MidiEventType::PolyAftertouch, 11, 31, 65}, &output, 1, 20) == 1 &&
+              output.data1 == 71,
+          "ledger saturation discarded a newer independent hit");
+}
+
+void test_non_pressure_burst_cannot_evict_a_chokable_hit() {
+  NoteRoute burstRoutes[18]{};
+  burstRoutes[0] = {11, 42, 90, 1, 127, 1, 127};
+  for (uint8_t index = 0; index < 17; ++index)
+    burstRoutes[index + 1] = {11, static_cast<uint8_t>(50 + index),
+                              static_cast<uint8_t>(91 + index), 1, 127, 1, 127};
+  const PressureRoute onePressureRoute[] = {{11, 42}};
+  BridgeConfig burst = config;
+  burst.noteRoutes = burstRoutes;
+  burst.noteRouteCount = 18;
+  burst.pressureRoutes = onePressureRoute;
+  burst.pressureRouteCount = 1;
+  DdrumBridge bridge(burst);
+  MidiEvent output{};
+  require(bridge.process({MidiEventType::NoteOn, 11, 42, 90}, &output, 1, 0) == 1,
+          "chokable primary hit missing before non-pressure burst");
+  for (uint8_t index = 0; index < 17; ++index)
+    require(bridge.process({MidiEventType::NoteOn, 11, static_cast<uint8_t>(50 + index), 90},
+                           &output, 1, static_cast<uint32_t>(index + 1)) == 1,
+            "non-pressure burst hit missing");
+  require(bridge.process({MidiEventType::PolyAftertouch, 11, 42, 64}, &output, 1, 20) == 1 &&
+              output.data1 == 90,
+          "non-pressure burst evicted the active chokable hit");
+}
+
 void test_malformed_configs_are_inert() {
   const BridgeConfig malformed = {
       10, programChannels, 3, {11, 4, 4, 0, 127, 0, 127, false}, routes, 4,
@@ -340,6 +391,8 @@ int main() {
     test_state_route_and_ledger_keep_the_primary_hit();
     test_flams_replace_only_the_same_source_note_ledger_entry();
     test_ledger_expires_stale_aftertouch();
+    test_ledger_saturation_evicts_only_the_oldest_hit();
+    test_non_pressure_burst_cannot_evict_a_chokable_hit();
     test_malformed_configs_are_inert();
     test_guard_is_not_generic_and_overflow_keeps_primary_hit();
     test_quantized_hihat_selects_note_p_from_last_cc4();

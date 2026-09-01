@@ -2,7 +2,8 @@
 # the generated project expects when the pads are connected later.
 format: ddti-input-layout/v1
 name: Greg Hybrid DDTi cymbals
-kits: [0]
+# Raw source addresses must remain invariant if the DDTi preset changes.
+kits: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 bindings:
   - {input: 1, zone: tip, role: crash1.bow}
   - {input: 1, zone: ring, role: crash1.edge}

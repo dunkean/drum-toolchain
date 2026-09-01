@@ -3,10 +3,31 @@ kind: edrumin-manual-profile
 id: greg_hybrid_edrumin
 status: ready-for-manual-application
 channel: 3
+transport:
+  usb_device: eDrumIn BLACK
+  din_channel: 3
 device_scope:
   - snare1
   - hihat1
   - ride
+socket_plan:
+  snare1:
+    topology: two-separate-pad-jacks
+    hit_jack: {input: 1, mode: dual-input-primary, kit_piece: snare1}
+    rim_jack: {input: 2, mode: dual-input-secondary, role: rim-sensor}
+    pad_type: dual-piezo-mesh
+    note: "Configure Inputs 1/2 as one dual-input dual-piezo pad. The module correlates HIT and RIM sensors to emit Head/Rimshot/Side Stick; do not leave them as two unrelated mono kit pieces."
+  hihat1:
+    cymbal: {input: 3, mode: stereo, pad_type: Hihat Cymbal, kit_piece: hihat1}
+    controller: {pedal_input: 1, mode: CC, cc: 4, only_send_cc_with_hit: false}
+  ride:
+    topology: dual-input-cymbal
+    bow_edge: {socket: upper-of-pair, pad_type: Roland 3-Zone Ride, kit_piece: ride}
+    bow_bell: {socket: lower-of-same-pair, role: Bell}
+    used_articulations: [bow, bell]
+drum_map:
+  name: Greg Hybrid Raw Source Map
+  persistence: save-to-device
 notes:
   - {physical: snare1.head, note: 0, zone: head}
   - {physical: snare1.rimshot, note: 1, zone: rimshot}
@@ -18,7 +39,10 @@ notes:
   - {physical: ride.bow, note: 7, zone: bow}
   - {physical: ride.bell, note: 8, zone: bell}
 controllers:
-  - {physical: hh.bow, expression: openness, type: cc, cc: 4, closed: 127, open: 0, status: measurement-required}
+  - {physical: hh.bow, expression: openness, type: cc, cc: 4, closed: 127, open: 0, status: configured-default-awaiting-pedal-calibration}
+  - {physical: snare1.head, expression: position, type: cc, cc: 16, status: ready-for-manual-application}
 application:
   method: eDRUMin desktop editor
-  rule: "Apply the channel and notes exactly; measure only trigger thresholds, curves and CC4 closed/open endpoints after pads are connected."
+  automated_protocol: unavailable-in-published-midi-implementation
+  rule: "Apply Global Channel 3 and the custom Drum Map exactly, wait for device auto-save, then export a .edp snapshot. Trigger thresholds, curves, CC4 calibration and CC16 response are post-connection calibration only and never redefine the notes."
+  reference: "eDRUMin 2.5 manual: Drum Map Editor pp.35-36, pedal pp.37-41, Device Settings p.47, MIDI implementation p.62."
