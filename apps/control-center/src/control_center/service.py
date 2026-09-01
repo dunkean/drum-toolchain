@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -59,6 +60,72 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _validate_campaign_session_contract(campaign: dict[str, object], session_path: Path) -> None:
+    """Reject a session whose exact note/controller grid differs from the campaign."""
+    expected = campaign.get("capture_session_sha256")
+    if not isinstance(expected, str) or not session_path.is_file() or _sha256_file(session_path) != expected:
+        raise ValueError("capture-session differs from the immutable campaign contract")
+
+
+def _validate_passing_capture_quality(report_path: Path, library_path: Path,
+                                      expected_takes: int,
+                                      session_path: Path | None = None) -> None:
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("a passing full-capture quality report is required") from error
+    summary = report.get("summary")
+    if (not library_path.is_file() or report.get("kind") != "capture-quality-report"
+            or report.get("library_sha256") != _sha256_file(library_path)
+            or (session_path is not None
+                and report.get("session_sha256") != _sha256_file(session_path))
+            or not isinstance(summary, dict)
+            or summary.get("accepted") != expected_takes
+            or summary.get("rejected") != 0 or summary.get("missing") != 0
+            or summary.get("round_robin_duplicate_cells") != 0):
+        raise ValueError("the full-capture quality report failed, is incomplete, or is stale")
+    if summary.get("round_robin_duplicate_cells") != 0:
+        raise ValueError("the full-capture quality report found duplicate round-robin audio")
+
+
+def _validate_passing_composite_quality(report_path: Path, *, session_path: Path,
+                                        plan_path: Path, composite_root: Path,
+                                        expected_filenames: tuple[str, ...]) -> None:
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("a passing simultaneous-layer quality report is required") from error
+    summary = report.get("summary")
+    if (report.get("kind") != "drumgizmo-composite-quality-report"
+            or not isinstance(summary, dict)
+            or report.get("session_sha256") != _sha256_file(session_path)
+            or report.get("megakit_plan_sha256") != _sha256_file(plan_path)
+            or summary.get("accepted") != len(expected_filenames)
+            or summary.get("rejected") != 0 or summary.get("missing") != 0
+            or summary.get("round_robin_duplicate_cells") != 0):
+        raise ValueError("the simultaneous-layer quality report failed or is incomplete")
+    records = report.get("takes")
+    if not isinstance(records, list):
+        raise ValueError("the simultaneous-layer quality report has no take grid")
+    indexed: dict[str, dict[str, object]] = {}
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+            raise ValueError("the simultaneous-layer quality report has an invalid take")
+        name = Path(record["path"]).name
+        if name in indexed:
+            raise ValueError(f"the simultaneous-layer quality report duplicates {name}")
+        indexed[name] = record
+    if set(indexed) != set(expected_filenames):
+        raise ValueError("the simultaneous-layer quality report does not cover the exact take grid")
+    for name in expected_filenames:
+        path = composite_root / name
+        facts = indexed[name].get("facts")
+        if (indexed[name].get("automatic_status") != "accepted"
+                or not isinstance(facts, dict) or not path.is_file()
+                or facts.get("sha256") != _sha256_file(path)):
+            raise ValueError(f"simultaneous-layer WAV changed after quality review: {name}")
+
+
 def _resolve_sd3_preset(campaign: dict[str, object]) -> tuple[Path, str]:
     """Resolve one unambiguous preset file and enforce its recorded fingerprint."""
     candidates: list[Path] = []
@@ -93,6 +160,94 @@ def _resolve_sd3_preset(campaign: dict[str, object]) -> tuple[Path, str]:
             f"campaign SD3 preset fingerprint changed: expected {declared_sha.lower()}, got {digest}"
         )
     return path, digest
+
+
+def _normalized_sd3_name(value: str) -> str:
+    """Normalize a preset/window label without relying on shell encoding."""
+    return re.sub(r"[^a-z0-9]", "", value.casefold())
+
+
+def active_sd3_window_titles() -> tuple[str, ...]:
+    """Read visible SD3 window titles directly through Win32, without a shell."""
+    if os.name != "nt":
+        return ()
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    titles: list[str] = []
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @callback_type
+    def collect(window: int, _parameter: int) -> bool:
+        if not user32.IsWindowVisible(window):
+            return True
+        length = user32.GetWindowTextLengthW(window)
+        if length <= 0:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(window, buffer, length + 1)
+        title = buffer.value.strip()
+        if "Superior Drummer 3" in title:
+            titles.append(title)
+        return True
+
+    user32.EnumWindows(collect, 0)
+    return tuple(dict.fromkeys(titles))
+
+
+def verify_active_sd3_preset(campaign: dict[str, object], window_title: str | None) -> None:
+    """Require direct evidence that the campaign preset is active in SD3."""
+    preset_name = campaign.get("sd3_preset")
+    if not isinstance(preset_name, str) or not preset_name.strip():
+        raise ValueError("campaign does not declare an SD3 preset name")
+    expected = _normalized_sd3_name(Path(preset_name).stem)
+    active = _normalized_sd3_name(window_title or "")
+    if not expected or expected not in active or "superiordrummer3" not in active:
+        shown = window_title.strip() if isinstance(window_title, str) and window_title.strip() else "no SD3 window"
+        raise ValueError(f"wrong SD3 preset is active: expected {preset_name!r}; active: {shown!r}")
+
+
+def _validate_passing_calibration(calibration: object, *, session_sha256: str,
+                                  preset_sha256: str) -> None:
+    """Validate a complete v2 calibration, not merely its headline status."""
+    if not isinstance(calibration, dict) or calibration.get("format") != "sd3-calibration-report/v2":
+        raise ValueError("full capture requires an SD3 calibration report v2")
+    summary = calibration.get("summary")
+    preset = calibration.get("preset")
+    policy = calibration.get("policy")
+    rows = calibration.get("rows")
+    if (not isinstance(summary, dict) or not isinstance(preset, dict)
+            or not isinstance(policy, dict) or not isinstance(rows, list)):
+        raise ValueError("full capture requires a complete SD3 calibration report v2")
+    level_groups = summary.get("level_groups")
+    if not isinstance(level_groups, dict) or not level_groups:
+        raise ValueError("full capture requires calibration level groups")
+    for name, group in level_groups.items():
+        if (not isinstance(name, str) or not isinstance(group, dict)
+                or not isinstance(group.get("articulations"), int)
+                or group["articulations"] < 1
+                or not isinstance(group.get("peak_span_db"), (int, float))
+                or not isinstance(group.get("quietest_peak_dbfs"), (int, float))
+                or not isinstance(group.get("loudest_peak_dbfs"), (int, float))
+                or not isinstance(group.get("outliers"), list)):
+            raise ValueError(f"invalid calibration level group: {name!r}")
+    relative_outliers = summary.get("relative_level_outliers")
+    if not isinstance(relative_outliers, list):
+        raise ValueError("full capture requires calibration relative-level results")
+    if (summary.get("status") != "technical-pass-user-mix-review-required"
+            or summary.get("technical_failures") != 0
+            or relative_outliers
+            or any(group["outliers"] for group in level_groups.values())):
+        raise ValueError("full capture requires a technically passing, level-balanced calibration")
+    if policy.get("only") != []:
+        raise ValueError("full capture requires a complete calibration, not targeted probes")
+    if summary.get("articulations") != len(rows) or not rows:
+        raise ValueError("full capture requires every calibration articulation row")
+    if (calibration.get("session_sha256") != session_sha256
+            or preset.get("sha256") != preset_sha256
+            or preset.get("loaded_confirmed") is not True):
+        raise ValueError("full capture requires the exact current session and loaded SD3 preset")
 
 
 class ControlCenter:
@@ -137,7 +292,9 @@ class ControlCenter:
     @staticmethod
     def sampler_command(action: str, run_directory: Path, *, note_map: Path | None = None,
                         megakit_plan: Path | None = None,
-                        confirm_capture: bool = False) -> tuple[str, ...]:
+                        confirm_capture: bool = False,
+                        active_sd3_title: str | None = None,
+                        confirm_midi_map: bool = False) -> tuple[str, ...]:
         """Build a capture-campaign command from conventional run artefacts.
 
         This keeps the GUI workflow explicit.  In particular, capture cannot be
@@ -159,37 +316,46 @@ class ControlCenter:
                     identifier = declared_id
             except (OSError, json.JSONDecodeError):
                 pass
+        if campaign_document is not None:
+            _validate_campaign_session_contract(campaign_document, session)
         command = (sys.executable, "-m", "drum_sampler.cli")
-        if action == "capture":
+        if action in {"capture", "capture-composites"}:
             if not confirm_capture:
-                raise ValueError("capture requires explicit confirmation")
+                raise ValueError(f"{action} requires explicit confirmation")
             if campaign_document is not None:
                 preset_path, preset_sha256 = _resolve_sd3_preset(campaign_document)
+                verify_active_sd3_preset(campaign_document, active_sd3_title)
+                if not confirm_midi_map:
+                    raise ValueError("capture requires explicit confirmation of the declared SD3 MIDI map")
                 calibration_path = reports / "calibration.json"
                 try:
                     calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
-                    calibration_summary = calibration.get("summary")
-                    calibration_status = (calibration_summary.get("status")
-                                          if isinstance(calibration_summary, dict) else None)
-                    calibration_preset = calibration.get("preset")
-                    calibrated_preset_sha = (calibration_preset.get("sha256")
-                                             if isinstance(calibration_preset, dict) else None)
-                    preset_loaded_confirmed = (calibration_preset.get("loaded_confirmed") is True
-                                               if isinstance(calibration_preset, dict) else False)
-                    calibrated_session_sha = calibration.get("session_sha256")
                 except (OSError, json.JSONDecodeError):
-                    calibration_status = None
-                    calibrated_preset_sha = None
-                    preset_loaded_confirmed = False
-                    calibrated_session_sha = None
-                current_session_sha = _sha256_file(session)
-                if (calibration_status != "technical-pass-user-mix-review-required"
-                        or calibrated_session_sha != current_session_sha
-                        or calibrated_preset_sha != preset_sha256
-                        or not preset_loaded_confirmed):
                     raise ValueError(
                         "full capture requires a passing calibration for the exact current session and loaded SD3 preset"
                     )
+                _validate_passing_calibration(
+                    calibration,
+                    session_sha256=_sha256_file(session),
+                    preset_sha256=preset_sha256,
+                )
+            if action == "capture-composites":
+                if megakit_plan is None and campaign_document is not None:
+                    declared_plan = campaign_document.get("megakit_plan_file")
+                    if isinstance(declared_plan, str) and declared_plan:
+                        megakit_plan = Path(declared_plan)
+                if megakit_plan is None:
+                    raise ValueError("simultaneous layered-center capture requires the reviewed MegaKit plan")
+                if campaign_document is not None:
+                    expected_takes = campaign_document.get("expected_take_count")
+                    if not isinstance(expected_takes, int):
+                        raise ValueError("campaign expected_take_count is invalid")
+                    _validate_passing_capture_quality(reports / "quality.json", library, expected_takes, session)
+                return (*command, "capture-composites", "--session", str(session),
+                        "--megakit-plan", str(megakit_plan),
+                        "--output-directory", str(run_directory / "drumgizmo-composite-wav"),
+                        "--quality-report", str(reports / "composite-quality.json"),
+                        "--confirm-capture")
             return (*command, "capture", "--session", str(session), "--raw-directory", str(raw),
                     "--library-output", str(library), "--id", identifier, "--source", "sd3",
                     "--license", "SD3 capture for personal kit development", "--confirm-capture")
@@ -199,6 +365,9 @@ class ControlCenter:
             if campaign_document is None:
                 raise ValueError("calibration requires a valid campaign.json with an SD3 preset identity")
             preset_path, preset_sha256 = _resolve_sd3_preset(campaign_document)
+            verify_active_sd3_preset(campaign_document, active_sd3_title)
+            if not confirm_midi_map:
+                raise ValueError("calibration requires explicit confirmation of the declared SD3 MIDI map")
             return (*command, "calibrate", "--session", str(session),
                     "--preset-file", str(preset_path),
                     "--expected-preset-sha256", preset_sha256,
@@ -207,13 +376,35 @@ class ControlCenter:
                     "--preferred-velocity", "110", "--duration-seconds", "1.5",
                     "--confirm-capture", "--confirm-preset-loaded")
         if action == "audit-quality":
-            return (*command, "audit-quality", "--library", str(library), "--audio-root", str(raw),
-                    "--output", str(reports / "quality.json"))
+            quality_command = (*command, "audit-quality", "--library", str(library), "--audio-root", str(raw),
+                               "--output", str(reports / "quality.json"), "--session", str(session))
+            if campaign_document is not None:
+                sample_rate = campaign_document.get("sample_rate")
+                channels = campaign_document.get("channels")
+                if isinstance(sample_rate, int):
+                    quality_command += ("--expected-sample-rate", str(sample_rate))
+                if isinstance(channels, list) and channels:
+                    quality_command += ("--expected-channels", str(len(channels)))
+            return quality_command
         if action == "export-drumgizmo":
             if note_map is None:
                 raise ValueError("DrumGizmo export requires a compiled note map")
             if megakit_plan is None:
                 raise ValueError("MegaKit DrumGizmo export requires its reviewed MegaKit plan")
+            if campaign_document is not None:
+                expected_takes = campaign_document.get("expected_take_count")
+                if not isinstance(expected_takes, int):
+                    raise ValueError("campaign expected_take_count is invalid")
+                _validate_passing_capture_quality(reports / "quality.json", library, expected_takes, session)
+                from .campaign import drumgizmo_composite_filenames
+                composite_filenames = drumgizmo_composite_filenames(megakit_plan)
+                if composite_filenames:
+                    _validate_passing_composite_quality(
+                        reports / "composite-quality.json", session_path=session,
+                        plan_path=megakit_plan,
+                        composite_root=run_directory / "drumgizmo-composite-wav",
+                        expected_filenames=composite_filenames,
+                    )
             export_command = (*command, "export-drumgizmo", "--library", str(library), "--audio-root", str(raw),
                               "--output-directory", str(run_directory / "drumgizmo-kit"), "--note-map", str(note_map),
                               "--megakit-plan", str(megakit_plan))
@@ -221,13 +412,18 @@ class ControlCenter:
         if action == "verify-drumgizmo":
             return (*command, "verify-drumgizmo", "--kit-directory", str(run_directory / "drumgizmo-kit"),
                     "--report", str(reports / "drumgizmo-verify.json"))
+        if action == "validate-drumgizmo":
+            return (*command, "validate-drumgizmo", "--kit-directory", str(run_directory / "drumgizmo-kit"),
+                    "--report", str(reports / "drumgizmo-validation.json"))
         raise ValueError(f"unsupported sampler action: {action}")
 
     def run_sampler(self, action: str, run_directory: Path, *, note_map: Path | None = None,
                     megakit_plan: Path | None = None,
-                    confirm_capture: bool = False, dry_run: bool = False) -> CommandResult:
+                    confirm_capture: bool = False, active_sd3_title: str | None = None,
+                    confirm_midi_map: bool = False, dry_run: bool = False) -> CommandResult:
         command = self.sampler_command(action, run_directory, note_map=note_map, megakit_plan=megakit_plan,
-                                       confirm_capture=confirm_capture)
+                                       confirm_capture=confirm_capture, active_sd3_title=active_sd3_title,
+                                       confirm_midi_map=confirm_midi_map)
         if dry_run:
             return CommandResult(command, None, dry_run=True)
         completed = self._runner(command, **_offline_run_options())
@@ -235,7 +431,8 @@ class ControlCenter:
 
     @staticmethod
     def ddti_command(action: str, dump: Path, *, preset: Path | None = None,
-                     output: Path | None = None, name: str | None = None) -> tuple[str, ...]:
+                     layout: Path | None = None, output: Path | None = None,
+                     name: str | None = None) -> tuple[str, ...]:
         """Build a strictly offline DDTi configuration command.
 
         The supported operations only decode/export or stage a new SysEx file.
@@ -252,6 +449,10 @@ class ControlCenter:
             if preset is None or output is None:
                 raise ValueError("DDTi apply-config requires a preset and staged output")
             return (sys.executable, "-m", "ddti.cli", action, str(dump), str(preset), str(output))
+        if action == "apply-role-preset":
+            if preset is None or layout is None or output is None:
+                raise ValueError("DDTi apply-role-preset requires a generated role template, input layout, and staged output")
+            return (sys.executable, "-m", "ddti.cli", action, str(dump), str(preset), str(layout), str(output))
         if action == "diff":
             if preset is None:
                 raise ValueError("DDTi diff requires a second dump")
@@ -259,9 +460,9 @@ class ControlCenter:
         raise ValueError(f"unsupported offline DDTi action: {action}")
 
     def run_ddti(self, action: str, dump: Path, *, preset: Path | None = None,
-                 output: Path | None = None, name: str | None = None,
+                 layout: Path | None = None, output: Path | None = None, name: str | None = None,
                  dry_run: bool = False) -> CommandResult:
-        command = self.ddti_command(action, dump, preset=preset, output=output, name=name)
+        command = self.ddti_command(action, dump, preset=preset, layout=layout, output=output, name=name)
         if dry_run:
             return CommandResult(command, None, dry_run=True)
         completed = self._runner(command, **_offline_run_options())

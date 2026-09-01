@@ -11,15 +11,48 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import shutil
 import yaml
 
 from .ddrum4_matrix import Ddrum4KitMatrix, MatrixLayer, UNKNOWN, load_kit_matrix
-from .service import ControlCenter
+from .service import ControlCenter, active_sd3_window_titles
 from .simulator import RigSimulator, SimulationError
 from .virtual_kit import build_virtual_kit
 from .campaign import (CaptureRow, Sd3CaptureCampaign, STARTER_ROWS, capture_rows_from_megakit_plan,
                        fingerprint_sd3_preset, METALCORE_ELECTRONIC_V1_ADDITIONS)
-from .live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
+from .live_measurement import (HihatCalibration, LiveMeasurementCampaign, PressureConfirmation,
+                               discover_midi_port_inventory)
+from midi_lab.ddrum4_programs import decode_ddrum4_program
+
+
+def format_measurement_review_row(row: dict[str, object]) -> str:
+    """Render one measured route without assuming that every event is a note."""
+    identifier = str(row.get("id", "unknown"))
+    status = str(row.get("status", "unknown"))
+    if status != "observed":
+        return f"{status.upper()} {identifier} — {row.get('reason', 'review required')}"
+    channel = row.get("channel", "?")
+    message_type = row.get("message_type")
+    if message_type == "note":
+        address = f"Note {row.get('note', row.get('data1', '?'))}"
+    elif message_type == "note_range":
+        measured = row.get("note_range", ["?", "?"])
+        if not isinstance(measured, list) or len(measured) != 2:
+            measured = ["?", "?"]
+        address = f"Notes {measured[0]}..{measured[1]} ({len(row.get('observed_notes', []))} positions)"
+    elif message_type == "cc":
+        values = row.get("observed_values", [])
+        value_text = ""
+        if isinstance(values, list) and values:
+            value_text = f"; values {min(values)}..{max(values)}"
+        address = f"CC{row.get('data1', '?')}{value_text}"
+    elif message_type == "poly_aftertouch":
+        address = f"Poly-aftertouch note {row.get('data1', '?')}"
+    elif message_type == "program_change":
+        address = f"Program {row.get('data1', '?')}"
+    else:
+        address = f"data1 {row.get('data1', '?')}"
+    return f"PASS {identifier} — C{channel} {address}"
 
 
 def launch() -> int:
@@ -27,10 +60,10 @@ def launch() -> int:
         from PySide6.QtCore import Qt, QTimer
         from PySide6.QtCore import QProcess
         from PySide6.QtGui import QTextCursor
-        from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog,
+        from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFileDialog,
                                        QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
                                        QHeaderView, QMainWindow, QMessageBox, QPushButton,
-                                       QSplitter, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
+                                       QScrollArea, QSlider, QSplitter, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
                                        QTextEdit, QVBoxLayout, QWidget)
     except ImportError as error:
         raise RuntimeError("Install drum-control-center[gui], or use drum-control-center CLI.") from error
@@ -44,12 +77,18 @@ def launch() -> int:
             self._active_simulator_path: Path | None = None
             self.matrix: Ddrum4KitMatrix | None = None
             self._studio_rows = []
+            self._studio_velocity_sliders: list[QSlider] = []
             self._studio_events: list[dict[str, object]] = []
-            self._studio_variable_controls: dict[str, QSpinBox] = {}
+            self._studio_variable_controls: dict[str, QSpinBox | QComboBox] = {}
             self._studio_state_syncing = False
             self.report_paths: list[Path] = []
             self.campaign_directory: Path | None = None
             self.campaign_process: QProcess | None = None
+            self.live_measurement_directory: Path | None = None
+            self.live_measurement_process: QProcess | None = None
+            self.live_measurement_trace_id: str | None = None
+            self.live_measurement_operation = ""
+            self.live_measurement_log = ""
             self.setWindowTitle("Drum Control Center — offline")
             tabs = QTabWidget()
             tabs.addTab(self._project_editor_workspace(), "Kit, MIDI map, and palettes")
@@ -64,12 +103,33 @@ def launch() -> int:
             choose_output = QPushButton("Select output"); choose_output.clicked.connect(self.select_output)
             output_row = QHBoxLayout(); output_row.addWidget(QLabel("Compile output:")); output_row.addWidget(self.output); output_row.addWidget(choose_output)
             layout.addLayout(output_row)
+            self.ddti_base_dump = QLineEdit()
+            self.ddti_base_dump.setPlaceholderText("Optional complete DDTi .syx dump; required for a transferable staged preset")
+            choose_ddti_dump = QPushButton("Select DDTi dump…")
+            choose_ddti_dump.clicked.connect(self.select_ddti_base_dump)
+            dump_row = QHBoxLayout(); dump_row.addWidget(QLabel("DDTi base dump:")); dump_row.addWidget(self.ddti_base_dump); dump_row.addWidget(choose_ddti_dump)
+            layout.addLayout(dump_row)
+            self.ddti_input_layout = QLineEdit(str(
+                Path(__file__).resolve().parents[4] / "profiles" / "physical" / "greg-hybrid-ddti-layout.yaml"
+            ))
+            self.ddti_input_layout.setPlaceholderText("Explicit DDTi Input/Tip/Ring layout")
+            choose_ddti_layout = QPushButton("Select DDTi layout…")
+            choose_ddti_layout.clicked.connect(self.select_ddti_input_layout)
+            layout_row = QHBoxLayout(); layout_row.addWidget(QLabel("DDTi input layout:")); layout_row.addWidget(self.ddti_input_layout); layout_row.addWidget(choose_ddti_layout)
+            layout.addLayout(layout_row)
+            self.replace_compile_output = QCheckBox("Replace generated build artifacts")
+            self.replace_compile_output.setToolTip("Allows the compiler to replace its generated output directory; source profiles and captures are never deleted.")
+            layout.addWidget(self.replace_compile_output)
             for action in ("validate", "report"):
                 button = QPushButton(action.title())
                 button.clicked.connect(lambda _=False, a=action: self.run(a))
                 layout.addWidget(button)
             compile_button = QPushButton("Compile offline artifacts"); compile_button.clicked.connect(self.compile_project)
             layout.addWidget(compile_button)
+            stage_ddti = QPushButton("Stage DDTi notes from compiled role template…")
+            stage_ddti.setToolTip("Creates a new reviewable .syx from the receive-only base dump, generated note roles, and explicit input layout. It never opens MIDI.")
+            stage_ddti.clicked.connect(self.stage_ddti_from_build)
+            layout.addWidget(stage_ddti)
             layout.addWidget(self._simulation_panel())
             launch_ddti = QPushButton("Launch DDTi Editor")
             launch_ddti.setToolTip("Explicitly launches the existing DDTi editor; it does not connect to MIDI here.")
@@ -225,8 +285,9 @@ def launch() -> int:
             editor_tabs.addTab(self.project_document, "Advanced YAML")
             readiness_page = QWidget(); readiness_layout = QVBoxLayout()
             readiness_layout.addWidget(QLabel(
-                "Readiness is calculated from the YAML currently shown above. It validates and compiles only a temporary local copy; "
-                "it never opens a MIDI port, builds/flashes Arduino firmware, or changes the DDrum4."
+                "The readiness inspector validates and compiles only a temporary local copy of the YAML shown above; "
+                "it never opens MIDI or changes hardware. The dedicated validation actions below state explicitly whether "
+                "they are receive-only or transmit a bounded diagnostic sequence."
             ))
             self.editor_readiness = QTextEdit(); self.editor_readiness.setReadOnly(True)
             self.editor_readiness.setPlainText("Load a rig project, then inspect readiness.")
@@ -235,16 +296,39 @@ def launch() -> int:
             create_measurement = QPushButton("Create live measurement campaign…")
             create_measurement.setToolTip("Writes a checklist and no MIDI/firmware data. It never converts SIM_* addresses into live mappings.")
             create_measurement.clicked.connect(self.create_live_measurement_campaign)
+            capture_measurement = QPushButton("Capture next physical trace (receive-only)…")
+            capture_measurement.setObjectName("captureLiveMeasurementTrace")
+            capture_measurement.setToolTip(
+                "Receive-only: opens one explicitly selected MIDI input for a bounded recording. It never opens an output, sends MIDI, or flashes firmware."
+            )
+            capture_measurement.clicked.connect(self.capture_live_measurement_trace)
+            capture_native = QPushButton("Capture all Scene/Palette controls (receive-only)…")
+            capture_native.setObjectName("captureNativeControlSequence")
+            capture_native.setToolTip(
+                "One bounded input recording, validated in exact order and atomically split into 30 isolated proofs. No MIDI output is opened."
+            )
+            capture_native.clicked.connect(self.capture_native_control_sequence)
+            echo_probe = QPushButton("Probe isolated DDrum4 echo/soft-through…")
+            echo_probe.setObjectName("probeDdrum4SoftThrough")
+            echo_probe.setToolTip(
+                "Hardware-output diagnostic with two confirmations. It remains preview-only until Arduino OUT is physically disconnected."
+            )
+            echo_probe.clicked.connect(self.probe_ddrum4_soft_through)
             review_measurement = QPushButton("Review captured live traces…")
             review_measurement.setToolTip("Reads isolated trace files only. It never writes a live profile or opens a MIDI port.")
             review_measurement.clicked.connect(self.review_live_measurement_campaign)
             promote_measurement = QPushButton("Create measured live profile…")
-            promote_measurement.setToolTip("Creates a new YAML only after every isolated note trace is complete. It never flashes or writes MIDI.")
+            promote_measurement.setToolTip("Creates a new YAML only after every isolated trace matches the prescribed source map. It never flashes or writes MIDI.")
             promote_measurement.clicked.connect(self.promote_live_measurement_campaign)
+            promote_configured = QPushButton("Create configured live profile (no pads)…")
+            promote_configured.setToolTip(
+                "Uses the DDTi readback and eDRUMin snapshot receipts. Prescribed notes are preserved; only live endpoints are selected."
+            )
+            promote_configured.clicked.connect(self.promote_configured_live_profile)
             inspect_ports = QPushButton("Inspect visible MIDI ports (read-only)")
             inspect_ports.setToolTip("Lists OS-visible MIDI names only. It does not open, send to, or bind any MIDI port.")
             inspect_ports.clicked.connect(self.inspect_visible_midi_ports)
-            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(review_measurement); readiness_layout.addWidget(promote_measurement); readiness_layout.addWidget(inspect_ports)
+            readiness_layout.addWidget(self.editor_readiness); readiness_layout.addWidget(inspect_readiness); readiness_layout.addWidget(create_measurement); readiness_layout.addWidget(capture_measurement); readiness_layout.addWidget(capture_native); readiness_layout.addWidget(echo_probe); readiness_layout.addWidget(review_measurement); readiness_layout.addWidget(promote_measurement); readiness_layout.addWidget(promote_configured); readiness_layout.addWidget(inspect_ports)
             readiness_page.setLayout(readiness_layout)
             editor_tabs.addTab(readiness_page, "Validation & deployment")
             layout.addWidget(editor_tabs)
@@ -992,6 +1076,328 @@ def launch() -> int:
             lines.extend(["", "Validate a physical cable and capture a trace before adding any name to deployment: live."])
             self.editor_readiness.setPlainText("\n".join(lines))
 
+        def capture_native_control_sequence(self) -> None:
+            """Capture every native panel command in one exact receive-only sequence."""
+            if (self.live_measurement_process is not None and
+                    self.live_measurement_process.state() != QProcess.ProcessState.NotRunning):
+                QMessageBox.warning(self, "Measurement already running", "Wait for the current validation process to finish.")
+                return
+            repository = Path(__file__).resolve().parents[4]
+            initial = self.live_measurement_directory or repository / "build" / "measurements" / "greg-hybrid-r15-v23-r10"
+            directory = QFileDialog.getExistingDirectory(self, "Select live measurement campaign", str(initial))
+            if not directory:
+                return
+            root = Path(directory).resolve()
+            try:
+                campaign = LiveMeasurementCampaign.read(root)
+                review = campaign.review_traces(root)
+                native_rows = [row for row in review["rows"] if str(row["id"]).startswith("native.")]
+                observed = [row for row in native_rows if row["status"] == "observed"]
+                if observed:
+                    if len(observed) == len(native_rows):
+                        self.editor_readiness.setPlainText("All native Scene/Palette controls are already observed.")
+                    else:
+                        QMessageBox.warning(
+                            self, "Partial native evidence already exists",
+                            "The atomic bulk importer never overwrites evidence. Capture the remaining controls individually, "
+                            "or archive the partial campaign before starting a fresh full sequence.",
+                        )
+                    return
+                requests = [item for item in campaign.to_document()["trace_requests"]
+                            if str(item["id"]).startswith("native.")]
+                inventory = discover_midi_port_inventory()
+                inputs = list(inventory["inputs"])
+                if not inputs:
+                    raise ValueError("no MIDI input is currently visible")
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot prepare native-control capture", str(error)); return
+            input_port, accepted = QInputDialog.getItem(
+                self, "Receive-only DDrum4 input", "Input receiving the DDrum4 panel Program Change:", inputs,
+                next((index for index, name in enumerate(inputs) if "UMC" in name), 0), False,
+            )
+            if not accepted:
+                return
+            seconds, accepted = QInputDialog.getDouble(
+                self, "Sequence duration", "Time allowed for all 30 panel actions (seconds):", 120.0, 30.0, 300.0, 0,
+            )
+            if not accepted:
+                return
+            sequence = [f"{index:2}. PC {int(item['matcher']['program']):3} — "
+                        f"{decode_ddrum4_program(int(item['matcher']['program'])).label}"
+                        for index, item in enumerate(requests, start=1)]
+            answer = QMessageBox.warning(
+                self, "Start atomic Scene/Palette capture",
+                f"Campaign: {root}\nInput: {input_port}\nDuration: {seconds:.0f} s\n\n"
+                + "\n".join(sequence)
+                + "\n\nPerform every action once and in this exact order. Only the selected input is opened. "
+                  "No MIDI output, module write, SysEx or firmware flash occurs. If one item is missing or out of order, "
+                  "no isolated proof is published. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+            script = repository / "scripts" / "capture-greg-hybrid-native-controls.ps1"
+            if powershell is None or not script.is_file():
+                QMessageBox.warning(self, "Cannot start capture", "PowerShell or the native-control helper is missing."); return
+            arguments = [
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                "-Campaign", str(root), "-InputPort", str(input_port), "-Seconds", str(seconds),
+                "-Capture", "-ConfirmSequence",
+            ]
+            self.live_measurement_directory = root
+            self.live_measurement_trace_id = None
+            self.live_measurement_operation = "native-sequence"
+            self.live_measurement_log = (
+                f"Atomic native-control capture started.\nInput: {input_port}\nDuration: {seconds:.0f} s\n\n"
+            )
+            self.editor_readiness.setPlainText(self.live_measurement_log)
+            self.live_measurement_process = QProcess(self)
+            self.live_measurement_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+            self.live_measurement_process.setProgram(powershell)
+            self.live_measurement_process.setArguments(arguments)
+            self.live_measurement_process.readyReadStandardOutput.connect(self.append_live_measurement_output)
+            self.live_measurement_process.errorOccurred.connect(self.live_measurement_failed)
+            self.live_measurement_process.finished.connect(self.live_measurement_finished)
+            self.live_measurement_process.start()
+
+        def probe_ddrum4_soft_through(self) -> None:
+            """Run the bounded echo probe only after an explicit isolated-cable confirmation."""
+            if (self.live_measurement_process is not None and
+                    self.live_measurement_process.state() != QProcess.ProcessState.NotRunning):
+                QMessageBox.warning(self, "Validation already running", "Wait for the current validation process to finish.")
+                return
+            topology = (
+                "Before continuing:\n\n"
+                "1. Disconnect Arduino MIDI OUT from DDrum4 MIDI IN.\n"
+                "2. Connect UMC MIDI OUT directly to DDrum4 MIDI IN.\n"
+                "3. Keep DDrum4 OUT → merger/Arduino IN → hardware THRU → UMC IN.\n"
+                "4. Set Local Off, C12 and aftertouch ON; do not touch any pad.\n\n"
+                "The probe sends 100 cycles of Note On → Poly Aftertouch → velocity-zero Note On on unused note 127. "
+                "Do not continue unless Arduino OUT is physically disconnected."
+            )
+            if QMessageBox.warning(
+                    self, "Isolate the DDrum4 return path", topology,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                inventory = discover_midi_port_inventory()
+                inputs, outputs = list(inventory["inputs"]), list(inventory["outputs"])
+                if not inputs or not outputs:
+                    raise ValueError("both one MIDI input and one MIDI output must be visible")
+            except (RuntimeError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot prepare echo probe", str(error)); return
+            input_port, accepted = QInputDialog.getItem(
+                self, "DDrum4 return input", "Input receiving DDrum4 OUT through hardware THRU:", inputs,
+                next((index for index, name in enumerate(inputs) if "UMC" in name), 0), False,
+            )
+            if not accepted:
+                return
+            output_port, accepted = QInputDialog.getItem(
+                self, "Direct DDrum4 output", "Output wired directly to DDrum4 MIDI IN:", outputs,
+                next((index for index, name in enumerate(outputs) if "UMC" in name), 0), False,
+            )
+            if not accepted:
+                return
+            if QMessageBox.warning(
+                    self, "Final hardware-output confirmation",
+                    f"Input: {input_port}\nOutput: {output_port}\n\n"
+                    "Confirm again that Arduino OUT is disconnected. This operation will now transmit 300 bounded MIDI messages.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            ) != QMessageBox.StandardButton.Yes:
+                return
+            repository = Path(__file__).resolve().parents[4]
+            powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+            script = repository / "scripts" / "probe-ddrum4-soft-through.ps1"
+            if powershell is None or not script.is_file():
+                QMessageBox.warning(self, "Cannot start echo probe", "PowerShell or the echo-probe helper is missing."); return
+            arguments = [
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                "-MidiInput", str(input_port), "-MidiOutput", str(output_port),
+                "-Run", "-ConfirmIsolatedTopology",
+            ]
+            self.live_measurement_directory = None
+            self.live_measurement_trace_id = None
+            self.live_measurement_operation = "echo-probe"
+            self.live_measurement_log = "Isolated DDrum4 soft-through probe started.\n\n"
+            self.editor_readiness.setPlainText(self.live_measurement_log)
+            self.live_measurement_process = QProcess(self)
+            self.live_measurement_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+            self.live_measurement_process.setProgram(powershell)
+            self.live_measurement_process.setArguments(arguments)
+            self.live_measurement_process.readyReadStandardOutput.connect(self.append_live_measurement_output)
+            self.live_measurement_process.errorOccurred.connect(self.live_measurement_failed)
+            self.live_measurement_process.finished.connect(self.live_measurement_finished)
+            self.live_measurement_process.start()
+
+        def capture_live_measurement_trace(self) -> None:
+            """Capture one explicitly selected raw input into a campaign trace.
+
+            This is the only hardware-capable action in the deployment page.
+            It is deliberately receive-only, bounded, confirmed by the user,
+            and delegated to the same reviewed helper used by the CLI workflow.
+            """
+            if (self.live_measurement_process is not None and
+                    self.live_measurement_process.state() != QProcess.ProcessState.NotRunning):
+                QMessageBox.warning(self, "Measurement already running", "Wait for the current receive-only capture to finish.")
+                return
+            repository = Path(__file__).resolve().parents[4]
+            initial = self.live_measurement_directory or repository / "build" / "measurements" / "greg-hybrid-r15-v23-r10"
+            directory = QFileDialog.getExistingDirectory(
+                self, "Select live measurement campaign", str(initial)
+            )
+            if not directory:
+                return
+            root = Path(directory).resolve()
+            try:
+                campaign = LiveMeasurementCampaign.read(root)
+                review = campaign.review_traces(root)
+                request_by_id = {str(item["id"]): item for item in campaign.to_document()["trace_requests"]}
+                pending = [row for row in review["rows"] if row["status"] != "observed"]
+                if not pending:
+                    self.editor_readiness.setPlainText(
+                        "Every isolated trace is observed. Review the campaign, then create the measured live profile."
+                    )
+                    return
+                inventory = discover_midi_port_inventory()
+                inputs = list(inventory["inputs"])
+                if not inputs:
+                    raise ValueError("no MIDI input is currently visible")
+            except (OSError, KeyError, RuntimeError, TypeError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot prepare live trace capture", str(error))
+                return
+
+            labels: list[str] = []
+            rows_by_label: dict[str, dict[str, object]] = {}
+            for row in pending:
+                identifier = str(row["id"])
+                request = request_by_id.get(identifier, {})
+                physical = request.get("physical", "unknown physical control")
+                label = f"{str(row['status']).upper()} — {identifier} — {physical}"
+                labels.append(label)
+                rows_by_label[label] = row
+            selected_label, accepted = QInputDialog.getItem(
+                self, "Physical trace", "Capture exactly one isolated event:", labels, 0, False
+            )
+            if not accepted:
+                return
+            selected = rows_by_label[str(selected_label)]
+            trace_id = str(selected["id"])
+            request = request_by_id[trace_id]
+            input_port, accepted = QInputDialog.getItem(
+                self, "Receive-only MIDI input", "Exact raw input to open:", inputs, 0, False
+            )
+            if not accepted:
+                return
+            seconds, accepted = QInputDialog.getDouble(
+                self, "Capture duration", "Listening window in seconds:", 5.0, 0.5, 60.0, 1
+            )
+            if not accepted:
+                return
+            replacing = str(selected["status"]) != "missing"
+            replacement_note = (
+                "\nThe existing rejected/invalid trace will be archived beside the new trace."
+                if replacing else ""
+            )
+            answer = QMessageBox.warning(
+                self, "Start receive-only physical capture",
+                f"Campaign: {root}\nTrace: {trace_id}\nPhysical event: {request.get('physical')}\n"
+                f"Expected matcher: {json.dumps(request.get('matcher'), ensure_ascii=False)}\n"
+                f"Input: {input_port}\nDuration: {seconds:.1f} s\n\n"
+                "Only this MIDI input will be opened. Strike/move only the named control during the window. "
+                "No MIDI output, SysEx, module write, audio capture, or Arduino flash will occur."
+                f"{replacement_note}\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+            script = repository / "scripts" / "capture-greg-hybrid-live-trace.ps1"
+            if powershell is None or not script.is_file():
+                QMessageBox.warning(self, "Cannot start capture", "PowerShell or the guided capture helper is missing.")
+                return
+            arguments = [
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                "-Campaign", str(root), "-InputPort", str(input_port), "-TraceId", trace_id,
+                "-Seconds", str(seconds), "-Capture",
+            ]
+            if replacing:
+                arguments.append("-ReplaceTrace")
+            self.live_measurement_directory = root
+            self.live_measurement_trace_id = trace_id
+            self.live_measurement_operation = "single-trace"
+            self.live_measurement_log = (
+                f"Receive-only capture started.\nTrace: {trace_id}\nInput: {input_port}\nDuration: {seconds:.1f} s\n\n"
+            )
+            self.editor_readiness.setPlainText(self.live_measurement_log)
+            self.live_measurement_process = QProcess(self)
+            self.live_measurement_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+            self.live_measurement_process.setProgram(powershell)
+            self.live_measurement_process.setArguments(arguments)
+            self.live_measurement_process.readyReadStandardOutput.connect(self.append_live_measurement_output)
+            self.live_measurement_process.errorOccurred.connect(self.live_measurement_failed)
+            self.live_measurement_process.finished.connect(self.live_measurement_finished)
+            self.live_measurement_process.start()
+
+        def append_live_measurement_output(self) -> None:
+            if self.live_measurement_process is None:
+                return
+            output = bytes(self.live_measurement_process.readAllStandardOutput()).decode(errors="replace")
+            if output:
+                self.live_measurement_log += output
+                self.editor_readiness.setPlainText(self.live_measurement_log)
+
+        def live_measurement_failed(self, error: object) -> None:
+            """Expose QProcess startup/runtime errors and release failed starts."""
+            self.append_live_measurement_output()
+            process = self.live_measurement_process
+            if process is None:
+                return
+            self.live_measurement_log += f"\nCapture process error: {process.errorString()}\n"
+            safety = ("The isolated probe may have transmitted its bounded diagnostic sequence; inspect the log and restore cabling."
+                      if self.live_measurement_operation == "echo-probe" else
+                      "No MIDI output, module write, or firmware flash was performed.")
+            self.editor_readiness.setPlainText(self.live_measurement_log + safety)
+            if error == QProcess.ProcessError.FailedToStart:
+                process.deleteLater()
+                self.live_measurement_process = None
+                self.live_measurement_trace_id = None
+                self.live_measurement_operation = ""
+
+        def live_measurement_finished(self, exit_code: int, _status: object) -> None:
+            self.append_live_measurement_output()
+            directory = self.live_measurement_directory
+            trace_id = self.live_measurement_trace_id
+            operation = self.live_measurement_operation
+            lines = [self.live_measurement_log.rstrip(), "", f"Capture command exit code: {exit_code}."]
+            if operation == "native-sequence" and directory is not None:
+                try:
+                    review = LiveMeasurementCampaign.read(directory).review_traces(directory)
+                    native = [row for row in review["rows"] if str(row["id"]).startswith("native.")]
+                    observed = sum(row["status"] == "observed" for row in native)
+                    lines.extend([f"Native Scene/Palette evidence: {observed}/{len(native)} observed.", "", str(review["next"])])
+                except (OSError, ValueError) as error:
+                    lines.append(f"Could not review native-control evidence: {error}")
+            elif directory is not None and trace_id is not None:
+                try:
+                    review = LiveMeasurementCampaign.read(directory).review_traces(directory)
+                    row = next(item for item in review["rows"] if item["id"] == trace_id)
+                    lines.extend([format_measurement_review_row(row), "", str(review["next"])])
+                except (OSError, StopIteration, ValueError) as error:
+                    lines.append(f"Could not review the captured trace: {error}")
+            lines.append(
+                "Restore Arduino OUT only after reviewing the probe report; the operation transmitted bounded diagnostic MIDI."
+                if operation == "echo-probe" else
+                "No MIDI output, module write, or firmware flash was performed."
+            )
+            self.editor_readiness.setPlainText("\n".join(lines))
+            if self.live_measurement_process is not None:
+                self.live_measurement_process.deleteLater()
+            self.live_measurement_process = None
+            self.live_measurement_trace_id = None
+            self.live_measurement_operation = ""
+
         def review_live_measurement_campaign(self) -> None:
             """Render a read-only completeness report for one campaign folder."""
             directory = QFileDialog.getExistingDirectory(self, "Select live measurement campaign directory")
@@ -1005,10 +1411,7 @@ def launch() -> int:
             observed = sum(row["status"] == "observed" for row in rows)
             lines = [f"Live trace review: {observed}/{len(rows)} isolated routes observed", f"Status: {review['status']}", ""]
             for row in rows:
-                if row["status"] == "observed":
-                    lines.append(f"PASS {row['id']} — C{row['channel']} N{row['note']}")
-                else:
-                    lines.append(f"{str(row['status']).upper()} {row['id']} — {row.get('reason', 'review required')}")
+                lines.append(format_measurement_review_row(row))
             lines.extend(["", str(review["next"]),
                           "This report is evidence only; it does not modify the rig or authorize a firmware flash."])
             self.editor_readiness.setPlainText("\n".join(lines))
@@ -1023,7 +1426,14 @@ def launch() -> int:
                 review = campaign.review_traces(Path(directory))
                 if review["status"] != "capture-complete-not-live":
                     raise ValueError("review must be capture-complete-not-live before creating a live profile")
+                hihat_calibration, accepted = self.prompt_hihat_calibration(campaign, review)
+                if not accepted:
+                    return
+                pressure_confirmation, accepted = self.prompt_pressure_confirmation(campaign, review)
+                if not accepted:
+                    return
                 endpoints: dict[str, str] = {}
+                transports: dict[str, str] = {}
                 for identifier, source in campaign.project.sources.items():
                     value, accepted = QInputDialog.getText(
                         self, f"Measured {identifier} input", f"Exact operating-system MIDI input for {identifier} (C{source.channel}):"
@@ -1031,6 +1441,16 @@ def launch() -> int:
                     if not accepted:
                         return
                     endpoints[identifier] = value.strip()
+                    choices = ("din", "usb")
+                    current = choices.index(source.primary) if source.primary in choices else 0
+                    transport, accepted = QInputDialog.getItem(
+                        self, f"{identifier} transport",
+                        "How does this source reach the PC? Use din for the Arduino/UMC THRU, usb for a direct device port:",
+                        choices, current, False,
+                    )
+                    if not accepted:
+                        return
+                    transports[identifier] = str(transport)
                 control_endpoint, accepted = QInputDialog.getText(
                     self, "Measured control output", "Exact PC/Master-Merger MIDI output for CH15 logical controls:"
                 )
@@ -1042,7 +1462,9 @@ def launch() -> int:
                 if not filename:
                     return
                 output = campaign.promote_live(Path(directory), Path(filename), endpoints=endpoints,
-                                               control_endpoint=control_endpoint.strip())
+                                               control_endpoint=control_endpoint.strip(), transports=transports,
+                                               hihat_calibration=hihat_calibration,
+                                               pressure_confirmation=pressure_confirmation)
             except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Cannot create measured live profile", str(error)); return
             self.editor_readiness.setPlainText(
@@ -1050,6 +1472,181 @@ def launch() -> int:
                 "No MIDI, SysEx, DDTi staging, Arduino generation, or flash occurred. Compile this file next; "
                 "the compiler will continue to block firmware until expression/state-action gates are satisfied."
             )
+
+        def promote_configured_live_profile(self) -> None:
+            """Create the first flashable profile from configuration receipts."""
+            project = Path(self.editor_project.text().strip())
+            if not project.is_file():
+                QMessageBox.warning(self, "No rig project", "Load the canonical rig project first."); return
+            contract_name, _ = QFileDialog.getOpenFileName(
+                self, "Select compiled source-note-contract.yaml", "", "YAML (*.yaml *.yml)"
+            )
+            if not contract_name:
+                return
+            ddti_name, _ = QFileDialog.getOpenFileName(
+                self, "Select verified DDTi readback receipt", "", "JSON (*.json)"
+            )
+            if not ddti_name:
+                return
+            edrumin_name, _ = QFileDialog.getOpenFileName(
+                self, "Select confirmed eDRUMin snapshot receipt", "", "JSON (*.json)"
+            )
+            if not edrumin_name:
+                return
+            try:
+                campaign = LiveMeasurementCampaign.from_path(project)
+                inventory = discover_midi_port_inventory()
+                inputs, outputs = list(inventory["inputs"]), list(inventory["outputs"])
+                defaults = {
+                    "ddrum4": next((name for name in inputs if "UMC" in name), ""),
+                    "ddti": next((name for name in inputs if "TriggerIO" in name), ""),
+                    "edrumin": next((name for name in inputs if "eDrumIn" in name), ""),
+                }
+                endpoints: dict[str, str] = {}
+                transports = {"ddrum4": "din", "ddti": "usb", "edrumin": "usb"}
+                for source in campaign.project.sources:
+                    value, accepted = QInputDialog.getText(
+                        self, f"{source} live input", f"Exact MIDI input for {source}:", text=defaults.get(source, "")
+                    )
+                    if not accepted:
+                        return
+                    endpoints[source] = value.strip()
+                control_default = next((name for name in outputs if "UMC" in name), "")
+                control, accepted = QInputDialog.getText(
+                    self, "Arduino control output", "Exact MIDI output feeding the Arduino/merger:", text=control_default
+                )
+                if not accepted:
+                    return
+                accepted = QMessageBox.question(
+                    self, "Confirm configured expression contract",
+                    "Use the prescribed first-flash hi-hat map (CC4 closed=127/open=0 and declared zones) "
+                    "and configured active-hit Poly Aftertouch routes? Physical calibration and audible choke tests remain mandatory after pads are connected.",
+                ) == QMessageBox.StandardButton.Yes
+                if not accepted:
+                    return
+                filename, _ = QFileDialog.getSaveFileName(
+                    self, "Create configured live rig project", str(project.parent / "greg-hybrid-r15-live.yaml"),
+                    "Rig projects (*.yaml *.yml)"
+                )
+                if not filename:
+                    return
+                output = campaign.promote_configured(
+                    Path(filename), endpoints=endpoints, transports=transports,
+                    control_endpoint=control.strip(), source_contract=Path(contract_name),
+                    ddti_receipt=Path(ddti_name), edrumin_receipt=Path(edrumin_name),
+                    hihat_calibration=HihatCalibration(
+                        127, 0, {
+                            "ddrum4": {"hh.bow": (15, 47, 79, 111), "hh.edge": (31, 63, 95)},
+                            "drumgizmo": {"hh.bow": (15, 47, 79, 111), "hh.edge": (21, 52, 74, 106)},
+                        },
+                    ),
+                    pressure_confirmation=PressureConfirmation(frozenset({"ddrum4", "sd3"})),
+                )
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot create configured live profile", str(error)); return
+            self.editor_readiness.setPlainText(
+                f"Created flash-only configured profile: {output}\n"
+                f"Evidence ledger: {output.with_suffix('.configuration-receipts.json')}\n\n"
+                "No MIDI output or firmware flash occurred. Compile this profile, then use only the gated flash "
+                "script. Live play stays blocked until post-flash pad traces create a hardware-verified profile."
+            )
+
+        def prompt_hihat_calibration(
+            self,
+            campaign: LiveMeasurementCampaign,
+            review: dict[str, object],
+        ) -> tuple[HihatCalibration | None, bool]:
+            """Collect explicit measured endpoints and renderer thresholds.
+
+            No proposed simulation boundary is pre-filled. The operator sees
+            it only as a comparison and must type every reviewed value.
+            """
+            requirements = campaign.hihat_calibration_requirements(review)
+            if requirements is None:
+                return None, True
+            observed_values = list(requirements["observed_values"])
+            QMessageBox.information(
+                self, "Measured hi-hat calibration required",
+                f"The isolated CC{requirements['input_cc']} trace observed values "
+                f"{min(observed_values)}..{max(observed_values)}.\n\n"
+                "Confirm which observed endpoint is physically closed and open, then enter every normalized "
+                "0..126 zone boundary. Proposed simulation values are shown only for comparison and are never accepted automatically."
+            )
+            input_closed, accepted = QInputDialog.getInt(
+                self, "Hi-hat closed endpoint", "Observed CC value with the pedal physically closed:",
+                max(observed_values), 0, 127, 1,
+            )
+            if not accepted:
+                return None, False
+            input_open, accepted = QInputDialog.getInt(
+                self, "Hi-hat open endpoint", "Observed CC value with the pedal physically open:",
+                min(observed_values), 0, 127, 1,
+            )
+            if not accepted:
+                return None, False
+            boundaries: dict[str, dict[str, tuple[int, ...]]] = {}
+            for target_name, target in requirements["targets"].items():
+                target_boundaries: dict[str, tuple[int, ...]] = {}
+                for physical, articulation in target["articulations"].items():
+                    count = int(articulation["count"])
+                    proposed = ",".join(str(value) for value in articulation["proposed"]) or "none"
+                    while True:
+                        value, accepted = QInputDialog.getText(
+                            self, f"{target_name} — {physical}",
+                            f"Enter exactly {count} strictly ascending normalized boundaries (comma-separated).\n"
+                            f"Proposed simulation values, not pre-filled: {proposed}",
+                        )
+                        if not accepted:
+                            return None, False
+                        try:
+                            parsed = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+                            if (len(parsed) != count or not all(0 <= item < 127 for item in parsed)
+                                    or any(right <= left for left, right in zip(parsed, parsed[1:]))):
+                                raise ValueError
+                        except ValueError:
+                            QMessageBox.warning(
+                                self, "Invalid hi-hat boundaries",
+                                f"Enter exactly {count} ascending integers from 0 to 126.",
+                            )
+                            continue
+                        target_boundaries[physical] = parsed
+                        break
+                boundaries[target_name] = target_boundaries
+            try:
+                return HihatCalibration(input_closed, input_open, boundaries), True
+            except ValueError as error:
+                QMessageBox.warning(self, "Invalid hi-hat calibration", str(error))
+                return None, False
+
+        def prompt_pressure_confirmation(
+            self,
+            campaign: LiveMeasurementCampaign,
+            review: dict[str, object],
+        ) -> tuple[PressureConfirmation | None, bool]:
+            """Keep raw choke evidence separate from renderer acceptance."""
+            requirements = campaign.pressure_confirmation_requirements(review)
+            if requirements is None:
+                return None, True
+            routes = requirements["routes"]
+            targets = requirements["targets"]
+            details = "\n".join(
+                f"• {item['source']}.{item['physical']} — {item['trace_id']}"
+                for item in routes
+            )
+            answer = QMessageBox.question(
+                self, "Confirm active-hit choke routing",
+                "The traces below prove only that each source emitted one Note-On followed by same-note "
+                "poly-aftertouch. They do not prove how DDrum4 or SD3 reacts.\n\n"
+                f"Observed raw routes ({len(routes)}):\n{details}\n\n"
+                f"Explicitly accept the configured active-hit aftertouch behavior for: {', '.join(targets)}?\n"
+                "This enables those renderer routes in the generated live profile; their audible behavior must still "
+                "be checked during the guided post-flash test.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return None, False
+            return PressureConfirmation(frozenset(targets)), True
 
         def save_editor_project(self) -> None:
             try:
@@ -1099,7 +1696,7 @@ def launch() -> int:
             load.clicked.connect(self.load_virtual_kit_workspace)
             trigger = QPushButton("▶ Trigger selected pad")
             trigger.setToolTip("Runs an offline trace with the selected source, state, pad and velocity.")
-            trigger.clicked.connect(self.trigger_virtual_kit_pad)
+            trigger.clicked.connect(lambda _=False: self.trigger_virtual_kit_pad())
             reset = QPushButton("Reset state")
             reset.clicked.connect(self.reset_virtual_kit_state)
             panic = QPushButton("● Panic (simulated)")
@@ -1158,7 +1755,7 @@ def launch() -> int:
             left_layout.addWidget(QLabel("Pads / articulations — use ▶ (or double-click a row) to route that articulation at the selected velocity. Raw input notes remain visible for all declared modules."))
             self.virtual_kit_table = QTableWidget(0, 8)
             self.virtual_kit_table.setHorizontalHeaderLabels((
-                "Trigger", "Physical event", "Hardware pad / zone", "Raw MIDI", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
+                "Trigger @ velocity", "Physical event", "Hardware pad / zone", "Raw MIDI", "Logical sound", "DDrum4 bank", "SD3", "DrumGizmo",
             ))
             self.virtual_kit_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             self.virtual_kit_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -1305,14 +1902,36 @@ def launch() -> int:
             self._studio_variable_controls.clear()
             if not simulator.project.variables:
                 self.studio_variable_layout.addWidget(QLabel("This project has no virtual-palette variables."))
+            labels_by_variable = simulator.project.raw.get("state", {}).get("value_labels", {})
             for name in simulator.project.variables:
                 label = QLabel(name.upper() + ":")
-                control = QSpinBox(); control.setRange(0, 127); control.setValue(simulator.state[name]); control.setPrefix("V ")
+                labels = labels_by_variable.get(name, {}) if isinstance(labels_by_variable, dict) else {}
+                if isinstance(labels, dict) and labels:
+                    control = QComboBox()
+                    for value, text in sorted(((int(value), str(text)) for value, text in labels.items())):
+                        control.addItem(f"V{value} · {text}", value)
+                    control.setCurrentIndex(max(0, control.findData(simulator.state[name])))
+                    control.currentIndexChanged.connect(
+                        lambda _index, variable=name, widget=control: self._studio_variable_changed(
+                            variable, int(widget.currentData())
+                        )
+                    )
+                else:
+                    control = QSpinBox(); control.setRange(0, 127); control.setValue(simulator.state[name]); control.setPrefix("V ")
+                    control.valueChanged.connect(lambda value, variable=name: self._studio_variable_changed(variable, value))
                 control.setToolTip(f"Offline value for {name}. It is applied to the logical route matrix.")
-                control.valueChanged.connect(lambda value, variable=name: self._studio_variable_changed(variable, value))
                 self._studio_variable_controls[name] = control
                 self.studio_variable_layout.addWidget(label); self.studio_variable_layout.addWidget(control)
             self.studio_variable_layout.addStretch(1)
+
+        @staticmethod
+        def _set_studio_variable_control(control: QSpinBox | QComboBox, value: int) -> None:
+            if isinstance(control, QComboBox):
+                index = control.findData(value)
+                if index >= 0:
+                    control.setCurrentIndex(index)
+            else:
+                control.setValue(value)
 
         def _studio_variable_changed(self, variable: str, value: int) -> None:
             if self._studio_state_syncing:
@@ -1356,7 +1975,7 @@ def launch() -> int:
             try:
                 self.studio_scene.setCurrentText(str(state["scene"]))
                 for name, control in self._studio_variable_controls.items():
-                    control.setValue(int(state[name]))
+                    self._set_studio_variable_control(control, int(state[name]))
             finally:
                 self._studio_state_syncing = False
             by_stage = {step.stage: step for step in result.steps}
@@ -1390,28 +2009,78 @@ def launch() -> int:
             self._studio_state_syncing = True
             try:
                 for name, control in self._studio_variable_controls.items():
-                    control.setValue(simulator.state[name])
+                    self._set_studio_variable_control(control, simulator.state[name])
             finally:
                 self._studio_state_syncing = False
             self._studio_rows = build_virtual_kit(simulator)
+            self._studio_velocity_sliders.clear()
             self.virtual_kit_table.setRowCount(len(self._studio_rows))
             for row, kit_row in enumerate(self._studio_rows):
                 logical = kit_row.logical_sound or "MISSING"
                 ddrum_text = (f"S{kit_row.ddrum4_slot} {kit_row.ddrum4_sound_id} · P{kit_row.ddrum4_note_p} · "
                               f"{len(kit_row.ddrum4_layer_candidates)} layer candidate(s) · "
                               f"C{simulator.project.ddrum4_output_channel} N{kit_row.ddrum4_note}"
+                              + (" · position → " + "/".join(str(note) for note in kit_row.ddrum4_position_notes)
+                                 if kit_row.ddrum4_position_notes else "")
                               if kit_row.ddrum4_note is not None and kit_row.ddrum4_sound_id else
                               (f"C{simulator.project.ddrum4_output_channel} · note {kit_row.ddrum4_note}" if kit_row.ddrum4_note is not None else "MISSING"))
-                sd3_text = f"C{kit_row.sd3_channel} · note {kit_row.sd3_note}" if kit_row.sd3_note is not None else "MISSING"
+                sd3_text = (
+                    f"C{kit_row.sd3_channel} · "
+                    + (f"CC{kit_row.sd3_position_cc} position + " if kit_row.sd3_position_cc is not None else "")
+                    + "notes "
+                    + "+".join(str(note) for note in (kit_row.sd3_note, *kit_row.sd3_layers))
+                    if kit_row.sd3_note is not None else "MISSING"
+                )
                 gizmo_text = (f"{kit_row.drumgizmo_instrument} / {kit_row.drumgizmo_articulation} · note {kit_row.drumgizmo_note}"
                               if kit_row.drumgizmo_note is not None and kit_row.drumgizmo_instrument and kit_row.drumgizmo_articulation else "MISSING")
                 values = (kit_row.physical, kit_row.hardware_summary, kit_row.raw_note_summary,
                           logical, ddrum_text, sd3_text, gizmo_text)
+                trigger_holder = QWidget()
+                trigger_layout = QHBoxLayout()
+                trigger_layout.setContentsMargins(2, 1, 2, 1)
                 trigger = QPushButton("▶")
                 trigger.setObjectName("padTrigger")
                 trigger.setToolTip(f"Simulate {kit_row.physical} at the selected velocity")
-                trigger.clicked.connect(lambda _=False, index=row: (self.virtual_kit_table.selectRow(index), self.trigger_virtual_kit_pad()))
-                self.virtual_kit_table.setCellWidget(row, 0, trigger)
+                velocity = QSlider(Qt.Orientation.Horizontal)
+                velocity.setRange(1, 127)
+                velocity.setValue(self.studio_velocity.value())
+                velocity.setMinimumWidth(105)
+                velocity.setToolTip(f"{kit_row.physical}: release to trigger at this velocity")
+                velocity.valueChanged.connect(lambda value, control=trigger: control.setText(f"▶ {value}"))
+                velocity.sliderReleased.connect(
+                    lambda index=row, control=velocity: self._trigger_virtual_kit_row(index, control.value())
+                )
+                trigger.setText(f"▶ {velocity.value()}")
+                trigger.clicked.connect(
+                    lambda _=False, index=row, control=velocity: self._trigger_virtual_kit_row(index, control.value())
+                )
+                trigger_layout.addWidget(trigger)
+                trigger_layout.addWidget(velocity, 1)
+                trigger_container = QVBoxLayout()
+                trigger_container.setContentsMargins(0, 0, 0, 0)
+                trigger_container.addLayout(trigger_layout)
+                source = self.studio_source.currentText()
+                raw_range = kit_row.raw_note_ranges.get(source)
+                if raw_range is not None:
+                    position_layout = QHBoxLayout()
+                    position_layout.setContentsMargins(0, 0, 0, 0)
+                    low, high = raw_range
+                    for position_index, raw_note in enumerate(range(low, high + 1), start=1):
+                        position = QPushButton(f"P{position_index}")
+                        position.setObjectName("positionTrigger")
+                        normalized = ((raw_note - low) * 127) // (high - low)
+                        position.setToolTip(
+                            f"Trigger {kit_row.physical} raw note {raw_note}; normalized position {normalized}/127"
+                        )
+                        position.clicked.connect(
+                            lambda _=False, index=row, note=raw_note, control=velocity:
+                            self._trigger_virtual_kit_row(index, control.value(), note)
+                        )
+                        position_layout.addWidget(position)
+                    trigger_container.addLayout(position_layout)
+                trigger_holder.setLayout(trigger_container)
+                self._studio_velocity_sliders.append(velocity)
+                self.virtual_kit_table.setCellWidget(row, 0, trigger_holder)
                 for column, value in enumerate(values, start=1):
                     item = QTableWidgetItem(str(value))
                     item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -1421,10 +2090,19 @@ def launch() -> int:
                         item.setBackground(Qt.GlobalColor.darkRed)
                     self.virtual_kit_table.setItem(row, column, item)
             self.virtual_kit_table.resizeColumnsToContents()
+            self.virtual_kit_table.resizeRowsToContents()
             if self.virtual_kit_table.rowCount() and self.virtual_kit_table.currentRow() < 0:
                 self.virtual_kit_table.selectRow(0)
 
-        def trigger_virtual_kit_pad(self) -> None:
+        def _trigger_virtual_kit_row(self, row: int, velocity: int, raw_note: int | None = None) -> None:
+            """Trigger one visible row directly from its local velocity strip."""
+            if row < 0 or row >= self.virtual_kit_table.rowCount():
+                return
+            self.virtual_kit_table.selectRow(row)
+            self.studio_velocity.setValue(velocity)
+            self.trigger_virtual_kit_pad(raw_note)
+
+        def trigger_virtual_kit_pad(self, raw_note: int | None = None) -> None:
             row = self.virtual_kit_table.currentRow()
             if row < 0 or row >= len(self._studio_rows):
                 self.virtual_kit_status.setText("Select a declared pad/articulation first."); return
@@ -1435,7 +2113,8 @@ def launch() -> int:
             try:
                 simulator = self.current_simulator()
                 simulator.set_state(scene=self.studio_scene.currentText() or None)
-                result = simulator.simulate_pad(source, kit_row.raw_notes[source], self.studio_velocity.value())
+                selected_note = kit_row.raw_notes[source] if raw_note is None else raw_note
+                result = simulator.simulate_pad(source, selected_note, self.studio_velocity.value())
             except (OSError, ValueError, SimulationError) as error:
                 QMessageBox.warning(self, "Cannot trigger virtual pad", str(error)); return
             by_stage = {step.stage: step for step in result.steps}
@@ -1445,7 +2124,7 @@ def launch() -> int:
             self.studio_cards["SD3 reference"].setPlainText(self._format_studio_card(by_stage, ("SD3 renderer", "SD3 declared target")))
             self.studio_cards["DrumGizmo"].setPlainText(self._format_studio_card(by_stage, ("DrumGizmo renderer", "DrumGizmo declared target")))
             self.studio_route_summary.setText(
-                f"{result.physical}  →  {result.logical_target}  |  source {result.source}, velocity {result.velocity}  |  "
+                f"{result.physical}  →  {result.logical_target}  |  source {result.source}, raw note {result.raw_note}, velocity {result.velocity}  |  "
                 "three declared destinations resolved; this offline trace does not prove audio playback"
             )
             self._append_virtual_kit_event(result)
@@ -1625,12 +2304,15 @@ def launch() -> int:
             setup_layout.addLayout(row)
             self.campaign_id = QLineEdit(); self.campaign_id.setPlaceholderText("for example: sd3_metal_2026_08")
             self.sd3_preset = QLineEdit(); self.sd3_preset.setPlaceholderText("Exact SD3 MegaKit / preset name")
+            self.sd3_midi_map = QLineEdit("Kit_Metalcore_MidiMapping_Capture_V1")
+            self.sd3_midi_map.setPlaceholderText("Exact SD3 MIDI Mapping preset")
             self.sd3_preset_file = QLineEdit(); self.sd3_preset_file.setPlaceholderText("Exact generated .sd3p used by this campaign")
             choose_preset = QPushButton("Select .sd3p…"); choose_preset.clicked.connect(self.select_sd3_preset_file)
             self.capture_midi_output = QLineEdit(); self.capture_midi_output.setPlaceholderText("SD3 MIDI input / virtual port name")
             self.capture_audio_input = QLineEdit(); self.capture_audio_input.setPlaceholderText("for example: loopback:OUT 3-4 (BEHRINGER UMC 404HD 192k)")
             self.capture_channels = QLineEdit("left,right")
             for label, field in (("Campaign ID:", self.campaign_id), ("SD3 MegaKit / preset:", self.sd3_preset),
+                                 ("SD3 MIDI map:", self.sd3_midi_map),
                                  ("MIDI output:", self.capture_midi_output), ("Audio input:", self.capture_audio_input),
                                  ("Capture channels:", self.capture_channels)):
                 row = QHBoxLayout(); row.addWidget(QLabel(label)); row.addWidget(field); setup_layout.addLayout(row)
@@ -1672,25 +2354,75 @@ def launch() -> int:
             create.setToolTip("Writes campaign.json and capture-session.json only. It never opens MIDI or audio devices.")
             create.clicked.connect(self.create_campaign); actions_layout.addWidget(create)
             open_campaign = QPushButton("Open existing campaign…"); open_campaign.clicked.connect(self.open_campaign); actions_layout.addWidget(open_campaign)
-            self.campaign_status = QLabel("No campaign is open."); actions_layout.addWidget(self.campaign_status)
-            calibrate = QPushButton("Run SD3 signal calibration…")
-            calibrate.setToolTip("Captures one short representative hit per articulation and reports silence, clipping, headroom and level spread before the full campaign.")
-            calibrate.clicked.connect(lambda: self.run_campaign_action("calibrate")); actions_layout.addWidget(calibrate)
-            capture = QPushButton("Capture pending takes…"); capture.clicked.connect(lambda: self.run_campaign_action("capture")); actions_layout.addWidget(capture)
-            quality = QPushButton("Run quality review"); quality.clicked.connect(lambda: self.run_campaign_action("audit-quality")); actions_layout.addWidget(quality)
+            status = QGroupBox("Campaign readiness")
+            status_layout = QVBoxLayout()
+            self.campaign_status = QLabel("No campaign is open.")
+            self.campaign_status.setWordWrap(True)
+            self.campaign_status.setStyleSheet("font-size: 15px; font-weight: 600; padding: 6px;")
+            status_layout.addWidget(self.campaign_status)
+            summary = QGridLayout()
+            self.campaign_capture_summary = QLabel("Raw takes\n—")
+            self.campaign_calibration_summary = QLabel("Calibration\nNot run")
+            self.campaign_output_summary = QLabel("Outputs\n—")
+            self.campaign_outlier_summary = QLabel("Attention\nNone")
+            for column, card in enumerate((self.campaign_capture_summary, self.campaign_calibration_summary,
+                                           self.campaign_output_summary, self.campaign_outlier_summary)):
+                card.setWordWrap(True)
+                card.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+                card.setStyleSheet("border: 1px solid palette(mid); border-radius: 5px; padding: 8px;")
+                summary.addWidget(card, 0, column)
+            status_layout.addLayout(summary)
+            self.calibration_groups = QTableWidget(0, 6)
+            self.calibration_groups.setHorizontalHeaderLabels((
+                "Comparable family", "Articulations", "Quietest peak", "Loudest peak", "Span", "Outliers",
+            ))
+            self.calibration_groups.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self.calibration_groups.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.calibration_groups.setAlternatingRowColors(True)
+            self.calibration_groups.verticalHeader().setVisible(False)
+            self.calibration_groups.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            for column in range(1, 6):
+                self.calibration_groups.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+            self.calibration_groups.setMinimumHeight(210)
+            status_layout.addWidget(self.calibration_groups)
+            status.setLayout(status_layout)
+            actions_layout.addWidget(status)
+            self.campaign_calibrate_button = QPushButton("Run SD3 signal calibration…")
+            self.campaign_calibrate_button.setToolTip("Captures one short representative hit per articulation and reports silence, clipping, headroom and level spread before the full campaign.")
+            self.campaign_calibrate_button.clicked.connect(lambda: self.run_campaign_action("calibrate")); actions_layout.addWidget(self.campaign_calibrate_button)
+            self.campaign_capture_button = QPushButton("Capture pending takes…")
+            self.campaign_capture_button.setToolTip("Enabled only after a complete, current, passing calibration v2.")
+            self.campaign_capture_button.clicked.connect(lambda: self.run_campaign_action("capture")); actions_layout.addWidget(self.campaign_capture_button)
+            self.campaign_quality_button = QPushButton("Run quality review")
+            self.campaign_quality_button.clicked.connect(lambda: self.run_campaign_action("audit-quality")); actions_layout.addWidget(self.campaign_quality_button)
+            self.campaign_composite_button = QPushButton("Capture simultaneous layered centers…")
+            self.campaign_composite_button.setToolTip("Captures the approved multi-note SD3 snare centers directly, preserving one coherent attack for DrumGizmo.")
+            self.campaign_composite_button.clicked.connect(lambda: self.run_campaign_action("capture-composites")); actions_layout.addWidget(self.campaign_composite_button)
             self.note_map = QLineEdit(); self.note_map.setPlaceholderText("Compiled drumgizmo-midimap.json for export")
             choose_map = QPushButton("Select DrumGizmo note map…"); choose_map.clicked.connect(self.select_note_map)
             row = QHBoxLayout(); row.addWidget(self.note_map); row.addWidget(choose_map); actions_layout.addLayout(row)
             self.export_megakit_plan = QLineEdit(); self.export_megakit_plan.setPlaceholderText("Required MegaKit plan for HH positions and shared variations")
             choose_plan = QPushButton("Select MegaKit plan…"); choose_plan.clicked.connect(self.select_export_megakit_plan)
             row = QHBoxLayout(); row.addWidget(self.export_megakit_plan); row.addWidget(choose_plan); actions_layout.addLayout(row)
-            export = QPushButton("Export complete DrumGizmo kit"); export.clicked.connect(lambda: self.run_campaign_action("export-drumgizmo")); actions_layout.addWidget(export)
-            verify = QPushButton("Verify DrumGizmo kit"); verify.clicked.connect(lambda: self.run_campaign_action("verify-drumgizmo")); actions_layout.addWidget(verify)
+            self.campaign_export_button = QPushButton("Export complete DrumGizmo kit")
+            self.campaign_export_button.clicked.connect(lambda: self.run_campaign_action("export-drumgizmo")); actions_layout.addWidget(self.campaign_export_button)
+            self.campaign_validate_button = QPushButton("Validate exported DrumGizmo files")
+            self.campaign_validate_button.setToolTip("Validates XML, WAV channel references, mappings and records a SHA-256 manifest without requiring DrumGizmo.")
+            self.campaign_validate_button.clicked.connect(lambda: self.run_campaign_action("validate-drumgizmo")); actions_layout.addWidget(self.campaign_validate_button)
+            self.campaign_verify_button = QPushButton("Probe installed DrumGizmo host")
+            self.campaign_verify_button.clicked.connect(lambda: self.run_campaign_action("verify-drumgizmo")); actions_layout.addWidget(self.campaign_verify_button)
+            for button in (self.campaign_calibrate_button, self.campaign_capture_button,
+                           self.campaign_quality_button, self.campaign_composite_button, self.campaign_export_button,
+                           self.campaign_validate_button, self.campaign_verify_button):
+                button.setEnabled(False)
             actions.setLayout(actions_layout); layout.addWidget(actions)
 
             self.campaign_log = QTextEdit(); self.campaign_log.setReadOnly(True); layout.addWidget(self.campaign_log)
             workspace.setLayout(layout)
-            return workspace
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(workspace)
+            return scroll
 
         def select_campaign_root(self) -> None:
             directory = QFileDialog.getExistingDirectory(self, "Select parent directory for SD3 campaigns")
@@ -1808,9 +2540,12 @@ def launch() -> int:
             preset_file, preset_sha256 = fingerprint_sd3_preset(Path(self.sd3_preset_file.text().strip()))
             return Sd3CaptureCampaign(
                 identifier=self.campaign_id.text().strip(), sd3_preset=self.sd3_preset.text().strip(),
+                sd3_midi_map=self.sd3_midi_map.text().strip(),
                 midi_output=self.capture_midi_output.text().strip(), audio_input=self.capture_audio_input.text().strip(),
                 channels=channels, rows=self._rows_from_table(), sd3_preset_file=preset_file,
                 sd3_preset_sha256=preset_sha256,
+                megakit_plan_file=(str(Path(self.export_megakit_plan.text().strip()).expanduser().resolve())
+                                   if self.export_megakit_plan.text().strip() else None),
             )
 
         def _campaign_path_from_form(self) -> Path:
@@ -1845,7 +2580,9 @@ def launch() -> int:
             self.campaign_directory = path
             self.campaign_root.setText(str(path.parent)); self.campaign_id.setText(campaign.identifier)
             self.sd3_preset.setText(campaign.sd3_preset); self.capture_midi_output.setText(campaign.midi_output)
+            self.sd3_midi_map.setText(campaign.sd3_midi_map)
             self.sd3_preset_file.setText(campaign.sd3_preset_file or "")
+            self.export_megakit_plan.setText(campaign.megakit_plan_file or "")
             self.capture_audio_input.setText(campaign.audio_input); self.capture_channels.setText(",".join(campaign.channels))
             self.capture_rows.setRowCount(0)
             for row in campaign.rows:
@@ -1855,42 +2592,111 @@ def launch() -> int:
 
         def refresh_campaign_status(self) -> None:
             if self.campaign_directory is None:
-                self.campaign_status.setText("No campaign is open."); return
+                self.campaign_status.setText("No campaign is open.")
+                self.calibration_groups.setRowCount(0)
+                for button in (self.campaign_calibrate_button, self.campaign_capture_button,
+                               self.campaign_quality_button, self.campaign_composite_button, self.campaign_export_button,
+                               self.campaign_validate_button, self.campaign_verify_button):
+                    button.setEnabled(False)
+                return
             try:
                 progress = Sd3CaptureCampaign.read(self.campaign_directory).progress(self.campaign_directory)
             except (OSError, ValueError) as error:
                 self.campaign_status.setText(f"Campaign status unavailable: {error}"); return
-            self.campaign_status.setText(
-                f"{progress.stage}. Raw takes: {progress.captured_takes}/{progress.total_takes}; "
-                f"calibration: {progress.calibration_status or 'not run'}; "
-                f"level outliers: {', '.join(progress.calibration_outliers) if progress.calibration_outliers else 'none'}; "
-                f"library: {'yes' if progress.library_exists else 'no'}; "
-                f"quality: {'yes' if progress.quality_report_exists else 'no'}; "
-                f"DrumGizmo: {'yes' if progress.drumgizmo_export_exists else 'no'}."
+            self.campaign_status.setText(progress.stage)
+            calibration_passed = progress.calibration_status == "technical-pass-user-mix-review-required"
+            self.campaign_status.setStyleSheet(
+                ("font-size: 15px; font-weight: 600; padding: 6px; color: #15803d;"
+                 if calibration_passed else
+                 "font-size: 15px; font-weight: 600; padding: 6px; color: #b45309;")
             )
+            self.campaign_calibrate_button.setEnabled(True)
+            self.campaign_capture_button.setEnabled(calibration_passed)
+            capture_complete = progress.captured_takes == progress.total_takes and progress.library_exists
+            self.campaign_quality_button.setEnabled(capture_complete)
+            self.campaign_composite_button.setEnabled(capture_complete and progress.quality_report_passed
+                                                      and progress.composite_takes > 0)
+            composites_complete = (progress.composite_takes == 0
+                                   or (progress.captured_composite_takes == progress.composite_takes
+                                       and progress.composite_quality_passed))
+            self.campaign_export_button.setEnabled(calibration_passed and capture_complete and progress.quality_report_passed
+                                                   and composites_complete)
+            self.campaign_validate_button.setEnabled(progress.drumgizmo_export_exists)
+            self.campaign_verify_button.setEnabled(progress.drumgizmo_validation_passed)
+            self.campaign_capture_summary.setText(
+                f"Raw takes\n{progress.captured_takes} / {progress.total_takes}\n"
+                f"{progress.missing_takes} remaining\n"
+                f"Layered centers: {progress.captured_composite_takes} / {progress.composite_takes}"
+            )
+            calibration = progress.calibration_status or "not run"
+            self.campaign_calibration_summary.setText(
+                f"Calibration\n{calibration}\n{progress.calibration_technical_failures} technical failures"
+            )
+            self.campaign_output_summary.setText(
+                "Outputs\n"
+                f"Library: {'ready' if progress.library_exists else 'pending'}\n"
+                f"Quality: {'ready' if progress.quality_report_passed else ('failed/stale' if progress.quality_report_exists else 'pending')} "
+                f"({progress.quality_accepted}/{progress.total_takes}, {progress.quality_rejected} rejected, {progress.quality_missing} missing)\n"
+                f"Layered QC: {'ready' if progress.composite_quality_passed else 'pending'}\n"
+                f"DrumGizmo: {'validated' if progress.drumgizmo_validation_passed else ('exported' if progress.drumgizmo_export_exists else 'pending')}"
+            )
+            self.campaign_outlier_summary.setText(
+                "Attention\n" + ("\n".join(progress.calibration_outliers)
+                                  if progress.calibration_outliers else "No level outlier")
+            )
+            self.calibration_groups.setRowCount(0)
+            for group in progress.calibration_level_groups:
+                row = self.calibration_groups.rowCount()
+                self.calibration_groups.insertRow(row)
+                values = (
+                    group.name, str(group.articulations), f"{group.quietest_peak_dbfs:.2f} dBFS",
+                    f"{group.loudest_peak_dbfs:.2f} dBFS", f"{group.peak_span_db:.2f} dB",
+                    ", ".join(group.outliers) if group.outliers else "—",
+                )
+                for column, value in enumerate(values):
+                    self.calibration_groups.setItem(row, column, QTableWidgetItem(value))
 
         def run_campaign_action(self, action: str) -> None:
             if self.campaign_process is not None and self.campaign_process.state() != QProcess.ProcessState.NotRunning:
                 QMessageBox.warning(self, "Campaign action already running", "Wait for the current campaign command to finish."); return
             if self.campaign_directory is None:
                 QMessageBox.warning(self, "No campaign", "Create or open an SD3 capture campaign first."); return
-            if action in {"capture", "calibrate"}:
+            active_sd3_title: str | None = None
+            confirm_midi_map = False
+            if action in {"capture", "capture-composites", "calibrate"}:
+                try:
+                    campaign = Sd3CaptureCampaign.read(self.campaign_directory)
+                    active_sd3_title = " | ".join(active_sd3_window_titles())
+                except (OSError, ValueError) as error:
+                    QMessageBox.warning(self, "Cannot verify SD3 state", str(error)); return
                 answer = QMessageBox.warning(
-                    self, "Confirm SD3 capture" if action == "capture" else "Confirm SD3 calibration",
-                    ("This will send all pending notes in the saved session to the declared SD3 MIDI input and record the declared audio input. Continue?"
-                     if action == "capture" else
-                     "This will send one bounded representative hit per articulation to SD3 and record short level probes. Continue?"),
+                    self, "Confirm SD3 capture" if action != "calibrate" else "Confirm SD3 calibration",
+                    ((f"Active SD3 window: {active_sd3_title or 'not detected'}\n"
+                      f"Required MIDI map: {campaign.sd3_midi_map}\n\n"
+                      + ("Confirm that this exact MIDI map is active. This will send the pending simultaneous layer chords "
+                         "to SD3 and record the coherent layered centers. Continue?"
+                         if action == "capture-composites" else
+                         "Confirm that this exact MIDI map is active. This will send all pending notes in the saved session "
+                         "to the declared SD3 MIDI input and record the declared audio input. Continue?"))
+                     if action != "calibrate" else
+                     (f"Active SD3 window: {active_sd3_title or 'not detected'}\n"
+                      f"Required MIDI map: {campaign.sd3_midi_map}\n\n"
+                      "Confirm that this exact MIDI map is active. This will send one bounded representative hit "
+                      "per articulation to SD3 and record short level probes. Continue?")),
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 )
                 if answer != QMessageBox.StandardButton.Yes:
                     return
+                confirm_midi_map = True
             try:
                 note_map = Path(self.note_map.text()) if self.note_map.text().strip() else None
                 megakit_plan = Path(self.export_megakit_plan.text()) if self.export_megakit_plan.text().strip() else None
                 command = self.center.sampler_command(action, self.campaign_directory, note_map=note_map,
                                                       megakit_plan=megakit_plan,
-                                                      confirm_capture=action in {"capture", "calibrate"})
-            except ValueError as error:
+                                                      confirm_capture=action in {"capture", "capture-composites", "calibrate"},
+                                                      active_sd3_title=active_sd3_title,
+                                                      confirm_midi_map=confirm_midi_map)
+            except (OSError, ValueError) as error:
                 QMessageBox.warning(self, "Cannot start campaign action", str(error)); return
             self.campaign_process = QProcess(self)
             self.campaign_process.setProgram(command[0]); self.campaign_process.setArguments(list(command[1:]))
@@ -2106,8 +2912,58 @@ def launch() -> int:
         def compile_project(self) -> None:
             if not self.project.text() or not self.output.text():
                 self.log.setPlainText("Select a rig project and an explicit output directory first."); return
-            result = self.center.run_rig("compile", Path(self.project.text()), output=Path(self.output.text()))
+            base_dump = Path(self.ddti_base_dump.text().strip()) if self.ddti_base_dump.text().strip() else None
+            result = self.center.run_rig(
+                "compile", Path(self.project.text()), output=Path(self.output.text()),
+                replace=self.replace_compile_output.isChecked(), base_dump=base_dump,
+            )
             self.log.setPlainText(" ".join(result.command) + "\n\n" + result.text)
+
+        def select_ddti_base_dump(self) -> None:
+            filename, _ = QFileDialog.getOpenFileName(
+                self, "Select a complete receive-only DDTi configuration dump", "",
+                "SysEx dumps (*.syx *.mid *.midi);;All files (*)",
+            )
+            if filename:
+                self.ddti_base_dump.setText(filename)
+
+        def select_ddti_input_layout(self) -> None:
+            filename, _ = QFileDialog.getOpenFileName(
+                self, "Select explicit DDTi Input/Tip/Ring layout", self.ddti_input_layout.text(),
+                "YAML/JSON layouts (*.yaml *.yml *.json)",
+            )
+            if filename:
+                self.ddti_input_layout.setText(filename)
+
+        def stage_ddti_from_build(self) -> None:
+            """Materialize and diff a DDTi note preset without opening MIDI."""
+            base = Path(self.ddti_base_dump.text().strip()) if self.ddti_base_dump.text().strip() else None
+            layout = Path(self.ddti_input_layout.text().strip()) if self.ddti_input_layout.text().strip() else None
+            build = Path(self.output.text().strip()) if self.output.text().strip() else None
+            template = build / "ddti-role-template.yaml" if build is not None else None
+            missing = [label for label, path in (("complete DDTi base dump", base), ("DDTi input layout", layout),
+                                                  ("compiled ddti-role-template.yaml", template))
+                       if path is None or not path.is_file()]
+            if missing:
+                QMessageBox.warning(self, "Cannot stage DDTi", "Missing: " + ", ".join(missing)); return
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Write a new review-only DDTi staged dump", str(build / "ddti-staged.syx"),
+                "SysEx dump (*.syx)",
+            )
+            if not filename:
+                return
+            staged = Path(filename)
+            try:
+                result = self.center.run_ddti(
+                    "apply-role-preset", base, preset=template, layout=layout, output=staged,
+                )
+                transcript = " ".join(result.command) + "\n\n" + result.text
+                if result.returncode == 0:
+                    difference = self.center.run_ddti("diff", base, preset=staged)
+                    transcript += "\n\nREVIEWED-OFFLINE DIFF\n" + difference.text
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Cannot stage DDTi", str(error)); return
+            self.log.setPlainText(transcript)
 
         def simulate_chain(self) -> None:
             if not self.project.text() and not self.editor_project.text():
@@ -2298,7 +3154,7 @@ def launch() -> int:
 
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet("""
-        QMainWindow, QWidget { background: #0b1013; color: #d8e3e7; font-size: 12px; }
+        QMainWindow, QWidget { background: #0b1013; color: #d8e3e7; font-family: "Segoe UI"; font-size: 12px; }
         QLabel#workspaceTitle { color: #eff8fb; font-size: 22px; font-weight: 750; padding: 4px 0; }
         QLabel#projectIdentity { color: #7faeb8; background: #0d171b; border: 1px solid #28434c; border-radius: 4px; padding: 6px; }
         QLabel#signalFlow { color: #8de85b; font-size: 13px; font-weight: 750; letter-spacing: 1px; background: #101a1e; border: 1px solid #274036; border-radius: 5px; padding: 9px; }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from argparse import Namespace
 import hashlib
 import os
 import subprocess
@@ -15,11 +16,16 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from control_center import ControlCenter
+from control_center.cli import _hihat_calibration_from_args, main as cli_main
+from control_center.service import _validate_passing_composite_quality
 from control_center.ddrum4_matrix import UNKNOWN, audition_command, load_kit_matrix
-from control_center.live_measurement import LiveMeasurementCampaign, discover_midi_port_inventory
+from control_center.live_measurement import (HihatCalibration, LiveMeasurementCampaign, PressureConfirmation,
+                                             discover_midi_port_inventory)
+from control_center.gui import format_measurement_review_row
 from control_center.simulator import RigSimulator
 from control_center.virtual_kit import build_virtual_kit
 from control_center.campaign import (CaptureRow, Sd3CaptureCampaign, capture_rows_from_megakit_plan,
+                                     drumgizmo_composite_filenames,
                                      fingerprint_sd3_preset,
                                      STARTER_ROWS, METALCORE_ELECTRONIC_V1_ADDITIONS)
 from midi_lab.traces import MidiTrace, TraceEvent
@@ -27,6 +33,154 @@ from rig_compiler.compiler import compile_project
 
 
 class ControlCenterTests(unittest.TestCase):
+    @staticmethod
+    def _reviewed_hihat_calibration() -> HihatCalibration:
+        return HihatCalibration(
+            127, 0,
+            {
+                "ddrum4": {"hh.bow": (15, 47, 79, 111), "hh.edge": (31, 63, 95)},
+                "drumgizmo": {"hh.bow": (15, 47, 79, 111), "hh.edge": (21, 52, 74, 106)},
+            },
+        )
+
+    @staticmethod
+    def _confirmed_pressure_targets() -> PressureConfirmation:
+        return PressureConfirmation(frozenset({"ddrum4", "sd3"}))
+
+    @staticmethod
+    def _write_native_control_traces(campaign: LiveMeasurementCampaign, root: Path) -> None:
+        for name, native in campaign.project.native_control_map.items():
+            path = root / campaign.native_trace_relative_path(name, native)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            native_type = native["type"]
+            if native_type == "program_change":
+                event = TraceEvent(0, "program_change", native["channel"], native["program"], None)
+            elif native_type == "cc":
+                event = TraceEvent(0, "control_change", native["channel"], native["cc"], native["value"])
+            else:
+                event = TraceEvent(0, "note_on", native["channel"], native["note"], 100)
+            MidiTrace("captured native control", (event,)).write(path)
+
+    def test_measurement_review_formats_notes_and_controllers_without_assuming_note_fields(self) -> None:
+        self.assertEqual(
+            format_measurement_review_row({"id": "kick", "status": "observed", "message_type": "note",
+                                           "channel": 12, "data1": 36, "note": 36}),
+            "PASS kick — C12 Note 36",
+        )
+        self.assertEqual(
+            format_measurement_review_row({"id": "hihat", "status": "observed", "message_type": "cc",
+                                           "channel": 3, "data1": 4, "observed_values": [0, 64, 127]}),
+            "PASS hihat — C3 CC4; values 0..127",
+        )
+        self.assertEqual(
+            format_measurement_review_row({"id": "scene", "status": "observed",
+                                           "message_type": "program_change", "channel": 12, "data1": 4}),
+            "PASS scene — C12 Program 4",
+        )
+        self.assertEqual(
+            format_measurement_review_row({"id": "snare2", "status": "observed",
+                                           "message_type": "note_range", "channel": 12,
+                                           "note_range": [8, 15], "observed_notes": list(range(8, 16))}),
+            "PASS snare2 — C12 Notes 8..15 (8 positions)",
+        )
+
+    def test_native_panel_sequence_import_is_exact_and_atomic(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "campaign"
+            campaign.write_new(root)
+            events = []
+            for index, native in enumerate(campaign.project.native_control_map.values()):
+                self.assertEqual(native["type"], "program_change")
+                source = native["source"]
+                events.append(TraceEvent(index * 10, "program_change",
+                                         campaign.project.sources[source].channel, native["program"], None))
+            sequence = Path(temporary) / "native-sequence.jsonl"
+            MidiTrace("UMC panel capture", tuple(events)).write(sequence)
+
+            outputs = campaign.import_native_control_sequence(root, sequence)
+
+            self.assertEqual(len(outputs), len(campaign.project.native_control_map))
+            self.assertTrue(all(path.is_file() for path in outputs))
+            review = campaign.review_traces(root)
+            native_rows = [row for row in review["rows"] if str(row["id"]).startswith("native.")]
+            self.assertEqual(len(native_rows), len(outputs))
+            self.assertTrue(all(row["status"] == "observed" for row in native_rows))
+
+    def test_native_panel_sequence_import_rejects_wrong_order_without_partial_files(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "campaign"
+            campaign.write_new(root)
+            natives = list(campaign.project.native_control_map.values())
+            events = [TraceEvent(index * 10, "program_change",
+                                 campaign.project.sources[native["source"]].channel,
+                                 native["program"], None)
+                      for index, native in enumerate(natives)]
+            events[0], events[1] = events[1], events[0]
+            sequence = Path(temporary) / "wrong-sequence.jsonl"
+            MidiTrace("UMC panel capture", tuple(events)).write(sequence)
+
+            with self.assertRaisesRegex(ValueError, "item 1"):
+                campaign.import_native_control_sequence(root, sequence)
+
+            self.assertFalse((root / "traces").exists())
+
+    def test_cli_parses_explicit_hihat_calibration_without_inventing_boundaries(self) -> None:
+        calibration = _hihat_calibration_from_args(Namespace(
+            hihat_input_closed=127,
+            hihat_input_open=0,
+            hihat_boundaries=[
+                "ddrum4:hh.bow=15,47,79,111", "ddrum4:hh.edge=31,63,95",
+                "drumgizmo:hh.bow=15,47,79,111", "drumgizmo:hh.edge=21,52,74,106",
+            ],
+        ))
+
+        self.assertEqual(calibration, self._reviewed_hihat_calibration())
+        with self.assertRaisesRegex(ValueError, "both endpoints"):
+            _hihat_calibration_from_args(Namespace(
+                hihat_input_closed=127, hihat_input_open=None, hihat_boundaries=[]
+            ))
+
+    def test_composite_export_gate_rejects_duplicate_rr_and_stale_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = root / "session.json"; session.write_text("session", encoding="utf-8")
+            plan = root / "plan.yaml"; plan.write_text("plan", encoding="utf-8")
+            audio = root / "audio"; audio.mkdir()
+            filename = "snare__center__v100__rr01_composite.wav"
+            sample = audio / filename; sample.write_bytes(b"wav-one")
+            report = root / "report.json"
+            document = {
+                "kind": "drumgizmo-composite-quality-report",
+                "session_sha256": hashlib.sha256(session.read_bytes()).hexdigest(),
+                "megakit_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+                "summary": {"accepted": 1, "rejected": 0, "missing": 0,
+                            "round_robin_duplicate_cells": 1},
+                "takes": [{"path": str(sample), "automatic_status": "accepted",
+                           "facts": {"sha256": hashlib.sha256(sample.read_bytes()).hexdigest()}}],
+            }
+            report.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "failed"):
+                _validate_passing_composite_quality(
+                    report, session_path=session, plan_path=plan, composite_root=audio,
+                    expected_filenames=(filename,),
+                )
+            document["summary"]["round_robin_duplicate_cells"] = 0
+            report.write_text(json.dumps(document), encoding="utf-8")
+            _validate_passing_composite_quality(
+                report, session_path=session, plan_path=plan, composite_root=audio,
+                expected_filenames=(filename,),
+            )
+            sample.write_bytes(b"wav-two")
+            with self.assertRaisesRegex(ValueError, "changed"):
+                _validate_passing_composite_quality(
+                    report, session_path=session, plan_path=plan, composite_root=audio,
+                    expected_filenames=(filename,),
+                )
+
     def test_midi_port_inventory_is_read_only_and_keeps_input_output_direction(self) -> None:
         inventory = discover_midi_port_inventory(lambda: ("UMC MIDI In", "eDrumIn BLACK"),
                                                  lambda: ("UMC MIDI Out", "TriggerIO"))
@@ -44,12 +198,21 @@ class ControlCenterTests(unittest.TestCase):
 
         self.assertEqual(document["kind"], "drum-live-measurement-campaign/v1")
         self.assertEqual(document["hardware_io"], "disabled")
-        self.assertTrue(document["do_not_copy_simulation_addresses"])
+        self.assertTrue(document["do_not_copy_simulation_endpoints"])
+        self.assertTrue(document["source_addresses_are_prescribed"])
         self.assertEqual(document["target_deployment"], "live")
         self.assertEqual({item["id"] for item in document["inputs"]}, {"ddrum4", "ddti", "edrumin"})
         self.assertIn("edrumin.hh.bow.cc-004", {item["id"] for item in document["trace_requests"]})
+        self.assertIn("edrumin.snare1.head.cc-016", {item["id"] for item in document["trace_requests"]})
+        self.assertIn("edrumin.ride.bow.poly-aftertouch-n007",
+                      {item["id"] for item in document["trace_requests"]})
+        self.assertIn("ddrum4.snare2.head.note-range-n008-n015",
+                      {item["id"] for item in document["trace_requests"]})
+        self.assertIn("native.ddrum_program_metalcore", {item["id"] for item in document["trace_requests"]})
         self.assertIn("SIM_", document["inputs"][0]["declared_endpoint"])
-        self.assertIn("Do not copy any `SIM_*`", guide_text)
+        self.assertIn("Replace `SIM_*` endpoint names only", guide_text)
+        self.assertIn("capture-greg-hybrid-live-trace.ps1", guide_text)
+        self.assertIn("never opens a MIDI output", guide_text)
 
     def test_live_measurement_campaign_reviews_only_unambiguous_isolated_note_traces(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
@@ -60,22 +223,43 @@ class ControlCenterTests(unittest.TestCase):
             first = next(decoder for decoder in campaign.project.source_decoders if decoder.message_type == "note")
             first_path = root / campaign.trace_relative_path(first)
             first_path.parent.mkdir()
-            MidiTrace("captured source", (TraceEvent(0, "note_on", 12, 36, 100),)).write(first_path)
+            MidiTrace("captured source", (TraceEvent(0, "note_on", 12, first.match["note"], 100),)).write(first_path)
             initial = LiveMeasurementCampaign.read(root).review_traces(root)
             observed = next(row for row in initial["rows"] if row["id"] == campaign.trace_identifier(first))
             self.assertEqual(observed, {"id": campaign.trace_identifier(first),
                                         "trace": campaign.trace_relative_path(first),
                                         "message_type": "note", "status": "observed", "channel": 12,
-                                        "data1": 36, "note": 36})
+                                        "data1": first.match["note"], "note": first.match["note"]})
             self.assertEqual(initial["status"], "incomplete")
-            for index, decoder in enumerate((item for item in campaign.project.source_decoders if item.message_type == "note"), start=1):
+            observed_primary: dict[tuple[str, str], tuple[int, int]] = {}
+            for decoder in (item for item in campaign.project.source_decoders if item.message_type == "note"):
                 path = root / campaign.trace_relative_path(decoder)
                 path.parent.mkdir(exist_ok=True)
-                MidiTrace("captured source", (TraceEvent(0, "note_on", 1, index, 100),)).write(path)
-            expression = next(item for item in campaign.project.source_decoders if item.message_type == "cc")
-            expression_path = root / campaign.trace_relative_path(expression)
-            MidiTrace("captured source", (TraceEvent(0, "control_change", 1, 4, 0),
-                                            TraceEvent(1, "control_change", 1, 4, 127))).write(expression_path)
+                channel, note = campaign.project.sources[decoder.source].channel, decoder.match["note"]
+                MidiTrace("captured source", (TraceEvent(0, "note_on", channel, note, 100),)).write(path)
+                observed_primary[(decoder.source, decoder.physical)] = (channel, note)
+            for decoder in (item for item in campaign.project.source_decoders if item.message_type == "note_range"):
+                path = root / campaign.trace_relative_path(decoder)
+                low, high = decoder.match["note_range"]
+                MidiTrace("captured positional sweep", tuple(
+                    TraceEvent(offset, "note_on", campaign.project.sources[decoder.source].channel, note, 100)
+                    for offset, note in enumerate(range(low, high + 1))
+                )).write(path)
+            for expression in (item for item in campaign.project.source_decoders if item.message_type == "cc"):
+                expression_path = root / campaign.trace_relative_path(expression)
+                controller = expression.match["cc"]
+                channel = campaign.project.sources[expression.source].channel
+                MidiTrace("captured source", (TraceEvent(0, "control_change", channel, controller, 0),
+                                                TraceEvent(1, "control_change", channel, controller, 127))).write(expression_path)
+            for expression in (item for item in campaign.project.source_decoders
+                               if item.message_type == "poly_aftertouch"):
+                channel, note = observed_primary[(expression.source, expression.physical)]
+                expression_path = root / campaign.trace_relative_path(expression)
+                MidiTrace("captured choke", (
+                    TraceEvent(0, "note_on", channel, note, 100),
+                    TraceEvent(1, "poly_aftertouch", channel, note, 127),
+                )).write(expression_path)
+            self._write_native_control_traces(campaign, root)
             complete = campaign.review_traces(root)
 
         self.assertEqual(complete["status"], "capture-complete-not-live")
@@ -87,31 +271,185 @@ class ControlCenterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             campaign.write_new(root)
-            per_source = {"ddrum4": (12, 40), "ddti": (2, 60), "edrumin": (3, 80)}
-            for offset, decoder in enumerate((item for item in campaign.project.source_decoders if item.message_type == "note")):
+            observed_primary: dict[tuple[str, str], tuple[int, int]] = {}
+            for decoder in (item for item in campaign.project.source_decoders if item.message_type == "note"):
                 path = root / campaign.trace_relative_path(decoder)
                 path.parent.mkdir(exist_ok=True)
-                channel, note = per_source[decoder.source]
-                MidiTrace("captured source", (TraceEvent(0, "note_on", channel, note + offset, 100),)).write(path)
-            expression = next(item for item in campaign.project.source_decoders if item.message_type == "cc")
-            channel, _note = per_source[expression.source]
-            expression_path = root / campaign.trace_relative_path(expression)
-            MidiTrace("captured source", (TraceEvent(0, "control_change", channel, 4, 0),
-                                            TraceEvent(1, "control_change", channel, 4, 127))).write(expression_path)
+                channel, note = campaign.project.sources[decoder.source].channel, decoder.match["note"]
+                MidiTrace("captured source", (TraceEvent(0, "note_on", channel, note, 100),)).write(path)
+                observed_primary[(decoder.source, decoder.physical)] = (channel, note)
+            for decoder in (item for item in campaign.project.source_decoders if item.message_type == "note_range"):
+                path = root / campaign.trace_relative_path(decoder)
+                path.parent.mkdir(exist_ok=True)
+                channel = campaign.project.sources[decoder.source].channel
+                low, high = decoder.match["note_range"]
+                MidiTrace("captured positional sweep", tuple(
+                    TraceEvent(offset, "note_on", channel, note, 100)
+                    for offset, note in enumerate(range(low, high + 1))
+                )).write(path)
+            for expression in (item for item in campaign.project.source_decoders if item.message_type == "cc"):
+                channel = campaign.project.sources[expression.source].channel
+                expression_path = root / campaign.trace_relative_path(expression)
+                controller = expression.match["cc"]
+                MidiTrace("captured source", (TraceEvent(0, "control_change", channel, controller, 0),
+                                                TraceEvent(1, "control_change", channel, controller, 127))).write(expression_path)
+            for expression in (item for item in campaign.project.source_decoders
+                               if item.message_type == "poly_aftertouch"):
+                channel, note = observed_primary[(expression.source, expression.physical)]
+                expression_path = root / campaign.trace_relative_path(expression)
+                MidiTrace("captured choke", (
+                    TraceEvent(0, "note_on", channel, note, 100),
+                    TraceEvent(1, "poly_aftertouch", channel, note, 127),
+                )).write(expression_path)
+            self._write_native_control_traces(campaign, root)
             destination = root / "metalcore-r15-live.yaml"
+            with self.assertRaisesRegex(ValueError, "planned hi-hat quantization requires"):
+                campaign.promote_live(
+                    root, destination,
+                    endpoints={"ddrum4": "UMC MIDI In", "ddti": "UMC MIDI In", "edrumin": "UMC MIDI In"},
+                    control_endpoint="UMC MIDI Out",
+                    transports={"ddrum4": "din", "ddti": "din", "edrumin": "din"},
+                )
+            with self.assertRaisesRegex(ValueError, "raw choke traces do not prove renderer behavior"):
+                campaign.promote_live(
+                    root, destination,
+                    endpoints={"ddrum4": "UMC MIDI In", "ddti": "UMC MIDI In", "edrumin": "UMC MIDI In"},
+                    control_endpoint="UMC MIDI Out",
+                    transports={"ddrum4": "din", "ddti": "din", "edrumin": "din"},
+                    hihat_calibration=self._reviewed_hihat_calibration(),
+                )
             result = campaign.promote_live(
                 root, destination,
-                endpoints={"ddrum4": "UMC MIDI In", "ddti": "TriggerIO", "edrumin": "eDrumIn BLACK"},
+                endpoints={"ddrum4": "UMC MIDI In", "ddti": "UMC MIDI In", "edrumin": "UMC MIDI In"},
                 control_endpoint="UMC MIDI Out",
+                transports={"ddrum4": "din", "ddti": "din", "edrumin": "din"},
+                hihat_calibration=self._reviewed_hihat_calibration(),
+                pressure_confirmation=self._confirmed_pressure_targets(),
             )
             live = yaml.safe_load(result.read_text(encoding="utf-8"))
+            compiled = compile_project(result, root / "live-build")
+            firmware = compiled.artifacts["firmware-project-mapping.json"]
+            runtime = compiled.artifacts["runtime-profile.yaml"]
 
         self.assertEqual(live["deployment"], "live")
+        self.assertEqual(live["validation_stage"], "hardware-verified")
         self.assertEqual(live["sources"]["ddrum4"]["endpoint"], "UMC MIDI In")
         self.assertEqual(live["sources"]["ddti"]["channel"], 2)
+        self.assertTrue(all(source["primary"] == "din" for source in live["sources"].values()))
+        self.assertTrue(all(source["connection_profile"] == "DIN_ONLY" for source in live["sources"].values()))
         self.assertEqual(live["control_bus"], {"endpoint": "UMC MIDI Out", "channel": 15, "status": "user-confirmed"})
         self.assertEqual(next(item for item in live["source_decoders"] if item["match"]["type"] == "cc")["match"]["cc"], 4)
         self.assertTrue(all(not source["endpoint"].startswith("SIM_") for source in live["sources"].values()))
+        openness = next(item for item in live["expression_routing"] if item["expression"] == "openness")
+        self.assertEqual(openness["targets"]["ddrum4"]["status"], "user-confirmed")
+        self.assertEqual(openness["targets"]["drumgizmo"]["status"], "user-confirmed")
+        self.assertNotIn("reason", openness["targets"]["ddrum4"])
+        self.assertEqual(openness["targets"]["ddrum4"]["event"]["input_closed"], 127)
+        self.assertEqual(openness["targets"]["drumgizmo"]["event"]["articulations"][1]["upper_boundaries"], [21, 52, 74, 106])
+        pressure = [item for item in live["expression_routing"] if item["expression"] == "pressure"]
+        self.assertEqual(len(pressure), 14)
+        self.assertTrue(all(item["targets"]["ddrum4"]["status"] == "user-confirmed" for item in pressure))
+        self.assertTrue(all(item["targets"]["sd3"]["status"] == "user-confirmed" for item in pressure))
+        self.assertEqual(firmware["status"], "ready")
+        self.assertEqual(firmware["hardware_flash"], "ready")
+        self.assertEqual(firmware["readiness_blockers"], [])
+        self.assertEqual(runtime["target_status"]["drumgizmo"], "ready")
+
+    def test_configured_promotion_preserves_raw_map_and_compiles_without_pads(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles/projects/metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            compiled_sim = compile_project(project, root / "sim-build")
+            contract_path = root / "sim-build/source-note-contract.yaml"
+            contract = compiled_sim.artifacts["source-note-contract.yaml"]
+            fingerprint = contract["source_contract_sha256"]
+            candidate_sha = "1" * 64
+            ddti_receipt = root / "ddti.json"
+            ddti_receipt.write_text(json.dumps({
+                "kind": "greg-hybrid-ddti-configuration-receipt/v1", "status": "verified",
+                "source_contract_sha256": fingerprint,
+                "candidate_sha256": candidate_sha, "readback_sha256": candidate_sha,
+            }), encoding="utf-8")
+            edrumin_receipt = root / "edrumin.json"
+            edrumin_receipt.write_text(json.dumps({
+                "kind": "greg-hybrid-edrumin-configuration-receipt/v1", "status": "user-confirmed",
+                "source_contract_sha256": fingerprint,
+            }), encoding="utf-8")
+            destination = root / "greg-hybrid-live.yaml"
+            before = [dict(item["match"]) for item in campaign.project.raw["source_decoders"]]
+            output = campaign.promote_configured(
+                destination,
+                endpoints={"ddrum4": "UMC MIDI In", "ddti": "TriggerIO", "edrumin": "eDrumIn BLACK"},
+                transports={"ddrum4": "din", "ddti": "usb", "edrumin": "usb"},
+                control_endpoint="UMC MIDI Out", source_contract=contract_path,
+                ddti_receipt=ddti_receipt, edrumin_receipt=edrumin_receipt,
+                hihat_calibration=self._reviewed_hihat_calibration(),
+                pressure_confirmation=self._confirmed_pressure_targets(),
+            )
+            live = yaml.safe_load(output.read_text(encoding="utf-8"))
+            compiled_live = compile_project(output, root / "live-build")
+            firmware = compiled_live.artifacts["firmware-project-mapping.json"]
+            evidence = json.loads(output.with_suffix(".configuration-receipts.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(live["deployment"], "live")
+        self.assertEqual(live["validation_stage"], "post-flash-validation-pending")
+        self.assertEqual([item["match"] for item in live["source_decoders"]], before)
+        self.assertEqual(live["sources"]["ddti"]["primary"], "usb")
+        self.assertEqual((firmware["status"], firmware["hardware_flash"]), ("ready", "ready"))
+        self.assertEqual(firmware["validation_stage"], "post-flash-validation-pending")
+        self.assertEqual(firmware["source_contract_sha256"], fingerprint)
+        self.assertEqual(evidence["source_contract_sha256"], fingerprint)
+        self.assertEqual(evidence["status"], "flash-ready-validation-pending")
+        self.assertIn("pad dynamics", evidence["post_flash_required"])
+
+    def test_choke_trace_requires_one_active_primary_hit_before_same_note_aftertouch(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        campaign = LiveMeasurementCampaign.from_path(project)
+        pressure = next(item for item in campaign.project.source_decoders
+                        if item.message_type == "poly_aftertouch")
+        primary = next(item for item in campaign.project.source_decoders
+                       if item.source == pressure.source and item.physical == pressure.physical
+                       and item.message_type == "note")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            campaign.write_new(root)
+            primary_path = root / campaign.trace_relative_path(primary)
+            primary_path.parent.mkdir(parents=True, exist_ok=True)
+            channel = campaign.project.sources[pressure.source].channel
+            note = pressure.match["note"]
+            MidiTrace("primary", (TraceEvent(0, "note_on", channel, note, 100),)).write(primary_path)
+            pressure_path = root / campaign.trace_relative_path(pressure)
+
+            invalid_sequences = (
+                (TraceEvent(0, "poly_aftertouch", channel, note, 127), TraceEvent(1, "note_on", channel, note, 100)),
+                (TraceEvent(0, "note_on", channel, note + 1, 100), TraceEvent(1, "note_on", channel, note, 100),
+                 TraceEvent(2, "poly_aftertouch", channel, note, 127)),
+                (TraceEvent(0, "note_on", channel, note, 100), TraceEvent(1, "note_on", channel, note, 110),
+                 TraceEvent(2, "poly_aftertouch", channel, note, 127)),
+            )
+            for events in invalid_sequences:
+                MidiTrace("invalid choke", events).write(pressure_path)
+                review = campaign.review_traces(root)
+                row = next(item for item in review["rows"] if item["id"] == campaign.trace_identifier(pressure))
+                self.assertEqual(row["status"], "invalid-choke-sequence")
+
+            MidiTrace("ambiguous choke", (
+                TraceEvent(0, "note_on", channel, note, 100),
+                TraceEvent(1, "poly_aftertouch", channel, note, 127),
+                TraceEvent(2, "poly_aftertouch", channel, note + 1, 127),
+            )).write(pressure_path)
+            review = campaign.review_traces(root)
+            row = next(item for item in review["rows"] if item["id"] == campaign.trace_identifier(pressure))
+            self.assertEqual(row["status"], "ambiguous")
+
+            MidiTrace("valid choke", (
+                TraceEvent(0, "note_on", channel, note, 100),
+                TraceEvent(1, "poly_aftertouch", channel, note, 127),
+            )).write(pressure_path)
+            review = campaign.review_traces(root)
+            row = next(item for item in review["rows"] if item["id"] == campaign.trace_identifier(pressure))
+            self.assertEqual(row["status"], "observed")
 
     def test_live_measurement_keeps_two_raw_notes_for_one_physical_pad_distinct(self) -> None:
         source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
@@ -133,12 +471,14 @@ class ControlCenterTests(unittest.TestCase):
             self.assertEqual(len({campaign.trace_identifier(decoder) for decoder in snare_decoders}), 2)
             self.assertEqual(len({campaign.trace_relative_path(decoder) for decoder in snare_decoders}), 2)
             captured_notes: dict[str, int] = {}
-            for offset, decoder in enumerate(campaign.project.source_decoders, start=70):
+            for decoder in campaign.project.source_decoders:
                 path = campaign_root / campaign.trace_relative_path(decoder)
                 path.parent.mkdir(exist_ok=True)
-                captured_notes[campaign.trace_identifier(decoder)] = offset
                 channel = {"edrumin": 3, "ddti": 2, "ddrum4": 12}[decoder.source]
-                MidiTrace("captured source", (TraceEvent(0, "note_on", channel, offset, 100),)).write(path)
+                note = decoder.match["note"]
+                captured_notes[campaign.trace_identifier(decoder)] = note
+                MidiTrace("captured source", (TraceEvent(0, "note_on", channel, note, 100),)).write(path)
+            self._write_native_control_traces(campaign, campaign_root)
             output = campaign.promote_live(
                 campaign_root, root / "measured-live.yaml",
                 endpoints={"edrumin": "eDrumIn BLACK", "ddti": "TriggerIO", "ddrum4": "UMC MIDI In"},
@@ -151,22 +491,44 @@ class ControlCenterTests(unittest.TestCase):
         expected = [captured_notes[campaign.trace_identifier(decoder)] for decoder in snare_decoders]
         self.assertEqual(promoted, expected)
 
-    def test_live_measurement_refuses_to_auto_promote_a_note_range(self) -> None:
+    def test_live_measurement_reviews_and_promotes_a_complete_positional_note_range(self) -> None:
         source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
         with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary) / "range.yaml"
+            root = Path(temporary)
+            project = root / "range.yaml"
             document = yaml.safe_load(source.read_text(encoding="utf-8"))
             document["source_decoders"][0]["match"] = {"source": "edrumin", "type": "note_range", "note_range": [38, 39]}
+            document["source_decoders"][0]["emit"]["expressions"] = ["velocity", "position"]
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
             campaign = LiveMeasurementCampaign.from_path(project)
             plan = campaign.to_document()
-            review = campaign.review_traces(Path(temporary))
+            decoder = next(item for item in campaign.project.source_decoders if item.message_type == "note_range")
+            trace = root / campaign.trace_relative_path(decoder)
+            trace.parent.mkdir(exist_ok=True)
+            MidiTrace("incomplete sweep", (TraceEvent(0, "note_on", 3, 48, 100),)).write(trace)
+            incomplete = campaign.review_traces(root)
+            MidiTrace("wrong configured sweep", (
+                TraceEvent(0, "note_on", 3, 48, 100),
+                TraceEvent(1, "note_on", 3, 49, 100),
+            )).write(trace)
+            mismatch = campaign.review_traces(root)
+            MidiTrace("complete prescribed sweep", (
+                TraceEvent(0, "note_on", 3, 38, 100),
+                TraceEvent(1, "note_on", 3, 39, 100),
+            )).write(trace)
+            review = campaign.review_traces(root)
 
         request = next(item for item in plan["trace_requests"] if item["message_type"] == "note_range")
+        incomplete_row = next(item for item in incomplete["rows"] if item["message_type"] == "note_range")
+        mismatch_row = next(item for item in mismatch["rows"] if item["message_type"] == "note_range")
         row = next(item for item in review["rows"] if item["message_type"] == "note_range")
-        self.assertEqual(request["status"], "manual-range-measurement-required")
-        self.assertIsNone(request["trace"])
-        self.assertEqual(row["status"], "manual-range-measurement-required")
+        self.assertEqual(request["status"], "pending")
+        self.assertTrue(request["trace"].endswith("note-range-n038-n039.jsonl"))
+        self.assertEqual(incomplete_row["status"], "incomplete-range")
+        self.assertEqual(mismatch_row["status"], "contract-mismatch")
+        self.assertEqual(row["status"], "observed")
+        self.assertEqual(row["note_range"], [38, 39])
+        self.assertEqual(row["observed_notes"], [38, 39])
         self.assertEqual(review["status"], "incomplete")
 
     def test_sd3_campaign_writes_resumable_sampler_session_and_reports_file_progress(self) -> None:
@@ -179,7 +541,13 @@ class ControlCenterTests(unittest.TestCase):
             run = Path(temporary) / campaign.identifier
             campaign.write_new(run)
             session = json.loads((run / "capture-session.json").read_text(encoding="utf-8"))
+            campaign_document = json.loads((run / "campaign.json").read_text(encoding="utf-8"))
             self.assertEqual(session["kind"], "capture-session")
+            self.assertEqual(
+                campaign_document["capture_session_sha256"],
+                hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(session["sample_rate"], 48000)
             self.assertEqual(session["requests"][0]["note"], 40)
             self.assertEqual(session["requests"][0]["velocities"], [40, 80])
             self.assertEqual(session["requests"][0]["controllers"], [])
@@ -203,6 +571,50 @@ class ControlCenterTests(unittest.TestCase):
             self.assertEqual(failed.calibration_status, "technical-fail")
             self.assertIn("failed", failed.stage)
 
+            (reports / "calibration.json").write_text(
+                json.dumps({
+                    "format": "sd3-calibration-report/v2",
+                    "session_sha256": hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
+                    "preset": {"sha256": "unused", "loaded_confirmed": True},
+                    "summary": {
+                        "status": "level-fail", "technical_failures": 0,
+                        "relative_level_outliers": ["snare_main.rimshot"],
+                        "level_groups": {"snare": {
+                            "articulations": 1, "peak_span_db": 0.0,
+                            "quietest_peak_dbfs": -18.5, "loudest_peak_dbfs": -18.5,
+                            "outliers": ["snare_main.rimshot"],
+                        }},
+                    },
+                }), encoding="utf-8",
+            )
+            detailed = campaign.progress(run)
+            self.assertEqual(detailed.calibration_outliers, ("snare_main.rimshot",))
+            self.assertEqual(detailed.calibration_level_groups[0].name, "snare")
+            self.assertEqual(detailed.calibration_level_groups[0].peak_span_db, 0.0)
+
+            (reports / "calibration.json").write_text(
+                json.dumps({
+                    "format": "sd3-calibration-report/v1",
+                    "session_sha256": hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
+                    "summary": {"status": "technical-pass-user-mix-review-required"},
+                }), encoding="utf-8",
+            )
+            self.assertEqual(campaign.progress(run).calibration_status, "invalid-v2")
+
+            library = run / "library.json"
+            library.write_text('{"library":"one"}\n', encoding="utf-8")
+            quality = {
+                "kind": "capture-quality-report",
+                "library_sha256": hashlib.sha256(library.read_bytes()).hexdigest(),
+                "session_sha256": hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
+                "summary": {"accepted": 4, "rejected": 0, "missing": 0,
+                            "round_robin_duplicate_cells": 0},
+            }
+            (reports / "quality.json").write_text(json.dumps(quality), encoding="utf-8")
+            self.assertTrue(campaign.progress(run).quality_report_passed)
+            library.write_text('{"library":"changed"}\n', encoding="utf-8")
+            self.assertFalse(campaign.progress(run).quality_report_passed)
+
     def test_campaign_commands_are_ordered_and_capture_is_explicit(self) -> None:
         run = Path("D:/Studio/drum-runs/sd3_test_kit")
         center = ControlCenter()
@@ -217,10 +629,20 @@ class ControlCenterTests(unittest.TestCase):
             center.sampler_command("calibrate", run, confirm_capture=True)
         quality = center.sampler_command("audit-quality", run)
         self.assertEqual(quality[1:4], ("-m", "drum_sampler.cli", "audit-quality"))
+        validation = center.sampler_command("validate-drumgizmo", run)
+        self.assertEqual(validation[1:4], ("-m", "drum_sampler.cli", "validate-drumgizmo"))
         with self.assertRaisesRegex(ValueError, "note map"):
             center.sampler_command("export-drumgizmo", run)
         with self.assertRaisesRegex(ValueError, "MegaKit plan"):
             center.sampler_command("export-drumgizmo", run, note_map=Path("drumgizmo-midimap.json"))
+        with self.assertRaisesRegex(ValueError, "explicit confirmation"):
+            center.sampler_command("capture-composites", run, megakit_plan=Path("plan.yaml"))
+        composites = center.sampler_command(
+            "capture-composites", run, megakit_plan=Path("plan.yaml"), confirm_capture=True,
+        )
+        self.assertEqual(composites[3], "capture-composites")
+        self.assertTrue(any("drumgizmo-composite-wav" in argument for argument in composites))
+        self.assertIn("--quality-report", composites)
 
     def test_full_campaign_is_gated_by_passing_signal_calibration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -236,26 +658,101 @@ class ControlCenterTests(unittest.TestCase):
             run = root / "sd3_gate"
             campaign.write_new(run)
             with self.assertRaisesRegex(ValueError, "exact current session"):
-                ControlCenter.sampler_command("capture", run, confirm_capture=True)
+                ControlCenter.sampler_command(
+                    "capture", run, confirm_capture=True,
+                    active_sd3_title="MegaKit - Superior Drummer 3", confirm_midi_map=True,
+                )
             report = run / "reports" / "calibration.json"
             report.parent.mkdir()
-            report.write_text(json.dumps({
-                "format": "sd3-calibration-report/v1",
+            passing_report = {
+                "format": "sd3-calibration-report/v2",
                 "session_sha256": hashlib.sha256((run / "capture-session.json").read_bytes()).hexdigest(),
                 "preset": {"sha256": preset_sha, "loaded_confirmed": True},
-                "summary": {"status": "technical-pass-user-mix-review-required"},
-            }), encoding="utf-8")
-            command = ControlCenter.sampler_command("capture", run, confirm_capture=True)
+                "policy": {"only": []},
+                "rows": [{"instrument": "kick", "articulation": "acoustic"}],
+                "summary": {
+                    "status": "technical-pass-user-mix-review-required",
+                    "technical_failures": 0,
+                    "articulations": 1,
+                    "relative_level_outliers": [],
+                    "level_groups": {"kick": {
+                        "articulations": 1, "peak_span_db": 0.0,
+                        "quietest_peak_dbfs": -12.0, "loudest_peak_dbfs": -12.0,
+                        "outliers": [],
+                    }},
+                },
+            }
+            report.write_text(json.dumps(passing_report), encoding="utf-8")
+            active_title = "MegaKit - Superior Drummer 3"
+            command = ControlCenter.sampler_command(
+                "capture", run, confirm_capture=True, active_sd3_title=active_title,
+                confirm_midi_map=True,
+            )
             self.assertEqual(command[3], "capture")
-            calibration = ControlCenter.sampler_command("calibrate", run, confirm_capture=True)
+            session_path = run / "capture-session.json"
+            original_session = session_path.read_bytes()
+            changed_session = json.loads(original_session.decode("utf-8"))
+            changed_session["requests"][0]["note"] = 25
+            session_path.write_text(json.dumps(changed_session), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "immutable campaign contract"):
+                ControlCenter.sampler_command(
+                    "export-drumgizmo", run, note_map=Path("notes.json"),
+                    megakit_plan=Path("megakit.yaml"),
+                )
+            session_path.write_bytes(original_session)
+            calibration = ControlCenter.sampler_command(
+                "calibrate", run, confirm_capture=True, active_sd3_title=active_title,
+                confirm_midi_map=True,
+            )
             self.assertIn("--confirm-preset-loaded", calibration)
             self.assertIn(preset_sha, calibration)
+
+            with self.assertRaisesRegex(ValueError, "wrong SD3 preset"):
+                ControlCenter.sampler_command(
+                    "calibrate", run, confirm_capture=True,
+                    active_sd3_title="Another Kit - Superior Drummer 3", confirm_midi_map=True,
+                )
+            with self.assertRaisesRegex(ValueError, "MIDI map"):
+                ControlCenter.sampler_command(
+                    "calibrate", run, confirm_capture=True, active_sd3_title=active_title,
+                )
+
+            legacy = dict(passing_report)
+            legacy["format"] = "sd3-calibration-report/v1"
+            report.write_text(json.dumps(legacy), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "report v2"):
+                ControlCenter.sampler_command(
+                    "capture", run, confirm_capture=True, active_sd3_title=active_title,
+                    confirm_midi_map=True,
+                )
+            missing_groups = json.loads(json.dumps(passing_report))
+            del missing_groups["summary"]["level_groups"]
+            report.write_text(json.dumps(missing_groups), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "level groups"):
+                ControlCenter.sampler_command(
+                    "capture", run, confirm_capture=True, active_sd3_title=active_title,
+                    confirm_midi_map=True,
+                )
+            level_failure = json.loads(json.dumps(passing_report))
+            level_failure["summary"]["status"] = "level-fail"
+            level_failure["summary"]["relative_level_outliers"] = ["kick.acoustic"]
+            level_failure["summary"]["level_groups"]["kick"]["outliers"] = ["kick.acoustic"]
+            report.write_text(json.dumps(level_failure), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "level-balanced"):
+                ControlCenter.sampler_command(
+                    "capture", run, confirm_capture=True, active_sd3_title=active_title,
+                    confirm_midi_map=True,
+                )
+            report.write_text(json.dumps(passing_report), encoding="utf-8")
 
             document = json.loads(report.read_text(encoding="utf-8"))
             document["session_sha256"] = "0" * 64
             report.write_text(json.dumps(document), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "exact current session"):
-                ControlCenter.sampler_command("capture", run, confirm_capture=True)
+                ControlCenter.sampler_command(
+                    "capture", run, confirm_capture=True, active_sd3_title=active_title,
+                    confirm_midi_map=True,
+                )
 
     def test_v1_electronic_additions_have_unique_raw_capture_cells(self) -> None:
         filenames = [filename for row in METALCORE_ELECTRONIC_V1_ADDITIONS for filename in row.raw_filenames()]
@@ -273,9 +770,10 @@ class ControlCenterTests(unittest.TestCase):
         self.assertIn(CaptureRow("tom4", "sleep", 63, (24, 48, 72, 96, 120), 2), rows)
         bow = [row for row in rows if row.instrument == "hh" and row.articulation.startswith("bow_")]
         edge = [row for row in rows if row.instrument == "hh" and row.articulation.startswith("edge_")]
-        self.assertEqual((len(bow), len(edge)), (5, 4))
+        self.assertEqual((len(bow), len(edge)), (5, 5))
         self.assertEqual({row.controllers for row in bow}, {((4, 127),), ((4, 96),), ((4, 64),), ((4, 32),), ((4, 0),)})
-        self.assertEqual({row.drumgizmo_note for row in bow + edge}, set(range(112, 121)))
+        self.assertEqual({row.drumgizmo_note for row in bow + edge}, set(range(112, 122)))
+        self.assertIn(CaptureRow("stack", "progressive_custom", 86, (40, 64, 88, 112), 2), rows)
         self.assertNotIn("perc_cowbell", {row.instrument for row in rows})
         self.assertNotIn("stack_metallic", {row.instrument for row in rows})
 
@@ -289,7 +787,7 @@ class ControlCenterTests(unittest.TestCase):
             command = [
                 sys.executable, "-m", "control_center.cli", "create-sd3-campaign", str(plan),
                 "--output", str(output), "--id", "greg_hybrid_r15_full",
-                "--preset", "Greg_Hybrid_r15_MegaKit_v3", "--midi-output", "SD3_MEGA_INPUT",
+                "--preset", "Greg_Hybrid_r15_MegaKit_v5", "--midi-output", "SD3_MEGA_INPUT",
                 "--preset-file", str(preset), "--audio-input", "SD3_PRINT_LOOPBACK",
             ]
             completed = subprocess.run(command, capture_output=True, text=True)
@@ -298,6 +796,15 @@ class ControlCenterTests(unittest.TestCase):
             self.assertEqual(len(campaign.rows), len(capture_rows_from_megakit_plan(plan)))
             self.assertGreater(campaign.total_takes, 500)
             self.assertEqual(campaign.sd3_preset_sha256, hashlib.sha256(b"preset").hexdigest())
+            self.assertEqual(campaign.megakit_plan_file, str(plan.resolve()))
+
+    def test_megakit_declares_exact_simultaneous_drumgizmo_layer_grid(self) -> None:
+        plan = Path(__file__).resolve().parents[3] / "profiles" / "sd3" / "metalcore-r15-megakit-plan.yaml"
+        filenames = drumgizmo_composite_filenames(plan)
+        self.assertEqual(len(filenames), 42)
+        self.assertEqual(len(set(filenames)), 42)
+        self.assertTrue(filenames[0].startswith("snare1__deftones__"))
+        self.assertTrue(filenames[-1].startswith("snare1__sleep__"))
 
     def test_complete_chain_simulator_traces_ddrum4_return_and_both_software_renderers(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
@@ -325,6 +832,24 @@ class ControlCenterTests(unittest.TestCase):
 
         self.assertEqual({result.physical for result in results.values()}, {"snare.head"})
         self.assertEqual({result.logical_target for result in results.values()}, {"snare.metalcore"})
+
+    def test_greg_hybrid_simulator_traces_calibrated_sd3_snare_layers(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+
+        simulator.set_state(scene="deftones")
+        deftones = simulator.simulate_pad("edrumin", 0, 104)
+        self.assertEqual(
+            [step.message["note"] for step in deftones.steps if step.stage in {"SD3 renderer", "SD3 layer renderer"}],
+            [37, 100, 101],
+        )
+
+        simulator.set_state(scene="sleep_token")
+        sleep = simulator.simulate_pad("edrumin", 0, 104)
+        self.assertEqual(
+            [step.message["note"] for step in sleep.steps if step.stage in {"SD3 renderer", "SD3 layer renderer"}],
+            [42, 103],
+        )
 
     def test_complete_chain_simulator_traces_logical_scene_to_declared_ddrum_program(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
@@ -357,6 +882,18 @@ class ControlCenterTests(unittest.TestCase):
         self.assertIn("pad.edrumin.n038.v127.metalcore.vp1_snare0", identifiers)
         self.assertIn("native.ddrum_program_metalcore", identifiers)
         self.assertEqual(report.to_document()["hardware_io"], "disabled")
+
+    def test_offline_diagnostic_cli_can_atomically_publish_its_json_report(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "reports" / "diagnostic.json"
+            with patch("builtins.print"):
+                result = cli_main(["diagnose", str(project), "--output", str(output)])
+            document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(result, 0)
+        self.assertEqual(document["status"], "passed")
+        self.assertEqual(document["summary"]["passed"], document["summary"]["total"])
+        self.assertEqual(document["hardware_io"], "disabled")
 
     def test_native_control_simulation_changes_state_without_native_echo(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
@@ -416,6 +953,35 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(steps["Arduino DDrum4 renderer"].message["status"], "planned")
         self.assertFalse(result.renders_audio)
 
+    def test_simulator_passes_snare_position_cc_to_sd3_only(self) -> None:
+        source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "sd3-position.yaml"
+            document = yaml.safe_load(source.read_text(encoding="utf-8"))
+            document["source_decoders"].append({
+                "match": {"source": "edrumin", "type": "cc", "cc": 16},
+                "emit": {"physical": "snare.head", "expressions": ["position"], "normalize": "cc7"},
+            })
+            for logical in ("snare.metalcore", "snare.electronic"):
+                document["renderers"]["sd3"][logical]["position_cc"] = 16
+            document["expression_routing"] = [{
+                "source": "edrumin", "physical": "snare.head", "expression": "position", "correlation": "none",
+                "targets": {
+                    "ddrum4": {"status": "unsupported", "reason": "unmeasured quantizer", "event": {"type": "unsupported"}},
+                    "sd3": {"status": "user-confirmed", "event": {"type": "cc", "channel": 10, "cc": 16, "transform": "passthrough"}},
+                    "drumgizmo": {"status": "unsupported", "reason": "note-only kit", "event": {"type": "unsupported"}},
+                },
+            }]
+            project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            result = RigSimulator.from_path(project).simulate_expression("edrumin", "cc", 16, 91)
+
+        steps = {step.stage: step for step in result.steps}
+        self.assertEqual(steps["SD3 renderer"].message,
+                         {"type": "control_change", "channel": 10, "cc": 16, "value": 91})
+        self.assertEqual(steps["Arduino DDrum4 renderer"].message["status"], "unsupported")
+        self.assertEqual(steps["DrumGizmo renderer"].message["status"], "unsupported")
+        self.assertFalse(result.renders_audio)
+
     def test_simulator_previews_declared_pressure_on_the_correlated_active_hit(self) -> None:
         source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "complete-chain-simulator.yaml"
         with tempfile.TemporaryDirectory() as temporary:
@@ -430,7 +996,7 @@ class ControlCenterTests(unittest.TestCase):
                 "targets": {
                     "ddrum4": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
                     "sd3": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
-                    "drumgizmo": {"status": "unsupported", "reason": "no measured choke behavior", "event": {"type": "unsupported"}},
+                    "drumgizmo": {"status": "user-confirmed", "event": {"type": "poly_aftertouch", "note_from": "active_rendered_hit"}},
                 },
             }]
             project.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
@@ -446,6 +1012,8 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(steps["Arduino DDrum4 renderer"].message,
                          {"type": "poly_aftertouch", "channel": 12, "note": 38, "value": 91, "correlated_raw_note": 38})
         self.assertEqual(steps["SD3 renderer"].message,
+                         {"type": "poly_aftertouch", "channel": 10, "note": 38, "value": 91, "correlated_raw_note": 38})
+        self.assertEqual(steps["DrumGizmo renderer"].message,
                          {"type": "poly_aftertouch", "channel": 10, "note": 38, "value": 91, "correlated_raw_note": 38})
         self.assertEqual(steps["active hit ledger"].message["hit_state"]["scene"], "metalcore")
         self.assertTrue(report.passed, report.render_text())
@@ -469,6 +1037,24 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(step.message["zone"], 5)
         self.assertFalse(result.renders_audio)
 
+    def test_r15_simulator_previews_planned_cc4_for_bow_and_edge_without_enabling_hardware(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        result = RigSimulator.from_path(project).simulate_expression("edrumin", "cc", 4, 64)
+
+        steps = {step.stage: step for step in result.steps}
+        ddrum = steps["Arduino DDrum4 renderer"]
+        drumgizmo = steps["DrumGizmo renderer"]
+        self.assertIn("planned preview only", ddrum.detail)
+        self.assertEqual(ddrum.message["next_hit_note"], 74)
+        self.assertEqual(ddrum.message["next_hit_notes"], {"hh.bow": 74, "hh.edge": 41})
+        self.assertTrue(ddrum.message["preview_only"])
+        self.assertEqual(ddrum.message["hardware_output"], "disabled")
+        self.assertIn("planned preview only", drumgizmo.detail)
+        self.assertEqual(drumgizmo.message["next_hit_note"], 114)
+        self.assertEqual(drumgizmo.message["next_hit_notes"], {"hh.bow": 114, "hh.edge": 121})
+        self.assertTrue(drumgizmo.message["preview_only"])
+        self.assertFalse(result.renders_audio)
+
     def test_simulator_previews_reviewed_cc4_drumgizmo_hihat_note_for_the_next_hit(self) -> None:
         source = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         with tempfile.TemporaryDirectory() as temporary:
@@ -484,8 +1070,8 @@ class ControlCenterTests(unittest.TestCase):
                 "event": {
                     "type": "quantized_note", "input_closed": 127, "input_open": 0,
                     "articulations": [
-                        {"physical": "hh.bow", "notes": [64, 100], "upper_boundaries": [63]},
-                        {"physical": "hh.edge", "notes": [65, 101], "upper_boundaries": [63]},
+                        {"physical": "hh.bow", "notes": [112, 100], "upper_boundaries": [63]},
+                        {"physical": "hh.edge", "notes": [117, 101], "upper_boundaries": [63]},
                     ],
                 },
             })
@@ -496,6 +1082,27 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(step.message["next_hit_note"], 100)
         self.assertEqual(step.message["zone"], 2)
         self.assertFalse(result.renders_audio)
+
+    def test_hihat_preview_matches_firmware_integer_normalization_for_both_polarities(self) -> None:
+        def firmware_reference(value: int, closed: int, opened: int) -> int:
+            span = opened - closed
+            half_span = int(span / 2)
+            normalized = int(((value - closed) * 127 + half_span) / span)
+            return min(127, max(0, normalized))
+
+        for closed, opened in ((11, 109), (109, 11), (0, 126), (126, 0)):
+            with self.subTest(closed=closed, opened=opened):
+                actual = [RigSimulator._firmware_hihat_openness(value, closed, opened) for value in range(128)]
+                expected = [firmware_reference(value, closed, opened) for value in range(128)]
+                self.assertEqual(actual, expected)
+                boundaries = (31, 63, 95)
+                actual_zones = [next((index for index, boundary in enumerate(boundaries)
+                                      if normalized <= boundary), len(boundaries))
+                                for normalized in actual]
+                expected_zones = [next((index for index, boundary in enumerate(boundaries)
+                                        if normalized <= boundary), len(boundaries))
+                                  for normalized in expected]
+                self.assertEqual(actual_zones, expected_zones)
 
     def test_r15_simulator_models_the_declared_module_ownership(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
@@ -519,9 +1126,36 @@ class ControlCenterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no declared physical-pad decoder"):
             simulator.simulate_pad("ddti", 0, 100)
 
+    def test_r15_simulator_exposes_every_snare2_position_to_sd3_and_quantizes_ddrum4(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+        simulator.set_state(values={"vp2_flex": 2})
+
+        expected = {
+            8: (0, 8, 32), 9: (18, 8, 32), 10: (36, 8, 32),
+            11: (54, 11, 33), 12: (72, 11, 33), 13: (90, 11, 33),
+            14: (108, 12, 34), 15: (127, 12, 34),
+        }
+        for raw_note, (position, ddrum_note, drumgizmo_note) in expected.items():
+            result = simulator.simulate_pad("ddrum4", raw_note, 100)
+            by_stage = {step.stage: step for step in result.steps}
+            self.assertEqual(by_stage["SD3 position renderer"].message,
+                             {"type": "control_change", "channel": 10, "cc": 16, "value": position})
+            self.assertEqual(by_stage["SD3 renderer"].message["note"], 33)
+            self.assertEqual(by_stage["Arduino DDrum4 renderer"].message["note"], ddrum_note)
+            self.assertEqual(by_stage["DrumGizmo renderer"].message["note"], drumgizmo_note)
+            self.assertIn("quantized", by_stage["DrumGizmo renderer"].detail)
+
+        simulator.set_state(values={"vp2_flex": 1})
+        tom = simulator.simulate_pad("ddrum4", 15, 100)
+        self.assertNotIn("SD3 position renderer", {step.stage for step in tom.steps})
+        self.assertEqual(next(step.message["note"] for step in tom.steps
+                              if step.stage == "Arduino DDrum4 renderer"), 27)
+
     def test_virtual_kit_is_complete_for_installed_r15_topology(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
-        rows = build_virtual_kit(RigSimulator.from_path(project))
+        simulator = RigSimulator.from_path(project)
+        rows = build_virtual_kit(simulator)
 
         self.assertEqual(len(rows), 29)
         self.assertTrue(all(row.complete for row in rows))
@@ -530,12 +1164,21 @@ class ControlCenterTests(unittest.TestCase):
         self.assertEqual(rows[0].hardware_summary, "DDrum4 · kick_main / head")
         self.assertEqual(rows[0].raw_note_summary, "DDrum4 N0")
         self.assertEqual(rows[0].raw_notes, {"ddrum4": 0})
+        self.assertEqual(rows[0].raw_note_ranges, {})
         self.assertEqual((rows[0].ddrum4_slot, rows[0].ddrum4_sound_id, rows[0].ddrum4_note_p),
                          (1, "KICK_981", 1))
         self.assertEqual([(layer.index, layer.velocity, layer.sample) for layer in rows[0].ddrum4_layer_candidates],
                          [(1, 84, 1), (2, 124, 2)])
         self.assertIn("Candidates (declared, not selected)", rows[0].ddrum4_content_summary)
         self.assertIn("variation 1/2", rows[0].ddrum4_content_summary)
+        simulator.set_state(values={"vp2_flex": 2})
+        snare2 = next(row for row in build_virtual_kit(simulator) if row.physical == "snare2.head")
+        self.assertEqual(snare2.raw_notes, {"ddrum4": 8})
+        self.assertEqual(snare2.raw_note_ranges, {"ddrum4": (8, 15)})
+        self.assertEqual(snare2.raw_note_summary, "DDrum4 N8..15 position")
+        self.assertEqual(snare2.ddrum4_position_notes, (8, 11, 12))
+        self.assertEqual(snare2.ddrum4_position_boundaries, (47, 95))
+        self.assertEqual(snare2.sd3_position_cc, 16)
 
     def test_r15_native_panel_programs_decode_to_scene_and_virtual_palettes(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
@@ -558,6 +1201,37 @@ class ControlCenterTests(unittest.TestCase):
         for result in (scene, snare, flex, family, variant):
             self.assertNotIn("Arduino DDrum4 state", {step.stage for step in result.steps})
 
+    def test_r15_stack_palette_exposes_progressive_and_fixed_hihat_variants(self) -> None:
+        project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
+        simulator = RigSimulator.from_path(project)
+
+        simulator.set_state(values={"vp3_percussion_family": 6})
+        progressive = simulator.simulate_pad("ddti", 23, 100)
+        simulator.set_state(values={"vp3_percussion_family": 7})
+        half = simulator.simulate_pad("ddti", 23, 100)
+        simulator.set_state(values={"vp3_percussion_family": 8})
+        closed = simulator.simulate_pad("ddti", 23, 100)
+
+        self.assertEqual(progressive.logical_target, "stack.progressive_custom")
+        self.assertEqual(
+            next(step.message["note"] for step in progressive.steps if step.stage == "SD3 renderer"), 86
+        )
+        for result, cc_value, ddrum_note, drumgizmo_note in (
+            (half, 64, 42, 121), (closed, 127, 40, 117),
+        ):
+            self.assertEqual(
+                next(step.message for step in result.steps if step.stage == "SD3 fixed controller"),
+                {"type": "control_change", "channel": 10, "cc": 4, "value": cc_value},
+            )
+            self.assertEqual(
+                next(step.message["note"] for step in result.steps if step.stage == "Arduino DDrum4 renderer"),
+                ddrum_note,
+            )
+            self.assertEqual(
+                next(step.message["note"] for step in result.steps if step.stage == "DrumGizmo renderer"),
+                drumgizmo_note,
+            )
+
     def test_control_center_ui_loads_virtual_kit_and_native_panel_controls_offscreen(self) -> None:
         repository = Path(__file__).resolve().parents[3]
         script = textwrap.dedent("""
@@ -565,8 +1239,8 @@ class ControlCenterTests(unittest.TestCase):
             import sys
             import traceback
 
-            from PySide6.QtCore import QTimer
-            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import QProcess, QTimer
+            from PySide6.QtWidgets import QApplication, QPushButton
 
             repository = Path.cwd()
             sys.path.insert(0, str(repository / "apps/control-center/src"))
@@ -581,9 +1255,43 @@ class ControlCenterTests(unittest.TestCase):
                     window = max(app.topLevelWidgets(), key=lambda item: item.width() * item.height())
                     project = repository / "profiles/projects/metalcore-r15-chain-simulator.yaml"
                     assert Path(window.editor_project.text()) == project
+                    assert window.ddti_base_dump.placeholderText().startswith("Optional complete DDTi")
+                    assert not window.replace_compile_output.isChecked()
                     assert window.visual_native_controls.rowCount() == 30
                     assert window.studio_native_control.count() == 30
                     assert window.virtual_kit_table.rowCount() == 29
+                    assert len(window._studio_velocity_sliders) == 29
+                    assert len(window.findChildren(QPushButton, "positionTrigger")) == 8
+                    capture_buttons = window.findChildren(QPushButton, "captureLiveMeasurementTrace")
+                    assert len(capture_buttons) == 1
+                    assert "receive-only" in capture_buttons[0].toolTip().lower()
+                    native_buttons = window.findChildren(QPushButton, "captureNativeControlSequence")
+                    assert len(native_buttons) == 1
+                    assert "no midi output" in native_buttons[0].toolTip().lower()
+                    echo_buttons = window.findChildren(QPushButton, "probeDdrum4SoftThrough")
+                    assert len(echo_buttons) == 1
+                    assert "hardware-output" in echo_buttons[0].toolTip().lower()
+                    assert "physically disconnected" in echo_buttons[0].toolTip().lower()
+                    assert all(slider.minimum() == 1 and slider.maximum() == 127
+                               for slider in window._studio_velocity_sliders)
+                    assert window.campaign_status.wordWrap()
+                    assert window.calibration_groups.columnCount() == 6
+                    assert window.calibration_groups.minimumHeight() >= 200
+                    class FailedProcess:
+                        deleted = False
+                        def readAllStandardOutput(self): return b""
+                        def errorString(self): return "PowerShell failed to start"
+                        def deleteLater(self): self.deleted = True
+                    failed_process = FailedProcess()
+                    window.live_measurement_process = failed_process
+                    window.live_measurement_trace_id = "physical.trace"
+                    window.live_measurement_operation = "single-trace"
+                    window.live_measurement_failed(QProcess.ProcessError.FailedToStart)
+                    assert failed_process.deleted
+                    assert window.live_measurement_process is None
+                    assert window.live_measurement_trace_id is None
+                    assert window.live_measurement_operation == ""
+                    assert "PowerShell failed to start" in window.editor_readiness.toPlainText()
                     window.studio_native_control.setCurrentIndex(1)
                     window.trigger_virtual_native_control()
                     assert window.current_simulator().state["scene"] in window.current_simulator().project.scenes
@@ -624,22 +1332,51 @@ class ControlCenterTests(unittest.TestCase):
         self.assertIn("DRUM_CONTROL_CENTER_PROJECT=%~dp0profiles\\projects\\metalcore-r15-chain-simulator.yaml", shortcut)
         self.assertIn("DRUM_CONTROL_CENTER_OUTPUT=%~dp0build\\rig\\metalcore-r15", shortcut)
 
-    def test_installed_r15_keeps_unmeasured_hihat_targets_out_of_firmware(self) -> None:
+    def test_installed_r15_emits_planned_hihat_contract_but_keeps_flash_disabled(self) -> None:
         project = Path(__file__).resolve().parents[3] / "profiles" / "projects" / "metalcore-r15-chain-simulator.yaml"
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "compiled"
             result = compile_project(project, output)
 
             expression = result.artifacts["expression-capability-report.json"]
-            self.assertEqual(expression["summary"]["declared_expressions"], 6)
-            self.assertEqual(expression["summary"]["firmware_unlowerable_routes"], 6)
+            self.assertEqual(expression["summary"]["declared_expressions"], 127)
+            self.assertEqual(expression["summary"]["firmware_unlowerable_routes"], 0)
+            self.assertEqual(expression["summary"]["firmware_unready_routes"], 15)
+            hihat_rows = [row for row in expression["expressions"] if row["emit"]["expressions"] == ["openness"]]
+            position_rows = [row for row in expression["expressions"] if row["emit"]["expressions"] == ["position"]]
+            pressure_rows = [row for row in expression["expressions"] if row["emit"]["expressions"] == ["pressure"]]
+            self.assertEqual((len(hihat_rows), len(position_rows)), (6, 10))
+            self.assertEqual(len(pressure_rows), 111)
             self.assertTrue(all(
-                row["targets"]["arduino_ddrum4"]["declared"]["status"] == "planned"
-                for row in expression["expressions"]
+                row["targets"]["arduino_ddrum4"]["status"] == "supported"
+                and row["targets"]["arduino_ddrum4"]["declared_status"] == "planned"
+                for row in hihat_rows
             ))
+            self.assertTrue(all(row["targets"]["arduino_ddrum4"]["status"] == "unsupported"
+                                for row in position_rows))
+            self.assertTrue(all(row["targets"]["sd3"]["status"] == "supported"
+                                for row in position_rows))
             firmware = result.artifacts["firmware-project-mapping.json"]
+            self.assertEqual(firmware["lowering_blockers"], [])
             self.assertEqual((firmware["deployment"], firmware["status"], firmware["hardware_flash"]),
                              ("simulation", "planned", "disabled"))
+            self.assertEqual(len(firmware["readiness_blockers"]), 15)
+            self.assertEqual(
+                sum("implemented pressure route" in item["reason"] for item in firmware["readiness_blockers"]),
+                14,
+            )
+            self.assertEqual(firmware["hihat_quantization"]["status"], "planned")
+            self.assertEqual(firmware["hihat_quantization"]["input_closed"], 127)
+            self.assertEqual(firmware["hihat_quantization"]["input_open"], 0)
+            self.assertEqual(
+                firmware["hihat_quantization"]["articulations"],
+                [
+                    {"physical": "hh.bow", "notes": [72, 73, 74, 75, 76],
+                     "upper_boundaries": [15, 47, 79, 111]},
+                    {"physical": "hh.edge", "notes": [40, 41, 42, 43],
+                     "upper_boundaries": [31, 63, 95]},
+                ],
+            )
 
     def test_installed_r15_matrix_exposes_shared_crash_variations_without_extra_samples(self) -> None:
         manifest = Path(__file__).resolve().parents[3] / "profiles" / "banks" / "metalcore-r15-installed.yaml"
@@ -746,6 +1483,17 @@ sounds: []
                          (*prefix, "export-config", "base.syx", "preset.yaml"))
         self.assertEqual(center.ddti_command("apply-config", Path("base.syx"), preset=Path("preset.yaml"), output=Path("staged.syx")),
                          (*prefix, "apply-config", "base.syx", "preset.yaml", "staged.syx"))
+        self.assertEqual(
+            center.ddti_command(
+                "apply-role-preset", Path("base.syx"), preset=Path("roles.yaml"),
+                layout=Path("layout.yaml"), output=Path("staged.syx"),
+            ),
+            (*prefix, "apply-role-preset", "base.syx", "roles.yaml", "layout.yaml", "staged.syx"),
+        )
+        with self.assertRaisesRegex(ValueError, "input layout"):
+            center.ddti_command(
+                "apply-role-preset", Path("base.syx"), preset=Path("roles.yaml"), output=Path("staged.syx"),
+            )
         with self.assertRaisesRegex(ValueError, "unsupported"):
             center.ddti_command("write-config", Path("base.syx"))
 

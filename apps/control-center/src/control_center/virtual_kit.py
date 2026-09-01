@@ -22,15 +22,20 @@ class VirtualKitRow:
     physical_instrument: str | None
     physical_zone: str | None
     raw_notes: Mapping[str, int]
+    raw_note_ranges: Mapping[str, tuple[int, int]]
     logical_sound: str | None
     ddrum4_slot: int | None
     ddrum4_sound_id: str | None
     ddrum4_note_p: int | None
     ddrum4_note: int | None
+    ddrum4_position_notes: tuple[int, ...]
+    ddrum4_position_boundaries: tuple[int, ...]
     ddrum4_variations: tuple[tuple[int, str | None], ...]
     ddrum4_layer_candidates: tuple[MatrixLayer, ...]
     sd3_note: int | None
+    sd3_layers: tuple[int, ...]
     sd3_channel: int | None
+    sd3_position_cc: int | None
     drumgizmo_note: int | None
     drumgizmo_channel: int | None
     drumgizmo_instrument: str | None
@@ -50,7 +55,7 @@ class VirtualKitRow:
     @property
     def hardware_summary(self) -> str:
         """Compact source-module and physical pad/zone label for the UI."""
-        source = next(iter(self.raw_notes), None)
+        source = next(iter(self.raw_notes), None) or next(iter(self.raw_note_ranges), None)
         source_label = {"edrumin": "eDRUMin", "ddti": "DDTi", "ddrum4": "DDrum4"}.get(
             source or "", source or "unknown source",
         )
@@ -62,7 +67,14 @@ class VirtualKitRow:
     def raw_note_summary(self) -> str:
         """Show exact decoder notes without reserving one column per module."""
         labels = {"edrumin": "eDRUMin", "ddti": "DDTi", "ddrum4": "DDrum4"}
-        return " · ".join(f"{labels.get(source, source)} N{note}" for source, note in self.raw_notes.items()) or "MISSING"
+        addresses = {
+            source: f"N{note}" for source, note in self.raw_notes.items()
+            if source not in self.raw_note_ranges
+        }
+        addresses.update({
+            source: f"N{low}..{high} position" for source, (low, high) in self.raw_note_ranges.items()
+        })
+        return " · ".join(f"{labels.get(source, source)} {address}" for source, address in addresses.items()) or "MISSING"
 
     @property
     def ddrum4_content_summary(self) -> str:
@@ -107,11 +119,17 @@ def build_virtual_kit(simulator: RigSimulator) -> tuple[VirtualKitRow, ...]:
         matrix = load_kit_matrix(simulator.project.ddrum4_bank_facts.manifest)
     for physical in simulator.project.physical_events:
         binding = simulator.project.physical_bindings.get(physical, {})
-        raw_notes = {
-            decoder.source: decoder.match["note"]
-            for decoder in simulator.project.source_decoders
-            if decoder.physical == physical and decoder.message_type == "note"
-        }
+        raw_notes: dict[str, int] = {}
+        raw_note_ranges: dict[str, tuple[int, int]] = {}
+        for decoder in simulator.project.source_decoders:
+            if decoder.physical != physical:
+                continue
+            if decoder.message_type == "note":
+                raw_notes[decoder.source] = decoder.match["note"]
+            elif decoder.message_type == "note_range":
+                low, high = decoder.match["note_range"]
+                raw_notes[decoder.source] = low
+                raw_note_ranges[decoder.source] = (low, high)
         try:
             logical = simulator._logical_target(physical)
         except SimulationError:
@@ -125,11 +143,15 @@ def build_virtual_kit(simulator: RigSimulator) -> tuple[VirtualKitRow, ...]:
         rows.append(VirtualKitRow(
             physical=physical,
             physical_instrument=binding.get("instrument"), physical_zone=binding.get("zone"),
-            raw_notes=raw_notes, logical_sound=logical,
+            raw_notes=raw_notes, raw_note_ranges=raw_note_ranges, logical_sound=logical,
             ddrum4_slot=bank_sound.slot if bank_sound else None, ddrum4_sound_id=bank_sound.sound_id if bank_sound else None,
             ddrum4_note_p=note_p, ddrum4_variations=bank_sound.variations if bank_sound else (),
             ddrum4_layer_candidates=candidates,
-            ddrum4_note=ddrum.get("note"), sd3_note=sd3.get("note"), sd3_channel=sd3.get("channel", 10),
+            ddrum4_note=ddrum.get("note"),
+            ddrum4_position_notes=tuple(ddrum.get("position_notes", ())),
+            ddrum4_position_boundaries=tuple(ddrum.get("position_upper_boundaries", ())),
+            sd3_note=sd3.get("note"), sd3_layers=tuple(sd3.get("layers", ())),
+            sd3_channel=sd3.get("channel", 10), sd3_position_cc=sd3.get("position_cc"),
             drumgizmo_note=gizmo.get("note"), drumgizmo_channel=gizmo.get("channel", 10),
             drumgizmo_instrument=gizmo.get("instrument"), drumgizmo_articulation=gizmo.get("articulation"),
         ))

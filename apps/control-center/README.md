@@ -1,9 +1,10 @@
 # Drum Control Center
 
-The Control Center is the offline workstation entry point for rig-project
-work. It never opens MIDI ports or sends MIDI unless the operator explicitly
-launches a separate hardware-capable application. It delegates validation,
-compilation, and reports to the installed `drum-toolchain` command.
+The Control Center is the workstation entry point for rig-project work. Its
+editors, simulator, readiness inspector, compilation and reports are offline.
+Hardware validation is available only through dedicated actions that disclose
+their I/O, use bounded helper processes and require explicit operator
+confirmation before capture or transmission.
 
 ## Start a new SD3 kit capture
 
@@ -26,15 +27,50 @@ normal starting point when capturing a new SD3 MegaKit:
    **Capture pending takes**. The app asks for a final confirmation before it
    sends MIDI or records audio, and keeps the UI responsive while the sampler
    runs.
-5. Run **Quality review**, select the compiled DrumGizmo note map, then export
-   and verify the complete DrumGizmo kit.
+5. Run **Quality review**, then **Capture simultaneous layered centers** for
+   plans which declare them. Select the compiled DrumGizmo note map only after
+   both quality reports pass, then export and verify the complete DrumGizmo
+   kit. Internal XML/WAV/hash validation is separate from the optional probe
+   of an installed DrumGizmo host.
 
-The status line is file-backed: it counts expected and recorded raw takes and
-reports whether the library, quality report, and DrumGizmo directory exist. It
-never treats a recorded file as an artistically approved sound. The separate
+The status line is file-backed: it counts expected raw and composite takes,
+checks that the quality report fingerprints the current immutable library,
+checks the exact capture-session hash frozen by the campaign, and requires
+every expected WAV to pass before export. It never treats a
+technically valid recording as an artistically approved sound. The separate
 **Rig, DDrum4, and applications** tab retains the simulator, compiler,
 DDrum4 matrix, and explicit launch controls for DDTi, ddrum4UI, Converter, and
 an SD3/DAW or DrumGizmo host.
+
+The **Validation & deployment** page also provides **Capture next physical
+trace (receive-only)…** for post-configuration hardware verification. It opens
+only the exact input selected by the operator for a bounded window, never a
+MIDI output. Existing rejected traces are archived before replacement and the
+campaign review is refreshed when the subprocess exits.
+
+The same page groups the 30 DDrum4 Scene/Palette panel proofs behind
+**Capture all Scene/Palette controls (receive-only)…**. One bounded recording
+is accepted only when every expected command occurs once, in the displayed
+order; publication of the 30 isolated traces is atomic. **Probe isolated
+DDrum4 echo/soft-through…** is intentionally different: after two topology
+confirmations it sends a bounded 300-message diagnostic and writes a local
+report. It must be used only with Arduino OUT physically disconnected from
+DDrum4 IN, as shown in the dialog.
+
+`promote-configured` closes the first-flash hi-hat gate from the eDRUMin
+snapshot and the prescribed normalized contract, without pads. Later traces
+must match the prescribed channel/CC exactly and refine pedal calibration;
+they never replace the source address. The generated project is explicitly
+`validation_stage: post-flash-validation-pending`: it may build and flash the
+reviewed bridge, but the one-click live launcher refuses it until pad traces
+produce a later `hardware-verified` promotion.
+
+Pressure/choke verification uses a separate proof gate. Each isolated trace must
+contain one target Note On followed by Poly Aftertouch on the same channel and
+note, with no other active hit. That trace proves only the source-module MIDI
+behavior. The operator must then explicitly confirm the intended DDrum4 and
+SD3 active-hit renderer targets; the tool records them as `user-confirmed`,
+never as audio-measured, and leaves DrumGizmo choke unsupported.
 
 ## Complete-chain simulator
 
@@ -54,7 +90,10 @@ drum-control-center simulate profiles/projects/complete-chain-simulator.yaml `
 
 Use `--state vp1_snare=1` (repeatable) to test virtual-palette variants, and
 `--json` for a complete machine-readable trace. The GUI contains the same
-simulator panel after selecting a rig project.
+simulator panel after selecting a rig project. Positional Note ranges are not
+collapsed in this view: the Snare2 row exposes one direct `P1`…`P8` button per
+raw NOTE P position, and the trace shows the resulting SD3 CC16 plus the
+quantized DDrum4 Center/Mid/Edge note.
 
 ## DDrum4 offline matrix
 

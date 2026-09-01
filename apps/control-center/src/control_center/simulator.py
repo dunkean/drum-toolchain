@@ -94,6 +94,7 @@ class _ActiveHit:
     state: Mapping[str, Any]
     ddrum_message: Mapping[str, Any]
     sd3_message: Mapping[str, Any]
+    drumgizmo_message: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -226,25 +227,69 @@ class RigSimulator:
         ]
         ddrum = self.project.renderers["ddrum4"][logical]
         ddrum_channel = self.project.ddrum4_output_channel
-        ddrum_message = {"type": "note_on", "channel": ddrum_channel, "note": ddrum["note"], "velocity": velocity}
+        position: int | None = None
+        if decoder.message_type == "note_range" and "position" in decoder.emit.get("expressions", ()):
+            low, high = decoder.match["note_range"]
+            position = ((note - low) * 127) // (high - low)
+        ddrum_note = ddrum["note"]
+        if position is not None and ddrum.get("position_policy") == "note_range_quantized":
+            position_notes = ddrum["position_notes"]
+            boundaries = ddrum["position_upper_boundaries"]
+            zone = 0
+            while zone < len(boundaries) and position > boundaries[zone]:
+                zone += 1
+            ddrum_note = position_notes[zone]
+        ddrum_message = {"type": "note_on", "channel": ddrum_channel, "note": ddrum_note, "velocity": velocity}
+        ddrum_detail = (f"; raw position {position}/127 quantized to note {ddrum_note}"
+                         if position is not None and ddrum.get("position_policy") == "note_range_quantized" else "")
         steps.extend((
-            TraceStep("Arduino DDrum4 renderer", "writes the converted event to DDrum4 MIDI IN", ddrum_message),
+            TraceStep("Arduino DDrum4 renderer", "writes the converted event to DDrum4 MIDI IN" + ddrum_detail, ddrum_message),
             TraceStep("DDrum4 declared target", f"Local Off is declared; DDrum4 would receive {logical} when live"),
             TraceStep("DDrum4 echo guard", "suppresses the expected returned DDrum4 MIDI OUT echo", ddrum_message),
         ))
         sd3 = self.project.renderers["sd3"][logical]
         sd3_message = {"type": "note_on", "channel": sd3.get("channel", 10), "note": sd3["note"], "velocity": velocity}
-        steps.extend((
-            TraceStep("SD3 renderer", "sends the canonical MegaKit MIDI event", sd3_message),
-            TraceStep("SD3 declared target", f"The selected SD3 kit would receive {logical} when its runtime is live"),
-        ))
+        if position is not None and sd3.get("position_cc") is not None:
+            steps.append(TraceStep(
+                "SD3 position renderer",
+                f"normalizes the DDrum4 NOTE P offset to CC{sd3['position_cc']} before the hit",
+                {"type": "control_change", "channel": sd3.get("channel", 10),
+                 "cc": sd3["position_cc"], "value": position},
+            ))
+        for controller, value in sd3.get("controllers", ()):
+            steps.append(TraceStep(
+                "SD3 fixed controller",
+                f"sets CC{controller}={value} immediately before the selected hit",
+                {"type": "control_change", "channel": sd3.get("channel", 10), "cc": controller, "value": value},
+            ))
+        steps.append(TraceStep("SD3 renderer", "sends the canonical MegaKit MIDI event", sd3_message))
+        for layer_note in sd3.get("layers", ()):
+            steps.append(TraceStep(
+                "SD3 layer renderer",
+                "adds the calibrated phase-safe layer at the same velocity",
+                {"type": "note_on", "channel": sd3.get("channel", 10), "note": layer_note, "velocity": velocity},
+            ))
+        steps.append(TraceStep("SD3 declared target", f"The selected SD3 kit would receive {logical} when its runtime is live"))
         drumgizmo = self.project.renderers["drumgizmo"][logical]
+        drumgizmo_note = drumgizmo["note"]
+        drumgizmo_position_detail = ""
+        if position is not None and drumgizmo.get("position_policy") == "note_range_quantized":
+            position_notes = drumgizmo["position_notes"]
+            boundaries = drumgizmo["position_upper_boundaries"]
+            zone = 0
+            while zone < len(boundaries) and position > boundaries[zone]:
+                zone += 1
+            drumgizmo_note = position_notes[zone]
+            drumgizmo_position_detail = f"; raw position {position}/127 quantized to note {drumgizmo_note}"
+        elif position is not None:
+            drumgizmo_position_detail = "; positional input is intentionally ignored"
         drumgizmo_message = {
-            "type": "note_on", "channel": drumgizmo.get("channel", 10), "note": drumgizmo["note"],
+            "type": "note_on", "channel": drumgizmo.get("channel", 10), "note": drumgizmo_note,
             "velocity": velocity, "instrument": drumgizmo["instrument"], "articulation": drumgizmo["articulation"],
         }
         steps.extend((
-            TraceStep("DrumGizmo renderer", "sends the declared note-only kit event", drumgizmo_message),
+            TraceStep("DrumGizmo renderer", "sends the declared kit event" + drumgizmo_position_detail,
+                      drumgizmo_message),
             TraceStep("DrumGizmo declared target", f"The selected kit would receive {drumgizmo['instrument']}/{drumgizmo['articulation']} when live"),
         ))
         self._active_hits[(source, note)] = _ActiveHit(
@@ -253,6 +298,7 @@ class RigSimulator:
             state=dict(self._state),
             ddrum_message=dict(ddrum_message),
             sd3_message=dict(sd3_message),
+            drumgizmo_message=dict(drumgizmo_message),
         )
         return SimulationResult(source, note, velocity, physical, logical, dict(self._state), tuple(steps))
 
@@ -307,38 +353,105 @@ class RigSimulator:
             drumgizmo_target = expression["targets"]["drumgizmo"]
             ddrum_event = ddrum_target.get("event", {})
             sd3_event = sd3_target.get("event", {})
+            drumgizmo_event = drumgizmo_target.get("event", {})
             assert active_hit is not None
             ddrum = active_hit.ddrum_message
             sd3 = active_hit.sd3_message
+            drumgizmo = active_hit.drumgizmo_message
             steps.append(TraceStep("active hit ledger", "uses the renderer destination selected by the preceding Note-On", {
                 "physical": active_hit.physical, "logical_target": active_hit.logical_target,
                 "hit_state": dict(active_hit.state), "raw_note": data1,
             }))
-            if (ddrum_target.get("status") in {"measured", "user-confirmed"}
+            if (ddrum_target.get("status") in {"planned", "measured", "user-confirmed"}
                     and ddrum_event.get("type") == "poly_aftertouch"
                     and ddrum_event.get("note_from") == "active_rendered_hit"):
-                ddrum_step = TraceStep("Arduino DDrum4 renderer", "declared pressure follows the active rendered hit", {
+                ddrum_status = ddrum_target["status"]
+                ddrum_message = {
                     "type": "poly_aftertouch", "channel": ddrum["channel"],
                     "note": ddrum["note"], "value": value, "correlated_raw_note": data1,
-                })
+                }
+                if ddrum_status == "planned":
+                    ddrum_message.update({
+                        "declared_status": ddrum_status, "preview_only": True, "hardware_output": "disabled",
+                    })
+                ddrum_step = TraceStep(
+                    "Arduino DDrum4 renderer",
+                    ("planned preview only; pressure would follow the active rendered hit after physical choke measurement"
+                     if ddrum_status == "planned" else "declared pressure follows the active rendered hit"), {
+                        **ddrum_message,
+                    })
             else:
                 ddrum_step = TraceStep("Arduino DDrum4 renderer", "unsupported: no reviewed active-rendered-hit pressure route", ddrum_target)
-            if (sd3_target.get("status") in {"measured", "user-confirmed"}
+            if (sd3_target.get("status") in {"planned", "measured", "user-confirmed"}
                     and sd3_event.get("type") == "poly_aftertouch"
                     and sd3_event.get("note_from") == "active_rendered_hit"):
-                sd3_step = TraceStep("SD3 renderer", "declared pressure follows the active rendered hit", {
+                sd3_status = sd3_target["status"]
+                sd3_message = {
                     "type": "poly_aftertouch", "channel": sd3["channel"],
                     "note": sd3["note"], "value": value, "correlated_raw_note": data1,
-                })
-                sd3_target_step = TraceStep("SD3 declared target", f"The selected SD3 kit would receive {physical} pressure on its active hit")
+                }
+                if sd3_status == "planned":
+                    sd3_message.update({
+                        "declared_status": sd3_status, "preview_only": True, "hardware_output": "disabled",
+                    })
+                sd3_step = TraceStep(
+                    "SD3 renderer",
+                    ("planned preview only; pressure would follow the active rendered hit after physical choke measurement"
+                     if sd3_status == "planned" else "declared pressure follows the active rendered hit"), {
+                        **sd3_message,
+                    })
+                sd3_target_step = TraceStep(
+                    "SD3 declared target",
+                    (f"Planned preview: the selected SD3 kit would receive {physical} pressure on its active hit"
+                     if sd3_status == "planned" else
+                     f"The selected SD3 kit would receive {physical} pressure on its active hit"),
+                )
             else:
                 sd3_step = TraceStep("SD3 renderer", "unsupported: no reviewed active-rendered-hit pressure route", sd3_target)
                 sd3_target_step = TraceStep("SD3 declared target", "no SD3 pressure is emitted")
+            if (drumgizmo_target.get("status") in {"measured", "user-confirmed"}
+                    and drumgizmo_event.get("type") == "poly_aftertouch"
+                    and drumgizmo_event.get("note_from") == "active_rendered_hit"):
+                drumgizmo_step = TraceStep(
+                    "DrumGizmo renderer", "reviewed pressure chokes the active rendered cymbal", {
+                        "type": "poly_aftertouch", "channel": drumgizmo["channel"],
+                        "note": drumgizmo["note"], "value": value,
+                        "correlated_raw_note": data1,
+                    },
+                )
+            else:
+                drumgizmo_step = TraceStep(
+                    "DrumGizmo renderer", "unsupported: no reviewed active-rendered-hit pressure route",
+                    drumgizmo_target,
+                )
             steps.extend((
                 ddrum_step,
                 sd3_step,
                 sd3_target_step,
-                TraceStep("DrumGizmo renderer", "unsupported: declared DrumGizmo pressure behavior", drumgizmo_target),
+                drumgizmo_step,
+            ))
+        elif message_type == "cc" and expression is not None and expression["expression"] == "position":
+            sd3_target = expression["targets"]["sd3"]
+            sd3_event = sd3_target["event"]
+            if (sd3_target.get("status") in {"measured", "user-confirmed"}
+                    and sd3_event.get("type") == "cc" and sd3_event.get("transform") == "passthrough"):
+                sd3_step = TraceStep("SD3 renderer", f"{sd3_target['status']} positional CC passthrough", {
+                    "type": "control_change", "channel": sd3_event["channel"],
+                    "cc": sd3_event["cc"], "value": value,
+                })
+                sd3_target_step = TraceStep(
+                    "SD3 declared target", f"The selected snare receives {physical} position on CC{sd3_event['cc']}",
+                )
+            else:
+                sd3_step = TraceStep("SD3 renderer", "unsupported: no reviewed positional CC route", sd3_target)
+                sd3_target_step = TraceStep("SD3 declared target", "no SD3 position is emitted")
+            steps.extend((
+                TraceStep("Arduino DDrum4 renderer", "unsupported: positional thresholds are not physically measured",
+                          expression["targets"]["ddrum4"]),
+                sd3_step,
+                sd3_target_step,
+                TraceStep("DrumGizmo renderer", "unsupported: the exported kit has no reviewed positional runtime rule",
+                          expression["targets"]["drumgizmo"]),
             ))
         elif message_type == "cc" and expression is not None and expression["expression"] == "openness":
             sd3_event = expression["targets"]["sd3"]["event"]
@@ -347,11 +460,29 @@ class RigSimulator:
             drumgizmo_target = expression["targets"]["drumgizmo"]
             ddrum_event = ddrum_target["event"]
             ddrum_status = ddrum_target["status"]
-            if ddrum_status in {"measured", "user-confirmed"} and ddrum_event.get("type") == "quantized_note_p":
-                preview = self._quantized_hihat_preview(physical, value, ddrum_event)
+            preview = None
+            if ddrum_status in {"planned", "measured", "user-confirmed"} and ddrum_event.get("type") == "quantized_note_p":
+                try:
+                    preview = self._quantized_hihat_preview(physical, value, ddrum_event)
+                    preview.update({
+                        "declared_status": ddrum_status,
+                        "preview_only": ddrum_status == "planned",
+                        "hardware_output": "disabled",
+                        "next_hit_notes": self._quantized_hihat_notes(value, ddrum_event),
+                    })
+                except SimulationError:
+                    if ddrum_status != "planned":
+                        raise
+            if preview is not None:
+                detail = (
+                    f"planned preview only; next {physical} hit would select DDrum4 Note-P note "
+                    f"{preview['next_hit_note']} after physical CC4 measurement"
+                    if ddrum_status == "planned" else
+                    f"{ddrum_status} CC4 state; next {physical} hit selects DDrum4 Note-P note {preview['next_hit_note']}"
+                )
                 ddrum_step = TraceStep(
                     "Arduino DDrum4 renderer",
-                    f"{ddrum_status} CC4 state; next {physical} hit selects DDrum4 Note-P note {preview['next_hit_note']}",
+                    detail,
                     preview,
                 )
             else:
@@ -362,12 +493,30 @@ class RigSimulator:
                 )
             drumgizmo_event = drumgizmo_target["event"]
             drumgizmo_status = drumgizmo_target["status"]
-            if (drumgizmo_status in {"measured", "user-confirmed"}
+            preview = None
+            if (drumgizmo_status in {"planned", "measured", "user-confirmed"}
                     and drumgizmo_event.get("type") == "quantized_note"):
-                preview = self._quantized_hihat_preview(physical, value, drumgizmo_event)
+                try:
+                    preview = self._quantized_hihat_preview(physical, value, drumgizmo_event)
+                    preview.update({
+                        "declared_status": drumgizmo_status,
+                        "preview_only": drumgizmo_status == "planned",
+                        "hardware_output": "disabled",
+                        "next_hit_notes": self._quantized_hihat_notes(value, drumgizmo_event),
+                    })
+                except SimulationError:
+                    if drumgizmo_status != "planned":
+                        raise
+            if preview is not None:
+                detail = (
+                    f"planned preview only; next {physical} hit would select DrumGizmo note "
+                    f"{preview['next_hit_note']} after physical CC4 measurement"
+                    if drumgizmo_status == "planned" else
+                    f"{drumgizmo_status} CC4 state; next {physical} hit selects DrumGizmo note {preview['next_hit_note']}"
+                )
                 drumgizmo_step = TraceStep(
                     "DrumGizmo renderer",
-                    f"{drumgizmo_status} CC4 state; next {physical} hit selects DrumGizmo note {preview['next_hit_note']}",
+                    detail,
                     preview,
                 )
             else:
@@ -632,8 +781,9 @@ class RigSimulator:
                 continue
             if message_type == "cc" and decoder.match["cc"] == data1:
                 return decoder
-            if message_type == "poly_aftertouch" and (decoder.match.get("active_note")
-                                                        or ("note" not in decoder.match or decoder.match["note"] == data1)):
+            if message_type == "poly_aftertouch" and (
+                    decoder.match.get("note") == data1 if "note" in decoder.match
+                    else bool(decoder.match.get("active_note"))):
                 return decoder
         return None
 
@@ -661,6 +811,21 @@ class RigSimulator:
         raise SimulationError(f"no logical route for {physical!r} in scene {scene!r}")
 
     @staticmethod
+    def _firmware_hihat_openness(value: int, closed: int, opened: int) -> int:
+        """Normalize CC4 exactly like the integer-only Arduino implementation."""
+        span = opened - closed
+        if not span:
+            return 0
+
+        def trunc_div(numerator: int, denominator: int) -> int:
+            quotient = abs(numerator) // abs(denominator)
+            return -quotient if (numerator < 0) != (denominator < 0) else quotient
+
+        half_span = trunc_div(span, 2)
+        normalized = trunc_div((value - closed) * 127 + half_span, span)
+        return min(127, max(0, normalized))
+
+    @staticmethod
     def _quantized_hihat_preview(physical: str, value: int, event: Mapping[str, Any]) -> dict[str, Any]:
         """Preview the next discrete hi-hat hit for a reviewed CC4 calibration."""
         closed, opened = event.get("input_closed"), event.get("input_open")
@@ -675,8 +840,7 @@ class RigSimulator:
         notes, boundaries = selected.get("notes"), selected.get("upper_boundaries")
         if not isinstance(notes, list) or not notes or not isinstance(boundaries, list) or len(boundaries) != len(notes) - 1:
             raise SimulationError("reviewed hi-hat zones are invalid")
-        normalized = round((value - closed) * 127 / (opened - closed))
-        normalized = min(127, max(0, normalized))
+        normalized = RigSimulator._firmware_hihat_openness(value, closed, opened)
         zone = next((index for index, boundary in enumerate(boundaries) if normalized <= boundary), len(notes) - 1)
         return {
             "type": "cc4_state", "input_cc": 4, "value": value,
@@ -684,3 +848,17 @@ class RigSimulator:
             "zone": zone + 1, "next_hit_note": notes[zone], "notes": notes,
             "upper_boundaries": boundaries,
         }
+
+    @classmethod
+    def _quantized_hihat_notes(cls, value: int, event: Mapping[str, Any]) -> dict[str, int]:
+        """Preview every declared bow/edge destination for one retained CC4 value."""
+        articulations = event.get("articulations")
+        if not isinstance(articulations, list):
+            raise SimulationError("reviewed hi-hat event has no articulation zones")
+        result: dict[str, int] = {}
+        for articulation in articulations:
+            physical = articulation.get("physical") if isinstance(articulation, Mapping) else None
+            if not isinstance(physical, str):
+                raise SimulationError("reviewed hi-hat articulation has no physical role")
+            result[physical] = cls._quantized_hihat_preview(physical, value, event)["next_hit_note"]
+        return result
