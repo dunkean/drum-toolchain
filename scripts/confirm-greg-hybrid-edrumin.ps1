@@ -44,4 +44,3 @@ New-Item -ItemType Directory -Path $directory -Force | Out-Null
 $path = Join-Path $directory ("greg-hybrid-edrumin-receipt-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 [IO.File]::WriteAllText($path, (($receipt | ConvertTo-Json -Depth 10) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 Write-Output "Verified operator receipt: $path"
-
