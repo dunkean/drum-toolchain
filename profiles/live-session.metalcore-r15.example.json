@@ -14,5 +14,6 @@
   "required_ports": ["eDrumIn BLACK", "TriggerIO", "UMC404HD 192k MIDI In", "ddrum_converted"],
   "asio_buffer_confirmation": "REPLACE: confirmed manually in the UMC/ASIO driver",
   "low_latency_power_scheme_guid": "REPLACE_WITH_EXPLICIT_POWERCFG_GUID",
+  "health_report_directory": "C:/replace/local/reports",
   "note": "Copy this only after the live measurement campaign. The referenced project is simulation-only and cannot be flashed."
 }

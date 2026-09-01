@@ -1,5 +1,10 @@
 @echo off
 setlocal
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-greg-hybrid-live.ps1"
+where pwsh.exe >nul 2>&1
+if errorlevel 1 (
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-greg-hybrid-live.ps1"
+) else (
+  pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-greg-hybrid-live.ps1"
+)
 if errorlevel 1 pause
 endlocal

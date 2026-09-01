@@ -2,8 +2,9 @@
 param([Parameter(Mandatory = $true)] [string] $StateFile)
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'live-common.ps1')
 if (-not (Test-Path -LiteralPath $StateFile)) { Write-Output 'No interrupted live session state found.'; exit 0 }
-$state = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+$state = Read-LiveJson -Path $StateFile
 if ($state.kind -ne 'live-session-state') { throw 'Refusing an unrecognised state document.' }
 $previousScheme = [string]$state.previous_power_scheme
 if (-not [string]::IsNullOrWhiteSpace($previousScheme)) {

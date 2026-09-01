@@ -7,9 +7,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if (-not $ConfirmStart -and -not $WhatIfPreference) { throw 'Starting live applications is explicit; pass -ConfirmStart after running live-preflight.' }
-& (Join-Path $PSScriptRoot 'live-preflight.ps1') -Config $Config -RequireAll | Write-Output
+. (Join-Path $PSScriptRoot 'live-common.ps1')
+$global:LASTEXITCODE = 0
+$preflightLines = @(& (Join-Path $PSScriptRoot 'live-preflight.ps1') -Config $Config -RequireAll)
+$preflightExitCode = $LASTEXITCODE
+$preflightLines | Write-Output
+if ($preflightExitCode -ne 0) {
+    throw "Live preflight failed closed with exit code $preflightExitCode; no process was started."
+}
+try {
+    $preflight = (($preflightLines -join [Environment]::NewLine) | ConvertFrom-Json)
+} catch {
+    throw "Live preflight did not return a valid health report; no process was started: $($_.Exception.Message)"
+}
+if ([string]$preflight.status -ne 'ready') {
+    throw "Live preflight status is '$($preflight.status)', not ready; no process was started."
+}
 $configPath = Resolve-Path -LiteralPath $Config
-$session = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$session = Read-LiveJson -Path $configPath.Path
 $runtimeProfilePath = (Resolve-Path -LiteralPath ([string]$session.runtime_profile.path)).Path
 $rendererTarget = [string]$session.renderer
 if (Test-Path -LiteralPath $StateFile) { throw "Interrupted/live session state exists: $StateFile. Review it, then run restore-live before starting again." }
@@ -64,12 +79,54 @@ if ($started.Count -ne 2) {
     }
     throw "Live launch was incomplete ($($started.Count)/2 owned processes); started processes were rolled back."
 }
+$runId = ([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$reportDirectoryProperty = $session.PSObject.Properties['health_report_directory']
+$reportDirectory = if ($null -ne $reportDirectoryProperty) { [string]$reportDirectoryProperty.Value } else { '' }
+if ([string]::IsNullOrWhiteSpace($reportDirectory)) {
+    $reportDirectory = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($StateFile))) 'reports'
+} elseif (-not [IO.Path]::IsPathRooted($reportDirectory)) {
+    $reportDirectory = Join-Path (Split-Path -Parent $configPath.Path) $reportDirectory
+}
+$reportPath = Join-Path ([IO.Path]::GetFullPath($reportDirectory)) ("greg-hybrid-live-$runId.json")
 $state = [ordered]@{
     kind = 'live-session-state'; schema_version = 1; started_utc = [DateTime]::UtcNow.ToString('o')
     config = $configPath.Path; processes = @($started); previous_power_scheme = $null
-    note = 'Only PIDs recorded here may be stopped by stop-live. No global power plan was changed.'
+    report_path = $reportPath
+    note = 'Only PIDs recorded here may be stopped by stop-live. The persistent report survives session shutdown.'
 }
-$parent = Split-Path -Parent $StateFile
-if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-$state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $StateFile -Encoding utf8NoBOM
+$report = [ordered]@{
+    kind = 'greg-hybrid-live-session-report'; schema_version = 1; run_id = $runId
+    status = 'running'; started_utc = $state.started_utc; ended_utc = $null
+    config = @{ path = $configPath.Path; sha256 = Get-LiveFileSha256 -Path $configPath.Path }
+    runtime_profile = @{
+        path = $runtimeProfilePath
+        sha256 = Get-LiveFileSha256 -Path $runtimeProfilePath
+        project_hash = [string]$session.runtime_profile.project_hash
+    }
+    renderer = [string]$session.renderer
+    renderer_output = [string]$session.renderer_output
+    asio_buffer_confirmation = [string]$session.asio_buffer_confirmation
+    preflight = $preflight
+    processes = @($started)
+    process_results = @()
+    power_plan = @{
+        status = 'pending'
+        requested = [string]$session.low_latency_power_scheme_guid
+        previous = $null
+        restored = $false
+    }
+    hardware_io = 'ports-opened-by-owned-converter-only'
+}
+try {
+    Write-LiveJson -Path $reportPath -Document $report
+    Write-LiveJson -Path $StateFile -Document $state
+} catch {
+    foreach ($owned in $started) {
+        $ownedProcess = Get-Process -Id $owned.pid -ErrorAction SilentlyContinue
+        if ($ownedProcess) { Stop-Process -Id $owned.pid -ErrorAction SilentlyContinue }
+    }
+    if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
+    throw
+}
 Write-Output "Live session started; state: $StateFile"
+Write-Output "Persistent health report: $reportPath"

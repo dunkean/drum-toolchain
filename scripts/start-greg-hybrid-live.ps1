@@ -25,3 +25,10 @@ try {
     throw
 }
 Write-Output 'Greg Hybrid live session is running: Converter auto-started, SD3 launched, and the owned power plan applied.'
+if (-not $WhatIfPreference -and (Test-Path -LiteralPath $StateFile)) {
+    . (Join-Path $PSScriptRoot 'live-common.ps1')
+    $state = Read-LiveJson -Path $StateFile
+    if (-not [string]::IsNullOrWhiteSpace([string]$state.report_path)) {
+        Write-Output "Persistent health report: $($state.report_path)"
+    }
+}

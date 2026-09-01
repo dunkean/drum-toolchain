@@ -10,5 +10,6 @@
   },
   "required_ports": ["REPLACE_WITH_UNIQUE_MIDI_PORT"],
   "asio_buffer_confirmation": "REPLACE: confirmed manually in the UMC/ASIO driver",
-  "low_latency_power_scheme_guid": "REPLACE_WITH_EXPLICIT_POWERCFG_GUID"
+  "low_latency_power_scheme_guid": "REPLACE_WITH_EXPLICIT_POWERCFG_GUID",
+  "health_report_directory": "C:/replace/local/reports"
 }

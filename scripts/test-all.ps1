@@ -78,6 +78,12 @@ if ([string]$windowsLiveProfile.renderer -ne 'sd3') {
     throw 'profiles/live-session.example.json must declare renderer: sd3 for the Windows live scripts.'
 }
 & (Join-Path $PSScriptRoot 'test-live-scripts.ps1')
+if (Get-Command powershell.exe -ErrorAction SilentlyContinue) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-live-common-compat.ps1')
+    if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell live JSON compatibility smoke failed with exit code $LASTEXITCODE" }
+} else {
+    & (Join-Path $PSScriptRoot 'test-live-common-compat.ps1')
+}
 
 Write-Output 'Running shared Python domain, sampler, bank-builder, and MIDI-lab tests.'
 Push-Location $repoRoot
